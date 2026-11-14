@@ -178,10 +178,11 @@ input:focus, select:focus, textarea:focus { border-color: var(--accent); outline
 .cover-badge { position: absolute; top: .4rem; left: .4rem; background: rgba(0,0,0,.75); color: #fff; font-size: .7rem; padding: .12rem .4rem; border-radius: 4px; font-weight: 600; }
 
 /* Game page */
-.game-hero { display: grid; grid-template-columns: 300px 1fr; gap: 2rem; align-items: start; }
+.game-title-row { margin-bottom: 1.25rem; }
+.game-title-row h1 { margin: 0; }
+.game-hero { display: grid; grid-template-columns: 240px 1fr; gap: 2rem; align-items: start; }
 @media (max-width: 800px) { .game-hero { grid-template-columns: 130px 1fr; gap: 1rem; } }
-.game-hero .cover { border-radius: var(--radius); border: 1px solid var(--border); width: 100%; }
-.game-info h1 { margin-bottom: .25rem; }
+.game-hero .cover { border-radius: var(--radius); border: 1px solid var(--border); width: 100%; max-width: 200px; display: block; margin: 0 auto; }
 .release { color: var(--muted); margin-bottom: .8rem; }
 .pill-row { display: flex; flex-wrap: wrap; gap: .35rem; margin: .5rem 0; }
 .pill { font-size: .76rem; background: var(--bg-elev); border: 1px solid var(--border); border-radius: 999px; padding: .1rem .55rem; color: var(--muted); }

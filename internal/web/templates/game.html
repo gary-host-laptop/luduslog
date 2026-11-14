@@ -1,5 +1,8 @@
 {{define "content"}}
 <article>
+<header class="game-title-row">
+  <h1>{{.Game.Title}}</h1>
+</header>
 <div class="game-hero">
   <div>
     <img class="cover" src="{{cover .Game}}" alt="Cover of {{.Game.Title}}">
@@ -24,7 +27,6 @@
     {{end}}
   </div>
   <div class="game-info">
-    <h1>{{.Game.Title}}</h1>
     <div class="release">
       {{if .Game.ReleaseDate}}{{.Game.ReleaseDate}}{{else if .Game.ReleaseYear}}{{.Game.ReleaseYear}}{{end}}
       {{if .Game.Franchise}} · <a href="/games?franchise={{.Game.Franchise}}">{{.Game.Franchise}}</a>{{end}}
