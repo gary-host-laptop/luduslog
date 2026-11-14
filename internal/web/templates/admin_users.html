@@ -1,21 +1,21 @@
 {{define "content"}}
 <div class="section-head"><h1 class="mb0">Users</h1><span class="muted">{{.Total}} accounts</span></div>
-<div class="tabs"><a href="/admin">Overview</a><a href="/admin/users" class="on">Users</a><a href="/admin/reports">Reports</a><a href="/admin/federation">Federation</a><a href="/admin/jobs">Jobs</a><a href="/admin/news">News</a></div>
+{{template "admin_tabs" .}}
 <form class="row mb2" method="get" action="/admin/users"><input type="search" name="q" value="{{.Query}}" placeholder="Search username or email" style="max-width:320px"><button class="btn" type="submit">Search</button></form>
 <div class="table-wrap card">
-<table><thead><tr><th>User</th><th>Email</th><th>Status</th><th>Joined</th><th>Actions</th></tr></thead><tbody>
+<table><thead><tr><th>User</th>{{if .IsAdmin}}<th>Email</th><th>Role</th>{{end}}<th>Status</th><th>Joined</th><th>Actions</th></tr></thead><tbody>
 {{range .Users}}
 <tr>
-  <td><a href="/users/{{.Username}}">{{.Username}}</a>{{if .IsAdmin}} <span class="pill">admin</span>{{end}}</td>
-  <td class="muted">{{.Email}}{{if not .EmailVerified}} <span class="pill">unverified</span>{{end}}</td>
+  <td><a href="/users/{{.Username}}">{{.Username}}</a> <span class="pill">{{.RoleLabel}}</span></td>
+  {{if $.IsAdmin}}<td class="muted">{{.Email}}{{if not .EmailVerified}} <span class="pill">unverified</span>{{end}}</td>
+  <td>{{if ne .ID $.User.ID}}<form class="inline-form" method="post" action="/admin/users/{{.ID}}/role"><input type="hidden" name="_csrf" value="{{$.CSRF}}"><select name="role" aria-label="Role for {{.Username}}"><option value="user" {{if eq .Role "user"}}selected{{end}}>user</option><option value="mod" {{if eq .Role "mod"}}selected{{end}}>mod</option><option value="admin" {{if eq .Role "admin"}}selected{{end}}>admin</option></select><button class="linklike" type="submit">Save</button></form>{{else}}<span class="muted">you</span>{{end}}</td>{{end}}
   <td>{{if .DeactivatedAt}}<span class="pill">suspended</span>{{else if not .Approved}}<span class="pill">pending</span>{{else}}active{{end}}</td>
   <td class="muted">{{date .CreatedAt}}</td>
   <td>
-    <form class="inline-form" method="post" action="/admin/users/{{.ID}}/admin"><input type="hidden" name="_csrf" value="{{$.CSRF}}"><button class="linklike" type="submit">{{if .IsAdmin}}Revoke admin{{else}}Make admin{{end}}</button></form>
-    <form class="inline-form" method="post" action="/admin/users/{{.ID}}/suspend"><input type="hidden" name="_csrf" value="{{$.CSRF}}"><input type="hidden" name="reason" value="admin action"><button class="linklike" type="submit">{{if .DeactivatedAt}}Restore{{else}}Suspend{{end}}</button></form>
+    <form class="inline-form" method="post" action="/admin/users/{{.ID}}/suspend"><input type="hidden" name="_csrf" value="{{$.CSRF}}"><input type="hidden" name="reason" value="moderation action"><button class="linklike" type="submit">{{if .DeactivatedAt}}Restore{{else}}Suspend{{end}}</button></form>
   </td>
 </tr>
-{{else}}<tr><td colspan="5" class="muted">No users found.</td></tr>{{end}}
+{{else}}<tr><td colspan="6" class="muted">No users found.</td></tr>{{end}}
 </tbody></table>
 </div>
 {{end}}

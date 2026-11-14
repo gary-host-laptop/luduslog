@@ -27,7 +27,7 @@
     <h1>{{.Game.Title}}</h1>
     <div class="release">
       {{if .Game.ReleaseDate}}{{.Game.ReleaseDate}}{{else if .Game.ReleaseYear}}{{.Game.ReleaseYear}}{{end}}
-      {{if .Game.Franchise}} · <a href="/games?company={{.Game.Franchise}}">{{.Game.Franchise}}</a>{{end}}
+      {{if .Game.Franchise}} · <a href="/games?franchise={{.Game.Franchise}}">{{.Game.Franchise}}</a>{{end}}
       {{if .Game.Category}} · <span class="pill">{{.Game.Category}}</span>{{end}}
       {{if .Game.Adult}}<span class="pill">18+</span>{{end}}
     </div>
@@ -92,7 +92,9 @@
       {{if .Game.ReleaseDates}}<dt class="muted">Releases</dt><dd style="margin:0">{{range .Game.ReleaseDates}}{{.Platform}} {{.Date}}<br>{{end}}</dd>{{end}}
     </dl>
     {{if .Game.Screenshots}}<div class="grid grid-3 mt1">{{range .Game.Screenshots}}<img src="{{.}}" alt="" style="border-radius:6px" loading="lazy">{{end}}</div>{{end}}
-    <div class="mt1"><a class="btn btn-sm" href="/report?target_type=game&target_id={{.Game.ID}}">Report an issue</a></div>
+    {{if .Game.Videos}}<div class="pill-row mt1">{{range .Game.Videos}}<a class="pill" href="https://www.youtube.com/watch?v={{.}}" rel="noopener">Watch video</a>{{end}}</div>{{end}}
+    <div class="mt1"><a class="btn btn-sm" href="/report?target_type=game&target_id={{.Game.ID}}">Report an issue</a>
+      {{if .IsAdmin}}<form class="inline-form" method="post" action="/admin/games/{{.Game.Slug}}/refresh"><input type="hidden" name="_csrf" value="{{.CSRF}}"><button class="btn btn-sm" type="submit">Refresh from IGDB</button></form>{{end}}</div>
   </section>
 </div>
 

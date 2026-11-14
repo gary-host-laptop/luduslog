@@ -4,7 +4,7 @@
   <div class="profile-body">
     <img class="avatar avatar-lg" src="{{avatar .Profile}}" alt="">
     <div class="profile-id">
-      <h1>{{.Profile.Username}} {{if .Profile.IsSupporter}}<span class="pill">supporter</span>{{end}}</h1>
+      <h1>{{.Profile.Username}} {{if ne .Profile.Role "user"}}<span class="pill">{{.Profile.RoleLabel}}</span>{{end}}</h1>
       <div class="muted">Joined {{date .Profile.CreatedAt}}{{if .Profile.Timezone}} · {{.Profile.Timezone}}{{end}}</div>
       {{if .Profile.Bio}}<div class="prose mt1">{{md .Profile.Bio}}</div>{{end}}
       {{if .Links}}<div class="pill-row">{{range .Links}}<a class="pill" href="{{.URL}}" rel="me nofollow ugc">{{.Site}}</a>{{end}}</div>{{end}}

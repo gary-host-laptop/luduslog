@@ -80,6 +80,19 @@
 </div>
 {{end}}
 
+{{define "admin_tabs"}}
+<div class="tabs">
+  <a href="/admin" class="{{if eq .Tab "overview"}}on{{end}}">Overview</a>
+  <a href="/admin/users" class="{{if eq .Tab "users"}}on{{end}}">Users</a>
+  <a href="/admin/reports" class="{{if eq .Tab "reports"}}on{{end}}">Reports</a>
+  <a href="/admin/modlog" class="{{if eq .Tab "modlog"}}on{{end}}">Mod log</a>
+  {{if .IsAdmin}}<a href="/admin/federation" class="{{if eq .Tab "federation"}}on{{end}}">Federation</a>
+  <a href="/admin/jobs" class="{{if eq .Tab "jobs"}}on{{end}}">Jobs</a>
+  <a href="/admin/news" class="{{if eq .Tab "news"}}on{{end}}">News</a>
+  <a href="/admin/settings" class="{{if eq .Tab "settings"}}on{{end}}">Settings</a>{{end}}
+</div>
+{{end}}
+
 {{define "pager"}}
 {{if gt .Pages 1}}
 <nav class="pager" aria-label="Pagination">

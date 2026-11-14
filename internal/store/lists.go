@@ -194,6 +194,12 @@ func (s *Store) DeleteList(ctx context.Context, id, userID int64) error {
 	return err
 }
 
+// ModDeleteList removes any user's list after a moderator review.
+func (s *Store) ModDeleteList(ctx context.Context, id int64) error {
+	_, err := s.DB.ExecContext(ctx, `UPDATE lists SET deleted_at=? WHERE id=? AND deleted_at IS NULL`, Now(), id)
+	return err
+}
+
 func (s *Store) AddListEntry(ctx context.Context, listID, gameID int64, note string) error {
 	var pos int
 	s.DB.QueryRowContext(ctx, `SELECT COALESCE(MAX(position),0)+1 FROM list_entries WHERE list_id=?`, listID).Scan(&pos)

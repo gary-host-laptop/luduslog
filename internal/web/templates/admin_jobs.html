@@ -1,6 +1,6 @@
 {{define "content"}}
 <div class="section-head"><h1 class="mb0">Job queue</h1><span class="muted">Newest runs first</span></div>
-<div class="tabs"><a href="/admin">Overview</a><a href="/admin/users">Users</a><a href="/admin/reports">Reports</a><a href="/admin/federation">Federation</a><a href="/admin/jobs" class="on">Jobs</a><a href="/admin/news">News</a></div>
+{{template "admin_tabs" .}}
 <div class="table-wrap card">
 <table><thead><tr><th>ID</th><th>Kind</th><th>Payload</th><th>Run at</th><th>Attempts</th><th>Last error</th></tr></thead><tbody>
 {{range .Jobs}}<tr><td>{{.ID}}</td><td>{{.Kind}}</td><td class="mono muted">{{truncate .Payload 60}}</td><td>{{.RunAt}}</td><td>{{.Attempts}}</td><td class="muted">{{truncate .LastError 100}}</td></tr>

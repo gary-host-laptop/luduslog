@@ -326,7 +326,6 @@ var badgeDefs = []models.Badge{
 	{Key: "first_list", Title: "Curator", Desc: "Create a list."},
 	{Key: "five_lists", Title: "Archivist", Desc: "Create five lists."},
 	{Key: "ten_reviews", Title: "Wordsmith", Desc: "Publish ten reviews."},
-	{Key: "supporter", Title: "Supporter", Desc: "Support your instance."},
 	{Key: "perfect", Title: "Master", Desc: "Master a game."},
 	{Key: "year_in_review", Title: "Recap", Desc: "View your year in review."},
 }

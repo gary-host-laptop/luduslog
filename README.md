@@ -42,7 +42,9 @@ CGO_ENABLED=0 go build -o luduslog ./cmd/luduslog
 - **Lists and folders**, ordered and ranked, public/unlisted/private.
 - **Profiles** with favourites, badges, stats, yearly recaps, social links, and
   followers.
-- **Notifications**, blocking, reporting, moderation, and an admin area.
+- **Notifications**, blocking, reporting, moderation roles (user/mod/admin), and an admin area with audit logging.
+- **Uploaded avatars and headers** with PNG/JPEG/WebP validation, local re-encoding, and automatic resizing.
+- **Editable instance settings** for safe, non-secret values; secrets stay in the config file or environment.
 - **Imports and exports**: Backloggd JSON/CSV import with IGDB catalog fill, JSON/CSV export, and a backup command.
 - **ActivityPub**: actors, WebFinger, NodeInfo, HTTP signatures, inbox/outbox,
   followers/following collections, notes for reviews, and game activity
@@ -58,7 +60,8 @@ CGO_ENABLED=0 go build -o luduslog ./cmd/luduslog
 | `luduslog admin create <user> <email> [password]` | Create an admin account. |
 | `luduslog backup <file.db>` | Write a consistent SQLite backup. |
 | `luduslog export-user <user> [out.json]` | Export a user's logs and lists. |
-| `luduslog igdb sync [--limit N]` | Import/update games from IGDB. |
+| `luduslog igdb sync [--limit N] [--offset N]` | Import/update games from IGDB in pages of 500. |
+| `luduslog igdb fetch --id N \| --slug S \| --search "title"` | Fetch one game on demand. |
 | `luduslog import backloggd <export> --user <name>` | Import a Backloggd library, fetching missing games from IGDB. |
 
 All commands accept `-config path/to/config.toml`.
@@ -70,7 +73,8 @@ All commands accept `-config path/to/config.toml`.
 - [Deployment](docs/deploy.md) — reverse proxy, backups, upgrades, TLS.
 - [Contributing](docs/contributing.md) — code style and tests.
 - [Decisions](docs/decisions.md) — ambiguous choices and their rationale.
-- [IGDB](docs/igdb.md) — attribution and sync behaviour.
+- [IGDB](docs/igdb.md) — attribution, metadata, sync, and on-demand fetch.
+- [Instance settings](docs/settings.md) — the editable allowlist and restart boundary.
 - [Importing](docs/import.md) — Backloggd exports, status mapping, and idempotency.
 
 ## License and attribution

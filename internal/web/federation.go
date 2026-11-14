@@ -29,7 +29,7 @@ func (s *Server) health(w http.ResponseWriter, r *http.Request) {
 		status = "degraded"
 		code = 503
 	}
-	writeJSON(w, code, map[string]any{"status": status, "name": s.cfg.Name, "time": time.Now().UTC()}, "application/json")
+	writeJSON(w, code, map[string]any{"status": status, "name": s.instanceConfig(r.Context()).Name, "time": time.Now().UTC()}, "application/json")
 }
 
 func (s *Server) actorKey(r *http.Request, u *models.User) (string, error) {
@@ -139,6 +139,7 @@ func (s *Server) nodeinfoDiscovery(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) nodeinfo(w http.ResponseWriter, r *http.Request) {
+	inst := s.instanceConfig(r.Context())
 	var users, posts, comments int
 	s.st.DB.QueryRowContext(r.Context(), `SELECT COUNT(*) FROM users WHERE deactivated_at IS NULL`).Scan(&users)
 	s.st.DB.QueryRowContext(r.Context(), `SELECT COUNT(*) FROM logs WHERE draft=0`).Scan(&posts)
@@ -148,9 +149,9 @@ func (s *Server) nodeinfo(w http.ResponseWriter, r *http.Request) {
 		"software":          map[string]any{"name": "luduslog", "version": "0.1.0"},
 		"protocols":         []string{"activitypub"},
 		"services":          map[string]any{"inbound": []string{}, "outbound": []string{}},
-		"openRegistrations": s.cfg.Registration == "open",
+		"openRegistrations": inst.Registration == "open",
 		"usage":             map[string]any{"users": map[string]any{"total": users}, "localPosts": posts, "localComments": comments},
-		"metadata":          map[string]any{"nodeName": s.cfg.Name, "nodeDescription": s.cfg.InstanceDesc},
+		"metadata":          map[string]any{"nodeName": inst.Name, "nodeDescription": inst.InstanceDesc},
 	}, "application/json")
 }
 

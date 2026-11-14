@@ -18,6 +18,8 @@ type adminData struct {
 	Domains []domainRow
 	Jobs    []models.Job
 	News    []models.News
+	Actions []models.ModAction
+	Audit   []store.AuditEntry
 	Query   string
 	Stats   map[string]int
 	Tab     string
@@ -37,7 +39,7 @@ func (s *Server) adminHome(w http.ResponseWriter, r *http.Request) {
 		sql string
 	}{
 		{"users", `SELECT COUNT(*) FROM users`},
-		{"games", `SELECT COUNT(*) FROM games WHERE deleted_at IS NULL`},
+		{"games", `SELECT COUNT(*) FROM games`},
 		{"logs", `SELECT COUNT(*) FROM logs WHERE deleted_at IS NULL`},
 		{"reviews", `SELECT COUNT(*) FROM logs WHERE review<>'' AND deleted_at IS NULL`},
 		{"lists", `SELECT COUNT(*) FROM lists WHERE deleted_at IS NULL`},
@@ -51,7 +53,11 @@ func (s *Server) adminHome(w http.ResponseWriter, r *http.Request) {
 		stats[row.key] = n
 	}
 	jobs, _ := s.st.Jobs(r.Context(), 20)
-	s.render(w, r, "admin", adminData{Page: s.page(r, "Admin"), Stats: stats, Jobs: jobs, Tab: "overview"})
+	data := adminData{Page: s.page(r, "Admin"), Stats: stats, Jobs: jobs, Tab: "overview"}
+	if data.IsAdmin {
+		data.Audit, _ = s.st.AuditEntries(r.Context(), 20)
+	}
+	s.render(w, r, "admin", data)
 }
 
 func (s *Server) adminUsers(w http.ResponseWriter, r *http.Request) {
@@ -68,7 +74,7 @@ func (s *Server) adminUsers(w http.ResponseWriter, r *http.Request) {
 	s.render(w, r, "admin_users", adminData{Page: s.page(r, "Users · Admin"), Users: users, Total: total, Query: q, Tab: "users"})
 }
 
-func (s *Server) adminToggleAdmin(w http.ResponseWriter, r *http.Request) {
+func (s *Server) adminSetRole(w http.ResponseWriter, r *http.Request) {
 	u := currentUser(r)
 	id, _ := strconv.ParseInt(r.PathValue("id"), 10, 64)
 	target, err := s.st.UserByID(r.Context(), id)
@@ -76,13 +82,31 @@ func (s *Server) adminToggleAdmin(w http.ResponseWriter, r *http.Request) {
 		s.notFound(w, r)
 		return
 	}
-	if target.ID == u.ID {
-		s.flash(w, r, "error", "You cannot change your own admin flag.")
+	role := r.FormValue("role")
+	if role != "user" && role != "mod" && role != "admin" {
+		s.flash(w, r, "error", "Invalid role.")
 		s.redirect(w, r, "/admin/users")
 		return
 	}
-	s.st.SetAdmin(r.Context(), id, !target.IsAdmin)
-	s.st.LogModAction(r.Context(), u.ID, "toggle_admin", "user", id, "")
+	if target.ID == u.ID {
+		s.flash(w, r, "error", "You cannot change your own role.")
+		s.redirect(w, r, "/admin/users")
+		return
+	}
+	if target.Role == "admin" && role != "admin" && s.st.AdminCount(r.Context()) <= 1 {
+		s.flash(w, r, "error", "The instance needs at least one administrator.")
+		s.redirect(w, r, "/admin/users")
+		return
+	}
+	if err := s.st.SetRole(r.Context(), id, role); err != nil {
+		s.serverError(w, r, err)
+		return
+	}
+	if err := s.st.Audit(r.Context(), u.ID, "set_role", target.Username+" -> "+role); err != nil {
+		s.serverError(w, r, err)
+		return
+	}
+	s.flash(w, r, "success", "Set "+target.Username+"'s role to "+role+".")
 	s.redirect(w, r, "/admin/users")
 }
 
@@ -99,20 +123,43 @@ func (s *Server) adminSuspend(w http.ResponseWriter, r *http.Request) {
 		s.redirect(w, r, "/admin/users")
 		return
 	}
+	if target.IsAdmin() && !u.IsAdmin() {
+		s.flash(w, r, "error", "Moderators cannot suspend administrators.")
+		s.redirect(w, r, "/admin/users")
+		return
+	}
+	action := "suspend"
 	if target.DeactivatedAt != nil {
-		s.st.SetDeactivated(r.Context(), id, nil)
-		s.st.SetApproved(r.Context(), id, true)
-		s.st.LogModAction(r.Context(), u.ID, "unsuspend", "user", id, r.FormValue("reason"))
+		action = "unsuspend"
+		if err := s.st.SetDeactivated(r.Context(), id, nil); err != nil {
+			s.serverError(w, r, err)
+			return
+		}
+		if err := s.st.SetApproved(r.Context(), id, true); err != nil {
+			s.serverError(w, r, err)
+			return
+		}
 	} else {
 		now := store.Now()
-		s.st.SetDeactivated(r.Context(), id, &now)
-		s.st.LogModAction(r.Context(), u.ID, "suspend", "user", id, r.FormValue("reason"))
+		if err := s.st.SetDeactivated(r.Context(), id, &now); err != nil {
+			s.serverError(w, r, err)
+			return
+		}
 	}
+	if err := s.st.LogModAction(r.Context(), u.ID, action, &id, r.FormValue("reason"), nil); err != nil {
+		s.flash(w, r, "error", "The action was applied but could not be logged: "+err.Error())
+		s.redirect(w, r, "/admin/users")
+		return
+	}
+	s.flash(w, r, "success", target.Username+" "+action+"ed.")
 	s.redirect(w, r, "/admin/users")
 }
 
 func (s *Server) adminReports(w http.ResponseWriter, r *http.Request) {
 	status := r.URL.Query().Get("status")
+	if status == "" {
+		status = "open"
+	}
 	reports, err := s.st.Reports(r.Context(), status)
 	if err != nil {
 		s.serverError(w, r, err)
@@ -122,12 +169,89 @@ func (s *Server) adminReports(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) adminResolveReport(w http.ResponseWriter, r *http.Request) {
+	u := currentUser(r)
 	id, _ := strconv.ParseInt(r.PathValue("id"), 10, 64)
 	status := r.FormValue("status")
 	if status != "resolved" && status != "dismissed" && status != "open" {
 		status = "resolved"
 	}
-	s.st.ResolveReport(r.Context(), id, status)
+	if err := s.st.ResolveReport(r.Context(), id, status); err != nil {
+		s.serverError(w, r, err)
+		return
+	}
+	if err := s.st.LogModAction(r.Context(), u.ID, status+"_report", nil, r.FormValue("resolution"), &id); err != nil {
+		s.flash(w, r, "error", "Report updated but the moderation log entry failed: "+err.Error())
+		s.redirect(w, r, "/admin/reports")
+		return
+	}
+	s.redirect(w, r, "/admin/reports")
+}
+
+func (s *Server) adminModLog(w http.ResponseWriter, r *http.Request) {
+	actions, err := s.st.ModActions(r.Context(), 200)
+	if err != nil {
+		s.serverError(w, r, err)
+		return
+	}
+	s.render(w, r, "admin_modlog", adminData{Page: s.page(r, "Moderation log"), Actions: actions, Tab: "modlog"})
+}
+
+func (s *Server) adminRemoveContent(w http.ResponseWriter, r *http.Request) {
+	u := currentUser(r)
+	id, _ := strconv.ParseInt(r.PathValue("id"), 10, 64)
+	if id <= 0 {
+		s.notFound(w, r)
+		return
+	}
+	var owner *int64
+	action := ""
+	switch r.PathValue("type") {
+	case "log", "review":
+		l, err := s.st.LogByID(r.Context(), id)
+		if err != nil {
+			s.notFound(w, r)
+			return
+		}
+		owner = &l.UserID
+		action = "remove_review"
+		if err := s.st.ModDeleteLog(r.Context(), id); err != nil {
+			s.serverError(w, r, err)
+			return
+		}
+	case "comment":
+		c, err := s.st.CommentByID(r.Context(), id)
+		if err != nil {
+			s.notFound(w, r)
+			return
+		}
+		owner = c.UserID
+		action = "remove_comment"
+		if err := s.st.ModDeleteComment(r.Context(), id); err != nil {
+			s.serverError(w, r, err)
+			return
+		}
+	case "list":
+		l, err := s.st.ListByID(r.Context(), id, true)
+		if err != nil {
+			s.notFound(w, r)
+			return
+		}
+		owner = &l.UserID
+		action = "remove_list"
+		if err := s.st.ModDeleteList(r.Context(), id); err != nil {
+			s.serverError(w, r, err)
+			return
+		}
+	default:
+		s.notFound(w, r)
+		return
+	}
+	if err := s.st.LogModAction(r.Context(), u.ID, action, owner, r.FormValue("reason"), nil); err != nil {
+		s.flash(w, r, "error", "Content removed but the moderation log entry failed: "+err.Error())
+		s.redirect(w, r, "/admin/reports")
+		return
+	}
+	s.flash(w, r, "success", "Content removed.")
 	s.redirect(w, r, "/admin/reports")
 }
 

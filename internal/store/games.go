@@ -13,7 +13,7 @@ import (
 	"luduslog/internal/models"
 )
 
-const gameCols = `g.id,g.igdb_id,g.slug,g.title,g.summary,g.cover_url,g.banner_url,COALESCE(g.release_date,''),
+const gameCols = `g.id,COALESCE(g.igdb_id,0),g.slug,g.title,g.summary,g.cover_url,g.banner_url,COALESCE(g.release_date,''),
 COALESCE(g.release_year,0),g.release_status,g.category,g.parent_id,g.edition_name,g.franchise,g.adult,g.restricted,
 g.avg_rating,g.rating_count,g.weighted,g.popularity,g.plays,g.completions,g.backlogs,g.wishlists,g.playing,
 g.likes,g.lists_count,g.reviews,g.updated_at,g.synced_at`
@@ -63,6 +63,12 @@ func (s *Store) GameBySlug(ctx context.Context, slug string) (*models.Game, erro
 	return g, nil
 }
 
+// SetGameIGDBID adopts a manually seeded row into its IGDB identity.
+func (s *Store) SetGameIGDBID(ctx context.Context, id, igdbID int64) error {
+	_, err := s.DB.ExecContext(ctx, `UPDATE games SET igdb_id=? WHERE id=?`, igdbID, id)
+	return err
+}
+
 func (s *Store) GameByIGDB(ctx context.Context, igdbID int64) (*models.Game, error) {
 	g, err := scanGame(s.DB.QueryRowContext(ctx, `SELECT `+gameCols+` FROM games g WHERE g.igdb_id=?`, igdbID))
 	if err == sql.ErrNoRows {
@@ -73,16 +79,23 @@ func (s *Store) GameByIGDB(ctx context.Context, igdbID int64) (*models.Game, err
 
 // GameDetail fills the associations rendered on the game page.
 func (s *Store) GameDetail(ctx context.Context, g *models.Game) (*models.Game, error) {
-	rows, err := s.DB.QueryContext(ctx, `SELECT p.id,p.igdb_id,p.name,p.abbrev,p.generation,p.family
+	rows, err := s.DB.QueryContext(ctx, `SELECT p.id,COALESCE(p.igdb_id,0),p.name,p.abbrev,p.generation,p.family
 		FROM game_platforms gp JOIN platforms p ON p.id=gp.platform_id WHERE gp.game_id=? ORDER BY p.generation DESC, p.name`, g.ID)
-	if err == nil {
-		for rows.Next() {
-			var p models.Platform
-			rows.Scan(&p.ID, &p.IGDBID, &p.Name, &p.Abbrev, &p.Generation, &p.Family)
-			g.Platforms = append(g.Platforms, p)
-		}
-		rows.Close()
+	if err != nil {
+		return g, err
 	}
+	for rows.Next() {
+		var p models.Platform
+		if err := rows.Scan(&p.ID, &p.IGDBID, &p.Name, &p.Abbrev, &p.Generation, &p.Family); err != nil {
+			continue
+		}
+		g.Platforms = append(g.Platforms, p)
+	}
+	if err := rows.Err(); err != nil {
+		rows.Close()
+		return g, err
+	}
+	rows.Close()
 	loadStrings := func(table, col string) []string {
 		r, err := s.DB.QueryContext(ctx, `SELECT `+col+` FROM `+table+` WHERE game_id=? ORDER BY 1`, g.ID)
 		if err != nil {
@@ -92,7 +105,9 @@ func (s *Store) GameDetail(ctx context.Context, g *models.Game) (*models.Game, e
 		var out []string
 		for r.Next() {
 			var v string
-			r.Scan(&v)
+			if err := r.Scan(&v); err != nil {
+				continue
+			}
 			out = append(out, v)
 		}
 		return out
@@ -102,23 +117,29 @@ func (s *Store) GameDetail(ctx context.Context, g *models.Game) (*models.Game, e
 	g.Modes = loadStrings("game_modes", "mode")
 	g.AltNames = loadStrings("game_alt_names", "name")
 	crows, err := s.DB.QueryContext(ctx, `SELECT name,role FROM game_companies WHERE game_id=? ORDER BY role,name`, g.ID)
-	if err == nil {
-		for crows.Next() {
-			var c models.CompanyRole
-			crows.Scan(&c.Name, &c.Role)
-			g.Companies = append(g.Companies, c)
-		}
-		crows.Close()
+	if err != nil {
+		return g, err
 	}
-	rrows, err := s.DB.QueryContext(ctx, `SELECT platform,region,COALESCE(date,''),human,status FROM game_release_dates WHERE game_id=? ORDER BY date`, g.ID)
-	if err == nil {
-		for rrows.Next() {
-			var rd models.ReleaseDate
-			rrows.Scan(&rd.Platform, &rd.Region, &rd.Date, &rd.Human, &rd.Status)
-			g.ReleaseDates = append(g.ReleaseDates, rd)
+	for crows.Next() {
+		var c models.CompanyRole
+		if err := crows.Scan(&c.Name, &c.Role); err != nil {
+			continue
 		}
-		rrows.Close()
+		g.Companies = append(g.Companies, c)
 	}
+	crows.Close()
+	rrows, err := s.DB.QueryContext(ctx, `SELECT COALESCE(platform_id,0),platform,region,COALESCE(date,''),human,status FROM game_release_dates WHERE game_id=? ORDER BY date`, g.ID)
+	if err != nil {
+		return g, err
+	}
+	for rrows.Next() {
+		var rd models.ReleaseDate
+		if err := rrows.Scan(&rd.PlatformID, &rd.Platform, &rd.Region, &rd.Date, &rd.Human, &rd.Status); err != nil {
+			continue
+		}
+		g.ReleaseDates = append(g.ReleaseDates, rd)
+	}
+	rrows.Close()
 	var media string
 	s.DB.QueryRowContext(ctx, `SELECT media FROM games WHERE id=?`, g.ID).Scan(&media)
 	var m struct {
@@ -557,18 +578,14 @@ func (s *Store) SaveGame(ctx context.Context, g *models.Game) (*models.Game, err
 		tx.ExecContext(ctx, `DELETE FROM `+table+` WHERE game_id=?`, id)
 	}
 	for _, p := range g.Platforms {
-		var pid int64
-		if p.IGDBID > 0 {
-			tx.ExecContext(ctx, `INSERT INTO platforms(igdb_id,name,abbrev,generation,family) VALUES(?,?,?,?,?)
-				ON CONFLICT(igdb_id) DO UPDATE SET name=excluded.name,abbrev=excluded.abbrev,generation=excluded.generation,family=excluded.family`,
-				p.IGDBID, p.Name, p.Abbrev, p.Generation, p.Family)
-			tx.QueryRowContext(ctx, `SELECT id FROM platforms WHERE igdb_id=?`, p.IGDBID).Scan(&pid)
-		} else if p.Name != "" {
-			tx.ExecContext(ctx, `INSERT INTO platforms(name) VALUES(?) ON CONFLICT DO NOTHING`, p.Name)
-			tx.QueryRowContext(ctx, `SELECT id FROM platforms WHERE name=? LIMIT 1`, p.Name).Scan(&pid)
+		pid, err := savePlatform(ctx, tx, p)
+		if err != nil {
+			return nil, fmt.Errorf("platform %q: %w", p.Name, err)
 		}
 		if pid > 0 {
-			tx.ExecContext(ctx, `INSERT OR IGNORE INTO game_platforms(game_id,platform_id) VALUES(?,?)`, id, pid)
+			if _, err := tx.ExecContext(ctx, `INSERT OR IGNORE INTO game_platforms(game_id,platform_id) VALUES(?,?)`, id, pid); err != nil {
+				return nil, err
+			}
 		}
 	}
 	for _, v := range g.Genres {
@@ -587,13 +604,72 @@ func (s *Store) SaveGame(ctx context.Context, g *models.Game) (*models.Game, err
 		tx.ExecContext(ctx, `INSERT OR IGNORE INTO game_alt_names(game_id,name) VALUES(?,?)`, id, v)
 	}
 	for _, rd := range g.ReleaseDates {
-		tx.ExecContext(ctx, `INSERT INTO game_release_dates(game_id,platform,region,date,human,status) VALUES(?,?,?,?,?,?)`,
-			id, rd.Platform, rd.Region, nullStr(rd.Date), rd.Human, rd.Status)
+		var platformID any
+		if rd.PlatformID > 0 {
+			platformID = rd.PlatformID
+		}
+		if _, err := tx.ExecContext(ctx, `INSERT INTO game_release_dates(game_id,platform_id,platform,region,date,human,status) VALUES(?,?,?,?,?,?,?)`,
+			id, platformID, rd.Platform, rd.Region, nullStr(rd.Date), rd.Human, rd.Status); err != nil {
+			return nil, err
+		}
 	}
 	if err := tx.Commit(); err != nil {
 		return nil, err
 	}
 	return s.GameByID(ctx, id)
+}
+
+func savePlatform(ctx context.Context, tx *sql.Tx, p models.Platform) (int64, error) {
+	if p.Name == "" {
+		return 0, nil
+	}
+	var id int64
+	if p.IGDBID > 0 {
+		err := tx.QueryRowContext(ctx, `SELECT id FROM platforms WHERE igdb_id=?`, p.IGDBID).Scan(&id)
+		if err == nil {
+			_, err = tx.ExecContext(ctx, `UPDATE platforms SET name=?,abbrev=?,generation=?,family=? WHERE id=?`,
+				p.Name, p.Abbrev, p.Generation, p.Family, id)
+			return id, err
+		}
+		if err != sql.ErrNoRows {
+			return 0, err
+		}
+		// An older name-only row may already own this name. Adopt it instead of
+		// violating the unique name index.
+		err = tx.QueryRowContext(ctx, `SELECT id FROM platforms WHERE name=? COLLATE NOCASE`, p.Name).Scan(&id)
+		if err == nil {
+			_, err = tx.ExecContext(ctx, `UPDATE platforms SET igdb_id=?,abbrev=?,generation=?,family=? WHERE id=?`,
+				p.IGDBID, p.Abbrev, p.Generation, p.Family, id)
+			return id, err
+		}
+		if err != sql.ErrNoRows {
+			return 0, err
+		}
+		res, err := tx.ExecContext(ctx, `INSERT INTO platforms(igdb_id,name,abbrev,generation,family) VALUES(?,?,?,?,?)`,
+			p.IGDBID, p.Name, p.Abbrev, p.Generation, p.Family)
+		if err != nil {
+			return 0, err
+		}
+		return res.LastInsertId()
+	}
+	err := tx.QueryRowContext(ctx, `SELECT id FROM platforms WHERE name=? COLLATE NOCASE`, p.Name).Scan(&id)
+	if err == nil {
+		return id, nil
+	}
+	if err != sql.ErrNoRows {
+		return 0, err
+	}
+	res, err := tx.ExecContext(ctx, `INSERT INTO platforms(name) VALUES(?) ON CONFLICT DO NOTHING`, p.Name)
+	if err != nil {
+		return 0, err
+	}
+	if id, _ := res.LastInsertId(); id > 0 {
+		return id, nil
+	}
+	if err := tx.QueryRowContext(ctx, `SELECT id FROM platforms WHERE name=? COLLATE NOCASE`, p.Name).Scan(&id); err != nil {
+		return 0, err
+	}
+	return id, nil
 }
 
 func buildSearchText(g *models.Game) string {
@@ -771,13 +847,15 @@ func (s *Store) GameFacets(ctx context.Context) Facets {
 		}
 		rows.Close()
 	}
-	prows, err := s.DB.QueryContext(ctx, `SELECT p.id,p.igdb_id,p.name,p.abbrev,p.generation,p.family FROM platforms p
+	prows, err := s.DB.QueryContext(ctx, `SELECT p.id,COALESCE(p.igdb_id,0),p.name,p.abbrev,p.generation,p.family FROM platforms p
 		WHERE EXISTS(SELECT 1 FROM game_platforms gp WHERE gp.platform_id=p.id)
 		ORDER BY p.generation DESC, p.name`)
 	if err == nil {
 		for prows.Next() {
 			var p models.Platform
-			prows.Scan(&p.ID, &p.IGDBID, &p.Name, &p.Abbrev, &p.Generation, &p.Family)
+			if err := prows.Scan(&p.ID, &p.IGDBID, &p.Name, &p.Abbrev, &p.Generation, &p.Family); err != nil {
+				continue
+			}
 			f.Platforms = append(f.Platforms, p)
 		}
 		prows.Close()
@@ -821,7 +899,9 @@ func (s *Store) Platforms(ctx context.Context) []models.Platform {
 	var out []models.Platform
 	for rows.Next() {
 		var p models.Platform
-		rows.Scan(&p.ID, &p.IGDBID, &p.Name, &p.Abbrev, &p.Generation, &p.Family)
+		if err := rows.Scan(&p.ID, &p.IGDBID, &p.Name, &p.Abbrev, &p.Generation, &p.Family); err != nil {
+			continue
+		}
 		out = append(out, p)
 	}
 	return out

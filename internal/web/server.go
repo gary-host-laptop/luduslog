@@ -16,6 +16,7 @@ import (
 
 	"luduslog/internal/auth"
 	"luduslog/internal/config"
+	"luduslog/internal/igdb"
 	"luduslog/internal/mail"
 	"luduslog/internal/markdown"
 	"luduslog/internal/models"
@@ -33,6 +34,7 @@ type Server struct {
 	q       *queue.Queue
 	log     *slog.Logger
 	mail    *mail.Mailer
+	igdb    *igdb.Client
 	pages   map[string]*template.Template
 	mux     *http.ServeMux
 	static  http.Handler
@@ -50,6 +52,9 @@ func New(cfg config.Config, st *store.Store, q *queue.Queue, log *slog.Logger) (
 		pages:   map[string]*template.Template{},
 		mux:     http.NewServeMux(),
 		started: time.Now(),
+	}
+	if cfg.HasIGDB() {
+		s.igdb = igdb.New(cfg.IgdbClientID, cfg.IgdbSecret)
 	}
 	sub, err := fs.Sub(assets, "static")
 	if err != nil {
@@ -111,6 +116,7 @@ type Page struct {
 	Error       string
 	Message     string
 	IsAdmin     bool
+	CanModerate bool
 	SearchQuery string
 }
 
@@ -134,9 +140,10 @@ func (s *Server) page(r *http.Request, title string) Page {
 		Query:       r.URL.Query(),
 		Flash:       ctxValue[[]Flash](r.Context(), ctxFlash),
 		Unread:      unread,
-		Instance:    s.cfg,
+		Instance:    s.instanceConfig(r.Context()),
 		Year:        time.Now().UTC().Year(),
-		IsAdmin:     u != nil && u.IsAdmin,
+		IsAdmin:     u.IsAdmin(),
+		CanModerate: u.CanModerate(),
 		SearchQuery: r.URL.Query().Get("q"),
 	}
 }

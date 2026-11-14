@@ -1,6 +1,6 @@
 {{define "content"}}
 <div class="section-head"><h1 class="mb0">Reports</h1><a class="more" href="/admin/reports?status=resolved">Resolved →</a></div>
-<div class="tabs"><a href="/admin">Overview</a><a href="/admin/users">Users</a><a href="/admin/reports" class="on">Reports</a><a href="/admin/federation">Federation</a><a href="/admin/jobs">Jobs</a><a href="/admin/news">News</a></div>
+{{template "admin_tabs" .}}
 {{if .Reports}}
 {{range .Reports}}
 <div class="card mb1">
@@ -12,8 +12,11 @@
   {{if .TargetURL}}<div class="mt1"><a href="{{.TargetURL}}">{{.TargetURL}}</a></div>{{end}}
   {{if .Details}}<div class="prose mt1">{{.Details}}</div>{{end}}
   <div class="btn-group mt1">
-    <form method="post" action="/admin/reports/{{.ID}}"><input type="hidden" name="_csrf" value="{{$.CSRF}}"><input type="hidden" name="status" value="resolved"><button class="btn btn-sm" type="submit">Resolve</button></form>
-    <form method="post" action="/admin/reports/{{.ID}}"><input type="hidden" name="_csrf" value="{{$.CSRF}}"><input type="hidden" name="status" value="dismissed"><button class="btn btn-sm btn-ghost" type="submit">Dismiss</button></form>
+    <form method="post" action="/admin/reports/{{.ID}}"><input type="hidden" name="_csrf" value="{{$.CSRF}}"><input type="hidden" name="status" value="resolved"><input type="hidden" name="resolution" value="reviewed"><button class="btn btn-sm" type="submit">Resolve</button></form>
+    <form method="post" action="/admin/reports/{{.ID}}"><input type="hidden" name="_csrf" value="{{$.CSRF}}"><input type="hidden" name="status" value="dismissed"><input type="hidden" name="resolution" value="no action needed"><button class="btn btn-sm btn-ghost" type="submit">Dismiss</button></form>
+    {{if or (eq .TargetType "log") (eq .TargetType "comment") (eq .TargetType "list")}}
+    <form method="post" action="/admin/content/{{.TargetType}}/{{.TargetID}}/remove" onsubmit="return confirm('Remove this content?')"><input type="hidden" name="_csrf" value="{{$.CSRF}}"><input type="hidden" name="reason" value="reported: {{.Reason}}"><button class="btn btn-sm btn-danger" type="submit">Remove content</button></form>
+    {{end}}
   </div>
 </div>
 {{end}}

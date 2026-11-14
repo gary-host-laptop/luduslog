@@ -1,0 +1,18 @@
+{{define "content"}}
+<div class="section-head"><div><h1 class="mb0">Moderation log</h1><div class="muted">Actions by moderators and administrators</div></div></div>
+{{template "admin_tabs" .}}
+<div class="table-wrap card">
+<table><thead><tr><th>When</th><th>Moderator</th><th>Action</th><th>Target</th><th>Reason</th><th>Report</th></tr></thead><tbody>
+{{range .Actions}}
+<tr>
+  <td class="muted">{{date .CreatedAt}}</td>
+  <td>{{if .Moderator}}{{.Moderator}}{{else}}system{{end}}</td>
+  <td>{{.Action}}</td>
+  <td>{{if .TargetName}}{{.TargetName}}{{else}}—{{end}}</td>
+  <td class="muted">{{truncate .Reason 120}}</td>
+  <td>{{if .ReportID}}#{{derefInt .ReportID}}{{else}}—{{end}}</td>
+</tr>
+{{else}}<tr><td colspan="6" class="muted">No moderation actions yet.</td></tr>{{end}}
+</tbody></table>
+</div>
+{{end}}

@@ -14,7 +14,22 @@
   {{if .Lists}}
   <section class="section"><div class="section-head"><h2>Lists</h2></div><div class="grid grid-2">{{range .Lists}}<a class="list-card" href="/users/{{.User.Username}}/lists/{{.Slug}}"><div><h3>{{.Title}}</h3><div class="muted">{{.User.Username}}</div></div></a>{{end}}</div></section>
   {{end}}
-  {{if and (not .Games) (not .Users) (not .Lists)}}
+  {{if .Remote}}
+  <section class="section"><div class="section-head"><h2>Add from IGDB</h2><span class="muted">Not in the local catalog yet</span></div>
+    <div class="card stack">
+    {{range .Remote}}
+      <div class="row between">
+        <div><strong>{{.Title}}</strong> <span class="muted">{{.ReleaseYear}}{{if .Franchise}} · {{.Franchise}}{{end}}</span></div>
+        {{if $.IsAdmin}}
+        <form class="inline-form" method="post" action="/admin/games/fetch"><input type="hidden" name="_csrf" value="{{$.CSRF}}"><input type="hidden" name="igdb_id" value="{{.IGDBID}}"><input type="hidden" name="q" value="{{$.Q}}"><button class="btn btn-sm btn-primary" type="submit">Add game</button></form>
+        {{end}}
+      </div>
+    {{end}}
+    {{if not .IsAdmin}}<p class="muted">An administrator can add these games to the local catalog.</p>{{end}}
+    </div>
+  </section>
+  {{end}}
+  {{if and (not .Games) (not .Remote) (not .Users) (not .Lists)}}
   <div class="empty"><h3>No results for “{{.Q}}”</h3><p>Try a different spelling, or <a href="/games">browse the catalog</a>.</p></div>
   {{end}}
 {{else}}

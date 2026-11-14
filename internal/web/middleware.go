@@ -172,9 +172,19 @@ func (s *Server) requireUser(next http.HandlerFunc) http.HandlerFunc {
 	}
 }
 
+func (s *Server) requireMod(next http.HandlerFunc) http.HandlerFunc {
+	return s.requireUser(func(w http.ResponseWriter, r *http.Request) {
+		if u := currentUser(r); !u.CanModerate() {
+			s.notFound(w, r)
+			return
+		}
+		next(w, r)
+	})
+}
+
 func (s *Server) requireAdmin(next http.HandlerFunc) http.HandlerFunc {
 	return s.requireUser(func(w http.ResponseWriter, r *http.Request) {
-		if u := currentUser(r); u == nil || !u.IsAdmin {
+		if u := currentUser(r); !u.IsAdmin() {
 			s.notFound(w, r)
 			return
 		}

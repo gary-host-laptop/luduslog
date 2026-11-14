@@ -39,12 +39,53 @@ func (s *Server) settingsPage(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) settingsProfile(w http.ResponseWriter, r *http.Request) {
 	u := currentUser(r)
+	r.Body = http.MaxBytesReader(w, r.Body, 12<<20)
+	if err := r.ParseMultipartForm(maxUploadBytes); err != nil {
+		s.flash(w, r, "error", "The upload was too large. Images must be 5 MiB or smaller.")
+		s.redirect(w, r, "/settings")
+		return
+	}
+	avatar, err := s.readImageUpload(r, "avatar_upload", "avatar")
+	if err != nil {
+		s.flash(w, r, "error", err.Error())
+		s.redirect(w, r, "/settings")
+		return
+	}
+	header, err := s.readImageUpload(r, "header_upload", "header")
+	if err != nil {
+		s.flash(w, r, "error", err.Error())
+		s.redirect(w, r, "/settings")
+		return
+	}
+	oldAvatar, oldHeader := u.Avatar, u.Header
+	newAvatar, newHeader := oldAvatar, oldHeader
+	if avatar.set {
+		newAvatar, err = s.saveUpload(avatar, "avatar", u.ID)
+		if err != nil {
+			s.serverError(w, r, err)
+			return
+		}
+	} else if r.FormValue("remove_avatar") == "1" {
+		newAvatar = ""
+	}
+	if header.set {
+		newHeader, err = s.saveUpload(header, "header", u.ID)
+		if err != nil {
+			if avatar.set {
+				s.deleteUpload(newAvatar, "avatar", u.ID)
+			}
+			s.serverError(w, r, err)
+			return
+		}
+	} else if r.FormValue("remove_header") == "1" {
+		newHeader = ""
+	}
 	links := parseLinks(r.FormValue("links"))
-	err := s.st.UpdateProfile(r.Context(), u.ID, store.ProfileUpdate{
+	err = s.st.UpdateProfile(r.Context(), u.ID, store.ProfileUpdate{
 		Bio:              strings.TrimSpace(r.FormValue("bio")),
 		SocialLinks:      links,
-		Avatar:           strings.TrimSpace(r.FormValue("avatar")),
-		Header:           strings.TrimSpace(r.FormValue("header")),
+		Avatar:           newAvatar,
+		Header:           newHeader,
 		PrivateProfile:   u.PrivateProfile,
 		HideActivity:     u.HideActivity,
 		ManuallyApproves: r.FormValue("manually_approves") == "1",
@@ -67,8 +108,20 @@ func (s *Server) settingsProfile(w http.ResponseWriter, r *http.Request) {
 		FedLists:         u.FedLists,
 	})
 	if err != nil {
+		if newAvatar != oldAvatar {
+			s.deleteUpload(newAvatar, "avatar", u.ID)
+		}
+		if newHeader != oldHeader {
+			s.deleteUpload(newHeader, "header", u.ID)
+		}
 		s.serverError(w, r, err)
 		return
+	}
+	if oldAvatar != newAvatar {
+		s.deleteUpload(oldAvatar, "avatar", u.ID)
+	}
+	if oldHeader != newHeader {
+		s.deleteUpload(oldHeader, "header", u.ID)
 	}
 	s.flash(w, r, "success", "Profile updated.")
 	s.redirect(w, r, "/settings")

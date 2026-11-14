@@ -38,8 +38,12 @@ func (s *Server) commentCreate(w http.ResponseWriter, r *http.Request) {
 		s.notFound(w, r)
 		return
 	}
-	if body == "" || len(body) > 5000 {
-		s.flash(w, r, "error", "Comments need between 1 and 5000 characters.")
+	maxChars := s.instanceConfig(r.Context()).MaxCommentChars
+	if maxChars <= 0 {
+		maxChars = 5000
+	}
+	if body == "" || len(body) > maxChars {
+		s.flash(w, r, "error", "Comments need between 1 and "+strconv.Itoa(maxChars)+" characters.")
 		s.redirect(w, r, back)
 		return
 	}

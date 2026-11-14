@@ -14,14 +14,23 @@
   </nav>
   <div>
     {{if or (eq .Tab "") (eq .Tab "profile")}}
-    <form class="card stack" method="post" action="/settings/profile">
+    <form class="card stack" method="post" action="/settings/profile" enctype="multipart/form-data">
       <input type="hidden" name="_csrf" value="{{.CSRF}}">
       <h2>Profile</h2>
       <div><label for="bio">Bio <span class="muted">(Markdown)</span></label><textarea id="bio" name="bio" rows="4">{{.User.Bio}}</textarea></div>
       <div class="form-row">
-        <div><label for="avatar">Avatar URL</label><input id="avatar" type="url" name="avatar" value="{{.User.Avatar}}" placeholder="https://…"></div>
-        <div><label for="header">Header image URL</label><input id="header" type="url" name="header" value="{{.User.Header}}" placeholder="https://…"></div>
+        <div>
+          <label for="avatar_upload">Avatar <span class="muted">(PNG, JPEG or WebP, 5 MiB max)</span></label>
+          {{if .User.Avatar}}<div class="row mt1"><img class="avatar avatar-md" src="{{avatar .User}}" alt=""><label class="check"><input type="checkbox" name="remove_avatar" value="1"> Remove</label></div>{{end}}
+          <input id="avatar_upload" type="file" name="avatar_upload" accept="image/png,image/jpeg,image/webp">
+        </div>
+        <div>
+          <label for="header_upload">Header image <span class="muted">(PNG, JPEG or WebP, 5 MiB max)</span></label>
+          {{if .User.Header}}<div class="mt1"><img src="{{header .User}}" alt="" style="max-width:240px;border-radius:6px"><br><label class="check"><input type="checkbox" name="remove_header" value="1"> Remove</label></div>{{end}}
+          <input id="header_upload" type="file" name="header_upload" accept="image/png,image/jpeg,image/webp">
+        </div>
       </div>
+      <p class="field-hint">Images are cropped and resized locally (512×512 avatar, 1500×500 header), and metadata such as EXIF is removed. Existing external image URLs remain visible until replaced or removed.</p>
       <div><label for="links">Links <span class="muted">(one per line, optionally site:url)</span></label><textarea id="links" name="links" rows="3">{{range .Links}}{{.Site}}:{{.URL}}
 {{end}}</textarea></div>
       <label class="check"><input type="checkbox" name="hide_social_graph" value="1" {{if .User.HideSocialGraph}}checked{{end}}> Hide my followers/following lists</label>

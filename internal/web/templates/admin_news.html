@@ -1,6 +1,6 @@
 {{define "content"}}
 <div class="section-head"><h1 class="mb0">Instance news</h1><span class="muted">Shown on the home page</span></div>
-<div class="tabs"><a href="/admin">Overview</a><a href="/admin/users">Users</a><a href="/admin/reports">Reports</a><a href="/admin/federation">Federation</a><a href="/admin/jobs">Jobs</a><a href="/admin/news" class="on">News</a></div>
+{{template "admin_tabs" .}}
 <div class="grid grid-2">
 <section class="card">
   <h2>Post an update</h2>

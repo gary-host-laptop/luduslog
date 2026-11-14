@@ -164,9 +164,31 @@ func (s *Store) Setting(ctx context.Context, key, def string) string {
 	return v
 }
 
+func (s *Store) LookupSetting(ctx context.Context, key string) (string, bool) {
+	var v string
+	if err := s.DB.QueryRowContext(ctx, `SELECT value FROM settings WHERE key=?`, key).Scan(&v); err != nil {
+		return "", false
+	}
+	return v, true
+}
+
 func (s *Store) SetSetting(ctx context.Context, key, value string) error {
 	_, err := s.DB.ExecContext(ctx, `INSERT INTO settings(key,value) VALUES(?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value`, key, value)
 	return err
+}
+
+func (s *Store) SetSettings(ctx context.Context, values map[string]string) error {
+	tx, err := s.DB.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	for key, value := range values {
+		if _, err := tx.ExecContext(ctx, `INSERT INTO settings(key,value) VALUES(?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value`, key, value); err != nil {
+			return err
+		}
+	}
+	return tx.Commit()
 }
 
 // Counter abbreviations used across templates: 1.2k, 3.4m.

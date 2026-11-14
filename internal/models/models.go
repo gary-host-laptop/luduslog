@@ -13,8 +13,7 @@ type User struct {
 	Bio                string
 	Avatar             string
 	Header             string
-	IsAdmin            bool
-	IsSupporter        bool
+	Role               string // user | mod | admin
 	CreatedAt          time.Time
 	DeactivatedAt      *time.Time
 	LastUsernameChange *time.Time
@@ -39,6 +38,24 @@ type User struct {
 	FedReviews         bool
 	FedLists           bool
 	RemoteActor        string
+}
+
+func (u *User) IsAdmin() bool { return u != nil && u.Role == "admin" }
+
+func (u *User) CanModerate() bool { return u != nil && (u.Role == "mod" || u.Role == "admin") }
+
+func (u *User) RoleLabel() string {
+	if u == nil {
+		return ""
+	}
+	switch u.Role {
+	case "admin":
+		return "admin"
+	case "mod":
+		return "moderator"
+	default:
+		return "user"
+	}
 }
 
 type SocialLink struct {
@@ -107,11 +124,12 @@ type Platform struct {
 }
 
 type ReleaseDate struct {
-	Platform string
-	Region   string
-	Date     string
-	Human    string
-	Status   string
+	PlatformID int64
+	Platform   string
+	Region     string
+	Date       string
+	Human      string
+	Status     string
 }
 
 type Log struct {
@@ -329,6 +347,18 @@ type News struct {
 	Body      string
 	BodyHTML  string
 	CreatedAt time.Time
+}
+
+type ModAction struct {
+	ID          int64
+	ModeratorID *int64
+	Moderator   string
+	TargetUser  *int64
+	TargetName  string
+	Action      string
+	Reason      string
+	ReportID    *int64
+	CreatedAt   time.Time
 }
 
 type Job struct {

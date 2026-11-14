@@ -105,7 +105,8 @@ func (s *Server) logout(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) registerForm(w http.ResponseWriter, r *http.Request) {
-	if s.cfg.Registration == "closed" {
+	inst := s.instanceConfig(r.Context())
+	if inst.Registration == "closed" {
 		s.render(w, r, "message", struct {
 			Page
 			Message string
@@ -116,6 +117,7 @@ func (s *Server) registerForm(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) registerSubmit(w http.ResponseWriter, r *http.Request) {
+	inst := s.instanceConfig(r.Context())
 	username := strings.TrimSpace(r.FormValue("username"))
 	emailAddr := strings.TrimSpace(r.FormValue("email"))
 	password := r.FormValue("password")
@@ -127,7 +129,7 @@ func (s *Server) registerSubmit(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(code)
 		s.render(w, r, "register", page)
 	}
-	if s.cfg.Registration == "closed" {
+	if inst.Registration == "closed" {
 		fail("Registration is closed on this instance.", http.StatusForbidden)
 		return
 	}
@@ -151,7 +153,7 @@ func (s *Server) registerSubmit(w http.ResponseWriter, r *http.Request) {
 		fail("Passwords do not match.", http.StatusBadRequest)
 		return
 	}
-	if s.cfg.Registration == "invite" && (s.cfg.InviteCode == "" || invite != s.cfg.InviteCode) {
+	if inst.Registration == "invite" && (inst.InviteCode == "" || invite != inst.InviteCode) {
 		fail("That invite code is not valid.", http.StatusForbidden)
 		return
 	}
@@ -179,17 +181,17 @@ func (s *Server) registerSubmit(w http.ResponseWriter, r *http.Request) {
 	if verified {
 		s.st.SetEmailVerified(r.Context(), u.ID)
 	}
-	if s.cfg.Registration == "approval" {
+	if inst.Registration == "approval" {
 		s.st.SetApproved(r.Context(), u.ID, false)
 	}
 	if !verified {
 		token, err := s.auth.CreateEmailToken(r.Context(), u.ID, "verify", emailAddr, 48*time.Hour)
 		if err == nil {
-			s.mail.Send(emailAddr, "Verify your "+s.cfg.Name+" email",
-				"Welcome to "+s.cfg.Name+"!\n\nVerify your address by opening:\n"+s.absolute("/verify?token="+token))
+			s.mail.Send(emailAddr, "Verify your "+inst.Name+" email",
+				"Welcome to "+inst.Name+"!\n\nVerify your address by opening:\n"+s.absolute("/verify?token="+token))
 		}
 	}
-	if s.cfg.Registration == "approval" {
+	if inst.Registration == "approval" {
 		s.render(w, r, "message", struct {
 			Page
 			Message string
@@ -207,7 +209,7 @@ func (s *Server) registerSubmit(w http.ResponseWriter, r *http.Request) {
 		s.serverError(w, r, err)
 		return
 	}
-	s.flash(w, r, "success", "Welcome to "+s.cfg.Name+", "+u.Username+"!")
+	s.flash(w, r, "success", "Welcome to "+inst.Name+", "+u.Username+"!")
 	s.redirect(w, r, "/")
 }
 
@@ -238,7 +240,8 @@ func (s *Server) forgotSubmit(w http.ResponseWriter, r *http.Request) {
 	if s.auth.RateLimit(r.Context(), "forgot:"+s.clientIP(r), 5, time.Hour) {
 		if u, err := s.st.UserByEmail(r.Context(), emailAddr); err == nil {
 			if token, err := s.auth.CreateEmailToken(r.Context(), u.ID, "reset", emailAddr, time.Hour); err == nil {
-				s.mail.Send(emailAddr, "Reset your "+s.cfg.Name+" password",
+				inst := s.instanceConfig(r.Context())
+				s.mail.Send(emailAddr, "Reset your "+inst.Name+" password",
 					"Reset your password by opening:\n"+s.absolute("/reset?token="+token)+"\n\nThis link expires in one hour.")
 			}
 		}

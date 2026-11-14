@@ -70,21 +70,44 @@ func (c *Client) authenticate(ctx context.Context) error {
 	return nil
 }
 
+type apiNamed struct {
+	ID      int64  `json:"id"`
+	Name    string `json:"name"`
+	URL     string `json:"url"`
+	VideoID string `json:"video_id"`
+}
+
+type apiReleaseDate struct {
+	Platform *apiNamed `json:"platform"`
+	Date     int64     `json:"date"`
+	Human    string    `json:"human"`
+	Region   int       `json:"region"`
+	Status   int       `json:"status"`
+}
+
 type apiGame struct {
 	ID               int64  `json:"id"`
 	Name             string `json:"name"`
 	Slug             string `json:"slug"`
 	Summary          string `json:"summary"`
 	FirstReleaseDate int64  `json:"first_release_date"`
+	Category         int    `json:"category"`
+	VersionParent    int64  `json:"version_parent"`
+	ParentGame       int64  `json:"parent_game"`
 	Cover            *struct {
 		URL string `json:"url"`
 	} `json:"cover"`
 	Genres []struct {
 		Name string `json:"name"`
 	} `json:"genres"`
-	Platforms []struct {
-		Name string `json:"name"`
-	} `json:"platforms"`
+	Platforms         []apiNamed       `json:"platforms"`
+	ReleaseDates      []apiReleaseDate `json:"release_dates"`
+	Themes            []apiNamed       `json:"themes"`
+	GameModes         []apiNamed       `json:"game_modes"`
+	Screenshots       []apiNamed       `json:"screenshots"`
+	Videos            []apiNamed       `json:"videos"`
+	Alternative       []apiNamed       `json:"alternative_names"`
+	Collections       []apiNamed       `json:"collections"`
 	InvolvedCompanies []struct {
 		Developer bool `json:"developer"`
 		Publisher bool `json:"publisher"`
@@ -96,13 +119,91 @@ type apiGame struct {
 	RatingCount      int     `json:"rating_count"`
 }
 
-const gameFields = `fields id,name,slug,summary,first_release_date,cover.url,genres.name,platforms.name,involved_companies.developer,involved_companies.publisher,involved_companies.company.name,aggregated_rating,rating_count;`
+const gameFields = `fields id,name,slug,summary,first_release_date,category,version_parent,parent_game,cover.url,
+genres.name,platforms.id,platforms.name,release_dates.platform.id,release_dates.platform.name,release_dates.date,
+release_dates.region,release_dates.human,release_dates.status,themes.name,game_modes.name,screenshots.url,
+videos.video_id,alternative_names.name,collections.name,involved_companies.developer,involved_companies.publisher,
+involved_companies.company.name,aggregated_rating,rating_count;`
 
 // Games fetches up to limit games ordered by rating count.
 func (c *Client) Games(ctx context.Context, limit int) ([]models.Game, error) {
+	return c.GamesRange(ctx, limit, 0, nil)
+}
+
+// GamesRange fetches a total of limit games starting at offset. IGDB caps a
+// single request at 500 rows, so larger catalogs are paged here.
+func (c *Client) GamesRange(ctx context.Context, limit, offset int, progress func(done, total int)) ([]models.Game, error) {
+	if limit <= 0 {
+		return nil, nil
+	}
+	var out []models.Game
+	for done := 0; done < limit; {
+		pageSize := limit - done
+		if pageSize > 500 {
+			pageSize = 500
+		}
+		body := fmt.Sprintf(`%s
+sort rating_count desc; where rating_count > 5 & version_parent = null; limit %d; offset %d;`, gameFields, pageSize, offset+done)
+		games, err := c.query(ctx, body)
+		if err != nil {
+			return out, err
+		}
+		out = append(out, games...)
+		done += len(games)
+		if progress != nil {
+			progress(done, limit)
+		}
+		if len(games) < pageSize {
+			break
+		}
+		if done < limit {
+			if err := sleepContext(ctx, 250*time.Millisecond); err != nil {
+				return out, err
+			}
+		}
+	}
+	return out, nil
+}
+
+// Search looks up games by title for the on-demand catalog flow.
+func (c *Client) Search(ctx context.Context, q string, limit int) ([]models.Game, error) {
+	q = strings.TrimSpace(q)
+	if q == "" {
+		return nil, nil
+	}
+	if limit <= 0 || limit > 50 {
+		limit = 10
+	}
+	escaped := strings.NewReplacer(`\`, `\\`, `"`, `\"`).Replace(q)
 	body := fmt.Sprintf(`%s
-sort rating_count desc; where rating_count > 5 & version_parent = null; limit %d;`, gameFields, limit)
+search "%s"; where version_parent = null; limit %d;`, gameFields, escaped, limit)
 	return c.query(ctx, body)
+}
+
+// GameBySlug fetches one game by its IGDB slug.
+func (c *Client) GameBySlug(ctx context.Context, slug string) (*models.Game, error) {
+	escaped := strings.NewReplacer(`\`, `\\`, `"`, `\"`).Replace(strings.TrimSpace(slug))
+	body := fmt.Sprintf(`%s
+where slug = "%s" & version_parent = null; limit 1;`, gameFields, escaped)
+	games, err := c.query(ctx, body)
+	if err != nil {
+		return nil, err
+	}
+	if len(games) == 0 {
+		return nil, fmt.Errorf("igdb: no game with slug %q", slug)
+	}
+	return &games[0], nil
+}
+
+func sleepContext(ctx context.Context, d time.Duration) error {
+	t := time.NewTimer(d)
+	defer t.Stop()
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-t.C:
+		return nil
+	}
 }
 
 // GamesByIDs fetches games by IGDB id in batches. Backloggd game ids are IGDB
@@ -155,60 +256,231 @@ func (c *Client) query(ctx context.Context, body string) ([]models.Game, error) 
 	req.Header.Set("Client-ID", c.ClientID)
 	req.Header.Set("Authorization", "Bearer "+c.token)
 	req.Header.Set("Accept", "application/json")
-	resp, err := c.HTTP.Do(req)
-	if err != nil {
-		return nil, err
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != 200 {
-		b, _ := io.ReadAll(io.LimitReader(resp.Body, 512))
-		return nil, fmt.Errorf("igdb games: %s: %s", resp.Status, b)
-	}
-	var raw []apiGame
-	if err := json.NewDecoder(resp.Body).Decode(&raw); err != nil {
-		return nil, err
-	}
-	out := make([]models.Game, 0, len(raw))
-	for _, r := range raw {
-		g := models.Game{
-			IGDBID: r.ID, Slug: r.Slug, Title: r.Name, Summary: r.Summary,
-			ReleaseStatus: "released", RatingCount: r.RatingCount,
+	for attempt := 0; ; attempt++ {
+		resp, err := c.HTTP.Do(req)
+		if err != nil {
+			return nil, err
 		}
-		if g.Slug == "" {
-			g.Slug = Slugify(r.Name)
+		if resp.StatusCode == http.StatusTooManyRequests && attempt < 3 {
+			io.Copy(io.Discard, io.LimitReader(resp.Body, 1024))
+			resp.Body.Close()
+			wait := time.Duration(1<<attempt) * time.Second
+			if ra := resp.Header.Get("Retry-After"); ra != "" {
+				if n, err := strconv.Atoi(ra); err == nil && n > 0 && n < 60 {
+					wait = time.Duration(n) * time.Second
+				}
+			}
+			if err := sleepContext(ctx, wait); err != nil {
+				return nil, err
+			}
+			req = req.Clone(ctx)
+			if req.GetBody != nil {
+				req.Body, _ = req.GetBody()
+			}
+			continue
 		}
-		if r.FirstReleaseDate > 0 {
-			t := time.Unix(r.FirstReleaseDate, 0).UTC()
-			g.ReleaseDate = t.Format("2006-01-02")
-			g.ReleaseYear = t.Year()
+		defer resp.Body.Close()
+		if resp.StatusCode != 200 {
+			b, _ := io.ReadAll(io.LimitReader(resp.Body, 512))
+			return nil, fmt.Errorf("igdb games: %s: %s", resp.Status, b)
 		}
-		if r.Cover != nil && r.Cover.URL != "" {
-			g.CoverURL = strings.Replace(r.Cover.URL, "t_thumb", "t_cover_big", 1)
-			if strings.HasPrefix(g.CoverURL, "//") {
-				g.CoverURL = "https:" + g.CoverURL
+		var raw []apiGame
+		if err := json.NewDecoder(resp.Body).Decode(&raw); err != nil {
+			return nil, err
+		}
+		out := make([]models.Game, 0, len(raw))
+		for _, r := range raw {
+			out = append(out, mapGame(r))
+		}
+		return out, nil
+	}
+}
+
+func mapGame(r apiGame) models.Game {
+	g := models.Game{
+		IGDBID: r.ID, Slug: r.Slug, Title: r.Name, Summary: r.Summary,
+		ReleaseStatus: "released", Category: categoryName(r.Category), RatingCount: r.RatingCount,
+	}
+	if g.Slug == "" {
+		g.Slug = Slugify(r.Name)
+	}
+	if r.FirstReleaseDate > 0 {
+		t := time.Unix(r.FirstReleaseDate, 0).UTC()
+		g.ReleaseDate = t.Format("2006-01-02")
+		g.ReleaseYear = t.Year()
+		if t.After(time.Now().UTC()) {
+			g.ReleaseStatus = "upcoming"
+		}
+	}
+	if r.Cover != nil && r.Cover.URL != "" {
+		g.CoverURL = imageURL(r.Cover.URL, "t_cover_big")
+	}
+	for _, gen := range r.Genres {
+		g.Genres = appendUnique(g.Genres, gen.Name)
+	}
+	for _, p := range r.Platforms {
+		g.Platforms = append(g.Platforms, models.Platform{IGDBID: p.ID, Name: p.Name})
+	}
+	for _, rd := range r.ReleaseDates {
+		x := models.ReleaseDate{Region: regionName(rd.Region), Human: rd.Human, Status: releaseStatusName(rd.Status)}
+		if rd.Platform != nil {
+			x.PlatformID = rd.Platform.ID
+			x.Platform = rd.Platform.Name
+		}
+		if rd.Date > 0 {
+			t := time.Unix(rd.Date, 0).UTC()
+			x.Date = t.Format("2006-01-02")
+			if x.Human == "" {
+				x.Human = t.Format("Jan 2, 2006")
 			}
 		}
-		for _, gen := range r.Genres {
-			g.Genres = append(g.Genres, gen.Name)
+		if x.Platform != "" || x.Date != "" {
+			g.ReleaseDates = append(g.ReleaseDates, x)
 		}
-		for _, p := range r.Platforms {
-			g.Platforms = append(g.Platforms, models.Platform{Name: p.Name})
-		}
-		for _, ic := range r.InvolvedCompanies {
-			role := ""
-			switch {
-			case ic.Developer:
-				role = "developer"
-			case ic.Publisher:
-				role = "publisher"
-			}
-			if role != "" {
-				g.Companies = append(g.Companies, models.CompanyRole{Name: ic.Company.Name, Role: role})
-			}
-		}
-		out = append(out, g)
 	}
-	return out, nil
+	for _, x := range r.Themes {
+		g.Themes = appendUnique(g.Themes, x.Name)
+	}
+	for _, x := range r.GameModes {
+		g.Modes = appendUnique(g.Modes, x.Name)
+	}
+	for _, x := range r.Screenshots {
+		if x.URL != "" {
+			g.Screenshots = appendUnique(g.Screenshots, imageURL(x.URL, "t_screenshot_big"))
+		}
+	}
+	for _, x := range r.Videos {
+		if x.VideoID != "" {
+			g.Videos = appendUnique(g.Videos, x.VideoID)
+		}
+	}
+	for _, x := range r.Alternative {
+		g.AltNames = appendUnique(g.AltNames, x.Name)
+	}
+	if len(r.Collections) > 0 {
+		g.Franchise = r.Collections[0].Name
+	}
+	for _, ic := range r.InvolvedCompanies {
+		role := ""
+		switch {
+		case ic.Developer:
+			role = "developer"
+		case ic.Publisher:
+			role = "publisher"
+		}
+		if role != "" {
+			g.Companies = appendUniqueCompany(g.Companies, models.CompanyRole{Name: ic.Company.Name, Role: role})
+		}
+	}
+	return g
+}
+
+func imageURL(raw, size string) string {
+	u := strings.Replace(raw, "t_thumb", size, 1)
+	if strings.HasPrefix(u, "//") {
+		u = "https:" + u
+	}
+	return u
+}
+
+func appendUnique(list []string, v string) []string {
+	if v == "" {
+		return list
+	}
+	for _, x := range list {
+		if x == v {
+			return list
+		}
+	}
+	return append(list, v)
+}
+
+func appendUniqueCompany(list []models.CompanyRole, v models.CompanyRole) []models.CompanyRole {
+	for _, x := range list {
+		if x == v {
+			return list
+		}
+	}
+	return append(list, v)
+}
+
+func categoryName(c int) string {
+	switch c {
+	case 1:
+		return "dlc_addon"
+	case 2:
+		return "expansion"
+	case 3:
+		return "bundle"
+	case 4:
+		return "standalone_expansion"
+	case 5:
+		return "mod"
+	case 6:
+		return "episode"
+	case 7:
+		return "season"
+	case 8:
+		return "remake"
+	case 9:
+		return "remaster"
+	case 10:
+		return "expanded_game"
+	case 11:
+		return "port"
+	case 12:
+		return "fork"
+	case 13:
+		return "pack"
+	case 14:
+		return "update"
+	default:
+		return "main_game"
+	}
+}
+
+func regionName(r int) string {
+	switch r {
+	case 1:
+		return "Europe"
+	case 2:
+		return "North America"
+	case 3:
+		return "Australia"
+	case 4:
+		return "New Zealand"
+	case 5:
+		return "Japan"
+	case 6:
+		return "China"
+	case 7:
+		return "Asia"
+	case 8:
+		return "Worldwide"
+	default:
+		return ""
+	}
+}
+
+func releaseStatusName(s int) string {
+	switch s {
+	case 1:
+		return "alpha"
+	case 2:
+		return "beta"
+	case 3:
+		return "early_access"
+	case 4:
+		return "offline"
+	case 5:
+		return "cancelled"
+	case 6:
+		return "rumored"
+	case 7:
+		return "delisted"
+	default:
+		return "released"
+	}
 }
 
 // Slugify turns a title into a URL slug.

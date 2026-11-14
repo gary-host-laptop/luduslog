@@ -330,11 +330,12 @@ func (s *Server) listsDiscover(w http.ResponseWriter, r *http.Request) {
 
 type searchData struct {
 	Page
-	Q     string
-	Games []models.Game
-	Users []*models.User
-	Lists []models.List
-	Total int
+	Q      string
+	Games  []models.Game
+	Remote []models.Game
+	Users  []*models.User
+	Lists  []models.List
+	Total  int
 }
 
 func (s *Server) searchPage(w http.ResponseWriter, r *http.Request) {
@@ -348,6 +349,9 @@ func (s *Server) searchPage(w http.ResponseWriter, r *http.Request) {
 		data.Total = total
 		data.Users, _ = s.st.SearchUsers(r.Context(), q, 10)
 		data.Lists, _ = s.st.SearchLists(r.Context(), q, 10)
+		if len(data.Games) == 0 && s.igdb != nil {
+			data.Remote, _ = s.igdb.Search(r.Context(), q, 6)
+		}
 	}
 	s.render(w, r, "search", data)
 }

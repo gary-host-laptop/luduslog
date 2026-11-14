@@ -245,8 +245,21 @@ func (s *Server) logDelete(w http.ResponseWriter, r *http.Request) {
 	id, _ := strconv.ParseInt(r.PathValue("id"), 10, 64)
 	u := currentUser(r)
 	l, err := s.st.LogByID(r.Context(), id)
-	if err != nil || (l.UserID != u.ID && !u.IsAdmin) {
+	if err != nil || (l.UserID != u.ID && !u.CanModerate()) {
 		s.notFound(w, r)
+		return
+	}
+	if l.UserID != u.ID {
+		if err := s.st.ModDeleteLog(r.Context(), id); err != nil {
+			s.serverError(w, r, err)
+			return
+		}
+		if err := s.st.LogModAction(r.Context(), u.ID, "remove_review", &l.UserID, r.FormValue("reason"), nil); err != nil {
+			s.serverError(w, r, err)
+			return
+		}
+		s.flash(w, r, "success", "Log removed.")
+		s.redirect(w, r, "/users/"+l.User.Username)
 		return
 	}
 	s.st.DeleteLog(r.Context(), id, l.UserID)

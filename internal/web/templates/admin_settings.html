@@ -1,0 +1,33 @@
+{{define "content"}}
+<div class="section-head"><div><h1 class="mb0">Instance settings</h1><div class="muted">Non-secret values that can change without editing a file</div></div></div>
+{{template "admin_tabs" .}}
+{{if .Error}}<div class="alert alert-error">{{.Error}}</div>{{end}}
+<form class="card stack" method="post" action="/admin/settings">
+  <input type="hidden" name="_csrf" value="{{.CSRF}}">
+  {{range .Settings}}
+  <div>
+    <label for="setting-{{.Key}}">{{.Label}}</label>
+    {{if eq .Kind "textarea"}}
+      <textarea id="setting-{{.Key}}" name="{{.Key}}" rows="3">{{.Value}}</textarea>
+    {{else if eq .Kind "select"}}
+      {{$v := .Value}}<select id="setting-{{.Key}}" name="{{.Key}}">{{range .Options}}<option value="{{.}}" {{if eq . $v}}selected{{end}}>{{.}}</option>{{end}}</select>
+    {{else if eq .Kind "bool"}}
+      <label class="check"><input id="setting-{{.Key}}" type="checkbox" name="{{.Key}}" value="true" {{if eq .Value "true"}}checked{{end}}> Enabled</label>
+    {{else if eq .Kind "number"}}
+      <input id="setting-{{.Key}}" type="number" name="{{.Key}}" value="{{.Value}}" min="100" max="20000">
+    {{else if eq .Kind "email"}}
+      <input id="setting-{{.Key}}" type="email" name="{{.Key}}" value="{{.Value}}">
+    {{else}}
+      <input id="setting-{{.Key}}" type="text" name="{{.Key}}" value="{{.Value}}">
+    {{end}}
+    {{if .Help}}<div class="field-hint">{{.Help}}</div>{{end}}
+  </div>
+  {{end}}
+  <div><button class="btn btn-primary" type="submit">Save instance settings</button></div>
+</form>
+<div class="card mt2 prose">
+  <h2>File or environment only</h2>
+  <p>Secrets and infrastructure values are never editable here and are never rendered in this page: session key, SMTP credentials, IGDB client ID/secret, TLS certificate and key paths, listen address, data directory, and database path. Change those in the config file or environment and restart the service.</p>
+  <p>The settings above are read on every request, so they take effect immediately. If registration mode is set to <code>invite</code>, an invite code is required.</p>
+</div>
+{{end}}

@@ -48,7 +48,7 @@
     </div>
     <div>
       <a href="/about">About</a> · <a href="/games">Browse</a> · <a href="/lists">Lists</a>
-      {{if .User}}{{if .User.IsAdmin}} · <a href="/admin">Admin</a>{{end}}{{end}}
+      {{if .User}}{{if .CanModerate}} · <a href="/admin">{{if .IsAdmin}}Admin{{else}}Moderation{{end}}</a>{{end}}{{end}}
       <br><a href="/.well-known/nodeinfo">NodeInfo</a> · <a href="/nodeinfo/2.1">2.1</a>
     </div>
   </div>

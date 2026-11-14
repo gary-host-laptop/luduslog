@@ -3,6 +3,7 @@ package web
 func (s *Server) routes() {
 	m := s.mux
 	m.Handle("GET /static/", s.static)
+	m.HandleFunc("GET /uploads/{path...}", s.uploadFile)
 	m.HandleFunc("GET /healthz", s.health)
 	m.HandleFunc("GET /about", s.about)
 
@@ -88,18 +89,24 @@ func (s *Server) routes() {
 	m.HandleFunc("GET /settings/blocks", s.requireUser(s.blocksPage))
 
 	// Admin
-	m.HandleFunc("GET /admin", s.requireAdmin(s.adminHome))
-	m.HandleFunc("GET /admin/users", s.requireAdmin(s.adminUsers))
-	m.HandleFunc("POST /admin/users/{id}/admin", s.requireAdmin(s.adminToggleAdmin))
-	m.HandleFunc("POST /admin/users/{id}/suspend", s.requireAdmin(s.adminSuspend))
-	m.HandleFunc("GET /admin/reports", s.requireAdmin(s.adminReports))
-	m.HandleFunc("POST /admin/reports/{id}", s.requireAdmin(s.adminResolveReport))
+	m.HandleFunc("GET /admin", s.requireMod(s.adminHome))
+	m.HandleFunc("GET /admin/users", s.requireMod(s.adminUsers))
+	m.HandleFunc("POST /admin/users/{id}/role", s.requireAdmin(s.adminSetRole))
+	m.HandleFunc("POST /admin/users/{id}/suspend", s.requireMod(s.adminSuspend))
+	m.HandleFunc("GET /admin/reports", s.requireMod(s.adminReports))
+	m.HandleFunc("POST /admin/reports/{id}", s.requireMod(s.adminResolveReport))
+	m.HandleFunc("GET /admin/modlog", s.requireMod(s.adminModLog))
+	m.HandleFunc("POST /admin/content/{type}/{id}/remove", s.requireMod(s.adminRemoveContent))
 	m.HandleFunc("GET /admin/federation", s.requireAdmin(s.adminFederation))
 	m.HandleFunc("POST /admin/federation/domain", s.requireAdmin(s.adminDomainBlock))
 	m.HandleFunc("POST /admin/federation/domain/remove", s.requireAdmin(s.adminDomainUnblock))
 	m.HandleFunc("GET /admin/jobs", s.requireAdmin(s.adminJobs))
 	m.HandleFunc("GET /admin/news", s.requireAdmin(s.adminNews))
 	m.HandleFunc("POST /admin/news", s.requireAdmin(s.adminNewsCreate))
+	m.HandleFunc("GET /admin/settings", s.requireAdmin(s.adminSettingsPage))
+	m.HandleFunc("POST /admin/settings", s.requireAdmin(s.adminSettingsSave))
+	m.HandleFunc("POST /admin/games/fetch", s.requireAdmin(s.adminFetchGame))
+	m.HandleFunc("POST /admin/games/{slug}/refresh", s.requireAdmin(s.adminRefreshGame))
 
 	// Federation endpoints
 	m.HandleFunc("GET /.well-known/webfinger", s.webfinger)

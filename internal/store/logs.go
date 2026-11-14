@@ -179,6 +179,18 @@ func (s *Store) DeleteLog(ctx context.Context, id, userID int64) error {
 	return s.RefreshGameStats(ctx, gameID)
 }
 
+// ModDeleteLog removes any user's log after a moderator review.
+func (s *Store) ModDeleteLog(ctx context.Context, id int64) error {
+	var gameID int64
+	if err := s.DB.QueryRowContext(ctx, `SELECT game_id FROM logs WHERE id=? AND deleted_at IS NULL`, id).Scan(&gameID); err != nil {
+		return ErrNotFound
+	}
+	if _, err := s.DB.ExecContext(ctx, `UPDATE logs SET deleted_at=? WHERE id=?`, Now(), id); err != nil {
+		return err
+	}
+	return s.RefreshGameStats(ctx, gameID)
+}
+
 func (s *Store) RestoreLog(ctx context.Context, id, userID int64) error {
 	var gameID int64
 	if err := s.DB.QueryRowContext(ctx, `SELECT game_id FROM logs WHERE id=? AND user_id=?`, id, userID).Scan(&gameID); err != nil {

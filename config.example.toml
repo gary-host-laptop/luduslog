@@ -1,4 +1,7 @@
 # LudusLog configuration. Every value can also be set with LUDUSLOG_* env vars.
+# Non-secret values listed in docs/settings.md can also be changed from
+# /admin/settings and take effect without a restart. Secrets, paths, and the
+# listen address stay in this file or the environment.
 name = "LudusLog"
 base_url = "http://localhost:8080"
 listen = ":8080"

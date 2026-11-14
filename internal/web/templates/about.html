@@ -1,7 +1,8 @@
 {{define "content"}}
 <article class="card prose" style="max-width:760px;margin:0 auto">
   <h1>About {{.Instance.Name}}</h1>
-  <p>{{.Instance.Name}} is a self-hostable video game diary: track what you play, rate and review it, keep a journal of sessions, build lists, and follow friends. It speaks ActivityPub, so your profile and public reviews can be followed from Mastodon and other fediverse servers.</p>
+  <p>{{if .Instance.InstanceDesc}}{{.Instance.InstanceDesc}}{{else}}{{.Instance.Name}} is a self-hostable video game diary: track what you play, rate and review it, keep a journal of sessions, build lists, and follow friends.{{end}} It speaks ActivityPub, so your profile and public reviews can be followed from Mastodon and other fediverse servers.</p>
+  {{if .Instance.ContactEmail}}<p>Contact: <a href="mailto:{{.Instance.ContactEmail}}">{{.Instance.ContactEmail}}</a></p>{{end}}
   <h2>Your data</h2>
   <p>Everything is stored in a single SQLite database on the instance. You can export a full JSON copy of your logs, lists and library at any time from <a href="/settings">Settings → Import &amp; export</a>. There are no analytics, ads or third-party trackers.</p>
   <h2>Privacy</h2>

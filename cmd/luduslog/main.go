@@ -110,7 +110,8 @@ func usage() {
   luduslog seed [-config config.toml]
   luduslog admin create <username> <email> [password]
   luduslog backup <destination.db>	  luduslog export-user <username> [out.json]
-	  luduslog igdb sync [--limit 200]
+	  luduslog igdb sync [--limit 200] [--offset 0]
+	  luduslog igdb fetch --id <igdb-id> | --slug <slug> | --search "title"
 	  luduslog import backloggd <export.json|export.csv> --user <username> [--no-fetch]
 	  luduslog version
 `)
@@ -436,22 +437,53 @@ func runImport(ctx context.Context, cfg config.Config, logger *slog.Logger, args
 }
 
 func runIGDB(ctx context.Context, cfg config.Config, logger *slog.Logger, args []string) {
-	if len(args) < 1 || args[0] != "sync" {
-		fmt.Fprintln(os.Stderr, "usage: luduslog igdb sync [--limit 200]")
+	if len(args) < 1 || (args[0] != "sync" && args[0] != "fetch") {
+		fmt.Fprintln(os.Stderr, "usage: luduslog igdb sync [--limit 200] [--offset 0]")
+		fmt.Fprintln(os.Stderr, "       luduslog igdb fetch --id <igdb-id> | --slug <slug> | --search \"title\"")
 		os.Exit(2)
-	}
-	limit := 200
-	for i, a := range args {
-		if a == "--limit" && i+1 < len(args) {
-			limit, _ = strconv.Atoi(args[i+1])
-		}
 	}
 	if !cfg.HasIGDB() {
 		fmt.Fprintln(os.Stderr, "IGDB_CLIENT_ID and IGDB_CLIENT_SECRET are required")
 		os.Exit(1)
 	}
+	limit, offset := 200, 0
+	var id int64
+	var slug, search string
+	for i := 1; i < len(args); i++ {
+		switch args[i] {
+		case "--limit":
+			if i+1 < len(args) {
+				limit, _ = strconv.Atoi(args[i+1])
+				i++
+			}
+		case "--offset":
+			if i+1 < len(args) {
+				offset, _ = strconv.Atoi(args[i+1])
+				i++
+			}
+		case "--id":
+			if i+1 < len(args) {
+				id, _ = strconv.ParseInt(args[i+1], 10, 64)
+				i++
+			}
+		case "--slug":
+			if i+1 < len(args) {
+				slug = args[i+1]
+				i++
+			}
+		case "--search":
+			if i+1 < len(args) {
+				search = args[i+1]
+				i++
+			}
+		}
+	}
 	withStore(cfg, logger, func(st *store.Store) error {
-		return igdbSync(ctx, st, cfg, limit)
+		if args[0] == "sync" {
+			return igdbSync(ctx, st, cfg, limit, offset)
+		}
+		_, err := igdbFetch(ctx, st, cfg, id, slug, search)
+		return err
 	})
 }
 

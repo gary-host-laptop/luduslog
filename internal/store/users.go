@@ -4,13 +4,14 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"fmt"
 	"strings"
 	"time"
 
 	"luduslog/internal/models"
 )
 
-const userCols = `id,username,email,email_verified,approved,password_hash,bio,avatar,header,is_admin,is_supporter,created_at,
+const userCols = `id,username,email,email_verified,approved,password_hash,bio,avatar,header,role,created_at,
 deactivated_at,last_username_change,private_profile,hide_activity,manually_approves,hide_social_graph,adult_optin,
 star_scale,cover_mode,time_display,infinite_scroll,theme,high_contrast,timezone,fade_played,journal_view,
 comment_privacy,note_privacy,federation,fed_statuses,fed_reviews,fed_lists,remote_actor,social_links`
@@ -21,9 +22,9 @@ func scanUser(row scanner) (*models.User, error) {
 	var u models.User
 	var createdAt, social string
 	var deact, lastChange sql.NullString
-	var emailVerified, approved, admin, supporter, private, hideAct, manual, hideGraph, adult, scroll, hc, fade, fed, fedS, fedR, fedL int
+	var emailVerified, approved, private, hideAct, manual, hideGraph, adult, scroll, hc, fade, fed, fedS, fedR, fedL int
 	err := row.Scan(&u.ID, &u.Username, &u.Email, &emailVerified, &approved, &u.PasswordHash, &u.Bio, &u.Avatar, &u.Header,
-		&admin, &supporter, &createdAt, &deact, &lastChange, &private, &hideAct, &manual, &hideGraph, &adult,
+		&u.Role, &createdAt, &deact, &lastChange, &private, &hideAct, &manual, &hideGraph, &adult,
 		&u.StarScale, &u.CoverMode, &u.TimeDisplay, &scroll, &u.Theme, &hc, &u.Timezone, &fade, &u.JournalView,
 		&u.CommentPrivacy, &u.NotePrivacy, &fed, &fedS, &fedR, &fedL, &u.RemoteActor, &social)
 	if err != nil {
@@ -31,8 +32,9 @@ func scanUser(row scanner) (*models.User, error) {
 	}
 	u.EmailVerified = emailVerified == 1
 	u.Approved = approved == 1
-	u.IsAdmin = admin == 1
-	u.IsSupporter = supporter == 1
+	if u.Role == "" {
+		u.Role = "user"
+	}
 	u.PrivateProfile = private == 1
 	u.HideActivity = hideAct == 1
 	u.ManuallyApproves = manual == 1
@@ -56,8 +58,12 @@ func scanUser(row scanner) (*models.User, error) {
 
 func (s *Store) CreateUser(ctx context.Context, username, email, passwordHash string, admin bool) (*models.User, error) {
 	now := Now()
-	res, err := s.DB.ExecContext(ctx, `INSERT INTO users(username,username_lower,email,email_lower,password_hash,created_at,is_admin,actor_key_pem)
-		VALUES(?,?,?,?,?,?,?,'')`, username, strings.ToLower(username), email, strings.ToLower(email), passwordHash, now, b2i(admin))
+	role := "user"
+	if admin {
+		role = "admin"
+	}
+	res, err := s.DB.ExecContext(ctx, `INSERT INTO users(username,username_lower,email,email_lower,password_hash,created_at,role,actor_key_pem)
+		VALUES(?,?,?,?,?,?,?,'')`, username, strings.ToLower(username), email, strings.ToLower(email), passwordHash, now, role)
 	if err != nil {
 		return nil, err
 	}
@@ -399,10 +405,19 @@ func (s *Store) SetApproved(ctx context.Context, id int64, approved bool) error 
 	return err
 }
 
-// SetAdmin grants or revokes administrator rights.
-func (s *Store) SetAdmin(ctx context.Context, id int64, admin bool) error {
-	_, err := s.DB.ExecContext(ctx, `UPDATE users SET is_admin=? WHERE id=?`, b2i(admin), id)
+// SetRole changes a user's role. Callers must authorize the change.
+func (s *Store) SetRole(ctx context.Context, id int64, role string) error {
+	if role != "user" && role != "mod" && role != "admin" {
+		return fmt.Errorf("invalid role %q", role)
+	}
+	_, err := s.DB.ExecContext(ctx, `UPDATE users SET role=? WHERE id=?`, role, id)
 	return err
+}
+
+func (s *Store) AdminCount(ctx context.Context) int {
+	var n int
+	s.DB.QueryRowContext(ctx, `SELECT COUNT(*) FROM users WHERE role='admin' AND deactivated_at IS NULL`).Scan(&n)
+	return n
 }
 
 // AllUsers lists accounts newest first for the admin dashboard.
@@ -433,11 +448,78 @@ func (s *Store) AllUsers(ctx context.Context, q string, limit, offset int) ([]*m
 	return out, total, rows.Err()
 }
 
-// UpdateUserModeration stores a suspension note on the account.
-func (s *Store) LogModAction(ctx context.Context, adminID int64, action, targetType string, targetID int64, reason string) error {
-	_, err := s.DB.ExecContext(ctx, `INSERT INTO mod_actions(admin_id,action,target_type,target_id,reason,created_at) VALUES(?,?,?,?,?,?)`,
-		adminID, action, targetType, targetID, reason, Now())
+// LogModAction records a moderation action using the columns the schema
+// actually has. targetUser and reportID are optional.
+func (s *Store) LogModAction(ctx context.Context, moderator int64, action string, targetUser *int64, reason string, reportID *int64) error {
+	_, err := s.DB.ExecContext(ctx, `INSERT INTO mod_actions(moderator,target_user,action,reason,report_id,created_at)
+		VALUES(?,?,?,?,?,?)`, moderator, targetUser, action, reason, reportID, Now())
 	return err
+}
+
+func (s *Store) ModActions(ctx context.Context, limit int) ([]models.ModAction, error) {
+	rows, err := s.DB.QueryContext(ctx, `SELECT m.id,m.moderator,COALESCE(u.username,''),m.target_user,
+		COALESCE(t.username,''),m.action,m.reason,m.report_id,m.created_at
+		FROM mod_actions m LEFT JOIN users u ON u.id=m.moderator LEFT JOIN users t ON t.id=m.target_user
+		ORDER BY m.created_at DESC LIMIT ?`, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []models.ModAction
+	for rows.Next() {
+		var a models.ModAction
+		var modID, targetID, reportID sql.NullInt64
+		var created string
+		if err := rows.Scan(&a.ID, &modID, &a.Moderator, &targetID, &a.TargetName, &a.Action, &a.Reason, &reportID, &created); err != nil {
+			return nil, err
+		}
+		if modID.Valid {
+			a.ModeratorID = &modID.Int64
+		}
+		if targetID.Valid {
+			a.TargetUser = &targetID.Int64
+		}
+		if reportID.Valid {
+			a.ReportID = &reportID.Int64
+		}
+		a.CreatedAt = parseTime(created)
+		out = append(out, a)
+	}
+	return out, rows.Err()
+}
+
+func (s *Store) Audit(ctx context.Context, actorID int64, action, detail string) error {
+	_, err := s.DB.ExecContext(ctx, `INSERT INTO admin_audit(actor_id,action,detail,created_at) VALUES(?,?,?,?)`,
+		actorID, action, detail, Now())
+	return err
+}
+
+type AuditEntry struct {
+	ID        int64
+	Actor     string
+	Action    string
+	Detail    string
+	CreatedAt time.Time
+}
+
+func (s *Store) AuditEntries(ctx context.Context, limit int) ([]AuditEntry, error) {
+	rows, err := s.DB.QueryContext(ctx, `SELECT a.id,COALESCE(u.username,'system'),a.action,a.detail,a.created_at
+		FROM admin_audit a LEFT JOIN users u ON u.id=a.actor_id ORDER BY a.created_at DESC LIMIT ?`, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []AuditEntry
+	for rows.Next() {
+		var e AuditEntry
+		var created string
+		if err := rows.Scan(&e.ID, &e.Actor, &e.Action, &e.Detail, &created); err != nil {
+			return nil, err
+		}
+		e.CreatedAt = parseTime(created)
+		out = append(out, e)
+	}
+	return out, rows.Err()
 }
 
 // MutualUsers returns approved mutual follows (friends).
