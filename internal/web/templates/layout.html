@@ -6,7 +6,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>{{if .Title}}{{.Title}} · {{.Instance.Name}}{{else}}{{.Instance.Name}} — your game diary, federated{{end}}</title>
 <meta name="description" content="{{if .Desc}}{{.Desc}}{{else}}Track the games you play, rate and review them, build lists, and share your backlog across the fediverse.{{end}}">
-<link rel="stylesheet" href="/static/style.css?v=3">
+<link rel="stylesheet" href="/static/style.css?v=4">
 <link rel="icon" href="/static/avatar.svg" type="image/svg+xml">
 {{block "head" .}}{{end}}
 </head>
@@ -21,13 +21,27 @@
       <a href="/lists" {{if eq .Path "/lists"}}class="active"{{end}}>Lists</a>
     </nav>
     <form class="nav-search" action="/search" method="get" role="search">
-      <label class="sr-only" for="nav-q">Search games, people and lists</label>
+      <label class="sr-only" for="nav-q">Search games, reviews, people and lists</label>
       <input id="nav-q" type="search" name="q" placeholder="Search…" value="{{.SearchQuery}}">
+      {{if .SearchTab}}<input type="hidden" name="tab" value="{{.SearchTab}}">{{end}}
     </form>
     <div class="header-actions">
       {{if .User}}
         <a class="icon-btn" href="/notifications" aria-label="Notifications ({{.Unread}} unread)">🔔{{if gt .Unread 0}}<span class="badge-dot">{{.Unread}}</span>{{end}}</a>
-        <a href="/users/{{.User.Username}}" aria-label="Your profile"><img class="avatar avatar-sm" src="{{avatar .User}}" alt=""></a>
+        <details class="user-menu">
+          <summary aria-label="Account menu"><img class="avatar avatar-sm" src="{{avatar .User}}" alt=""></summary>
+          <div class="menu-panel">
+            <div class="menu-id"><strong>{{.User.Username}}</strong>{{if ne .User.Role "user"}}<span class="pill">{{.User.RoleLabel}}</span>{{end}}</div>
+            <a href="/users/{{.User.Username}}">Profile</a>
+            <a href="/library">Library</a>
+            <a href="/users/{{.User.Username}}?tab=lists">Your lists</a>
+            <a href="/users/{{.User.Username}}/stats">Stats</a>
+            <a href="/settings">Settings</a>
+            {{if .CanModerate}}<a href="/admin">{{if .IsAdmin}}Admin{{else}}Moderation{{end}}</a>{{end}}
+            <div class="menu-sep" role="separator"></div>
+            <form method="post" action="/logout"><input type="hidden" name="_csrf" value="{{.CSRF}}"><button class="menu-logout" type="submit">Log out</button></form>
+          </div>
+        </details>
         <a class="btn btn-sm" href="/games">+ Log</a>
       {{else}}
         <a class="btn btn-sm" href="/login">Log in</a>

@@ -1,12 +1,25 @@
 {{define "content"}}
 <div class="section-head">
-  <div><h1 class="mb0">{{if .Game}}Reviews of {{.Game.Title}}{{else}}Reviews{{end}}</h1><div class="muted">{{.Total}} published</div></div>
+  <div>
+    <h1 class="mb0">{{if .Game}}Reviews of {{.Game.Title}}{{else}}Reviews{{end}}</h1>
+    <div class="muted">{{.Total}} published</div>
+  </div>
 </div>
+{{if .Game}}
+<div class="tabs">
+  <a href="/games/{{.Game.Slug}}/reviews?sort=popular" class="{{if eq .Sort "popular"}}on{{end}}">Popular</a>
+  <a href="/games/{{.Game.Slug}}/reviews?sort=newest" class="{{if eq .Sort "newest"}}on{{end}}">Newest</a>
+  <a href="/games/{{.Game.Slug}}/reviews?sort=rating" class="{{if eq .Sort "rating"}}on{{end}}">Highest rated</a>
+  <a href="/games/{{.Game.Slug}}/reviews?sort=oldest" class="{{if eq .Sort "oldest"}}on{{end}}">Oldest</a>
+</div>
+<div class="mb2"><a href="/games/{{.Game.Slug}}">← Back to {{.Game.Title}}</a></div>
+{{else}}
 <div class="tabs">
   <a href="/reviews?tab=all" class="{{if eq .Tab "all"}}on{{end}}">Everyone</a>
   <a href="/reviews?tab=friends" class="{{if eq .Tab "friends"}}on{{end}}">Friends</a>
   <a href="/reviews?tab=following" class="{{if eq .Tab "following"}}on{{end}}">Following</a>
 </div>
+{{end}}
 {{if .Reviews}}
   {{range .Reviews}}<div class="review-card mb1">
     <div class="log-head">
@@ -15,15 +28,11 @@
       {{if .Game}}<span class="muted">· <a href="/games/{{.Game.Slug}}">{{.Game.Title}}</a></span>{{end}}
     </div>
     {{if .Name}}<h2 class="mt1" style="font-size:1.2rem"><a href="{{reviewPath .}}">{{.Name}}</a></h2>{{end}}
-    <div class="prose mt1">{{truncate (plain .Review) 700}}</div>
-    <div class="log-actions"><a href="{{reviewPath .}}">Read more →</a><span>{{.Likes}} likes</span><span>{{.CommentCount}} comments</span></div>
+    {{template "review_preview" .}}
+    {{template "review_actions" .}}
   </div>{{end}}
-  {{if not .Game}}{{if gt .Pages 1}}<nav class="pager">
-    {{if gt .PageNum 1}}<a href="?tab={{.Tab}}&page={{dec .PageNum}}">← Prev</a>{{end}}
-    <span class="on">{{.PageNum}} / {{.Pages}}</span>
-    {{if lt .PageNum .Pages}}<a href="?tab={{.Tab}}&page={{inc .PageNum}}">Next →</a>{{end}}
-  </nav>{{end}}{{end}}
+  {{template "pager" .}}
 {{else}}
-  <div class="empty"><h3>No reviews here yet</h3><p>Follow more people or write the first review.</p><a class="btn" href="/games">Find a game</a></div>
+  <div class="empty"><h3>No reviews here yet</h3><p>{{if .Game}}Be the first to review this game.{{else}}Follow more people or write the first review.{{end}}</p><a class="btn" href="/games">Find a game</a></div>
 {{end}}
 {{end}}

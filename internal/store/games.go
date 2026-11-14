@@ -9,6 +9,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"unicode"
 
 	"luduslog/internal/models"
 )
@@ -281,8 +282,12 @@ func (f GameFilter) where(ctx context.Context, s *Store) (string, []any) {
 		conds = append(conds, "g.parent_id IS NULL")
 	}
 	if f.Q != "" {
-		conds = append(conds, "g.id IN (SELECT rowid FROM games_fts WHERE games_fts MATCH ?)")
-		args = append(args, ftsQuery(f.Q))
+		if match := ftsQuery(f.Q); match != "" {
+			conds = append(conds, "g.id IN (SELECT rowid FROM games_fts WHERE games_fts MATCH ?)")
+			args = append(args, match)
+		} else {
+			conds = append(conds, "1=0")
+		}
 	}
 	for _, genre := range f.Genres {
 		conds = append(conds, "EXISTS(SELECT 1 FROM game_genres gg WHERE gg.game_id=g.id AND gg.genre=?)")
@@ -461,33 +466,37 @@ func (s *Store) ListGames(ctx context.Context, f GameFilter) ([]models.Game, int
 	return out, total, rows.Err()
 }
 
-// ftsQuery converts user input to a safe FTS5 prefix query, dropping
-// punctuation and handling plus signs and hyphens.
+// ftsQuery converts user input to a safe FTS5 prefix query. Only letters and
+// numbers survive, so quotes, operators, punctuation and path characters can
+// never change the meaning of the query.
 func ftsQuery(q string) string {
-	q = strings.Map(func(r rune) rune {
-		switch r {
-		case '+', '-', ':', '*', '"', '\'', '(', ')', '.', ',', '?', '!', '/', '&':
-			return ' '
+	var b strings.Builder
+	for _, r := range q {
+		if unicode.IsLetter(r) || unicode.IsNumber(r) {
+			b.WriteRune(r)
+		} else {
+			b.WriteByte(' ')
 		}
-		return r
-	}, q)
-	fields := strings.Fields(q)
-	var parts []string
+	}
+	fields := strings.Fields(b.String())
+	if len(fields) > 12 {
+		fields = fields[:12]
+	}
+	parts := make([]string, 0, len(fields))
 	for _, f := range fields {
-		if len(f) > 64 {
-			f = f[:64]
+		runes := []rune(f)
+		if len(runes) > 64 {
+			f = string(runes[:64])
 		}
 		parts = append(parts, f+"*")
-	}
-	if len(parts) == 0 {
-		return `""`
 	}
 	return strings.Join(parts, " ")
 }
 
 // SearchGames searches the catalog, excluding editions from results.
 func (s *Store) SearchGames(ctx context.Context, q string, limit, offset int, includeAdult bool) ([]models.Game, int, error) {
-	if strings.TrimSpace(q) == "" {
+	match := ftsQuery(q)
+	if match == "" {
 		return nil, 0, nil
 	}
 	adult := ""
@@ -495,13 +504,14 @@ func (s *Store) SearchGames(ctx context.Context, q string, limit, offset int, in
 		adult = " AND g.adult=0"
 	}
 	var total int
-	err := s.DB.QueryRowContext(ctx, `SELECT COUNT(*) FROM games g WHERE g.id IN (SELECT rowid FROM games_fts WHERE games_fts MATCH ?) AND g.parent_id IS NULL`+adult, ftsQuery(q)).Scan(&total)
+	err := s.DB.QueryRowContext(ctx, `SELECT COUNT(*) FROM games g JOIN games_fts ON games_fts.rowid=g.id
+		WHERE games_fts MATCH ? AND g.parent_id IS NULL`+adult, match).Scan(&total)
 	if err != nil {
 		return nil, 0, err
 	}
-	rows, err := s.DB.QueryContext(ctx, `SELECT `+gameCols+` FROM games g
-		WHERE g.id IN (SELECT rowid FROM games_fts WHERE games_fts MATCH ?) AND g.parent_id IS NULL`+adult+`
-		ORDER BY bm25(games_fts), g.popularity DESC LIMIT ? OFFSET ?`, ftsQuery(q), limit, offset)
+	rows, err := s.DB.QueryContext(ctx, `SELECT `+gameCols+` FROM games g JOIN games_fts ON games_fts.rowid=g.id
+		WHERE games_fts MATCH ? AND g.parent_id IS NULL`+adult+`
+		ORDER BY bm25(games_fts), g.popularity DESC, g.id DESC LIMIT ? OFFSET ?`, match, limit, offset)
 	if err != nil {
 		return nil, 0, err
 	}
@@ -523,8 +533,8 @@ func (s *Store) QuickSearch(ctx context.Context, q string, limit int, includeAdu
 	if err != nil {
 		return nil, nil, nil, err
 	}
-	users, _ := s.SearchUsers(ctx, q, 3)
-	lists, _ := s.SearchLists(ctx, q, 3)
+	users, _, _ := s.SearchUsers(ctx, q, 3, 0)
+	lists, _, _ := s.SearchLists(ctx, q, 3, 0)
 	return games, users, lists, nil
 }
 

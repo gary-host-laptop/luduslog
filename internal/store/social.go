@@ -431,16 +431,22 @@ func (s *Store) ReviewsForUser(ctx context.Context, userID int64, limit int) ([]
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
 	var out []*models.Log
 	for rows.Next() {
 		l, err := scanLog(rows)
 		if err == nil {
-			s.hydrateLog(ctx, l)
 			out = append(out, l)
 		}
 	}
-	return out, rows.Err()
+	err = rows.Err()
+	rows.Close()
+	if err != nil {
+		return nil, err
+	}
+	for _, l := range out {
+		s.hydrateLog(ctx, l)
+	}
+	return out, nil
 }
 
 func (s *Store) CountReviews(ctx context.Context, userID int64) int {

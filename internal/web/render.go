@@ -16,24 +16,26 @@ import (
 
 func templateFuncs(s *Server) template.FuncMap {
 	return template.FuncMap{
-		"safe":      safeHTML,
-		"md":        md,
-		"plain":     mdPlain,
-		"avatar":    avatarURL,
-		"header":    headerURL,
-		"cover":     coverURL,
-		"userCover": userCoverURL,
-		"stars":     starsHTML,
-		"rating":    ratingText,
-		"timeago":   timeAgo,
-		"date":      dateFmt,
-		"dateLong":  dateLong,
-		"year":      func(t time.Time) int { return t.Year() },
-		"add":       func(a, b int) int { return a + b },
-		"sub":       func(a, b int) int { return a - b },
-		"inc":       func(a int) int { return a + 1 },
-		"dec":       func(a int) int { return a - 1 },
-		"mul":       func(a, b float64) float64 { return a * b },
+		"safe":            safeHTML,
+		"md":              md,
+		"plain":           mdPlain,
+		"avatar":          avatarURL,
+		"header":          headerURL,
+		"cover":           coverURL,
+		"userCover":       userCoverURL,
+		"screenshotThumb": screenshotThumb,
+		"screenshotFull":  screenshotFull,
+		"stars":           starsHTML,
+		"rating":          ratingText,
+		"timeago":         timeAgo,
+		"date":            dateFmt,
+		"dateLong":        dateLong,
+		"year":            func(t time.Time) int { return t.Year() },
+		"add":             func(a, b int) int { return a + b },
+		"sub":             func(a, b int) int { return a - b },
+		"inc":             func(a int) int { return a + 1 },
+		"dec":             func(a int) int { return a - 1 },
+		"mul":             func(a, b float64) float64 { return a * b },
 		"div": func(a, b float64) float64 {
 			if b == 0 {
 				return 0
@@ -128,6 +130,14 @@ func headerURL(u *models.User) string {
 		return u.Header
 	}
 	return ""
+}
+
+func screenshotThumb(raw string) string {
+	return strings.Replace(raw, "t_screenshot_big", "t_screenshot_med", 1)
+}
+
+func screenshotFull(raw string) string {
+	return strings.Replace(raw, "t_screenshot_big", "t_1080p", 1)
 }
 
 func coverURL(g *models.Game) string {

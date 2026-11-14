@@ -241,23 +241,39 @@ func (s *Store) LikeList(ctx context.Context, listID, userID int64, like bool) e
 	return err
 }
 
-func (s *Store) SearchLists(ctx context.Context, q string, limit int) ([]models.List, error) {
-	rows, err := s.DB.QueryContext(ctx, `SELECT `+listCols+` FROM lists l WHERE l.deleted_at IS NULL AND l.privacy='public'
-		AND l.id IN (SELECT rowid FROM lists_fts WHERE lists_fts MATCH ?) ORDER BY l.updated_at DESC LIMIT ?`, ftsQuery(q), limit)
-	if err != nil {
-		return nil, err
+func (s *Store) SearchLists(ctx context.Context, q string, limit, offset int) ([]models.List, int, error) {
+	match := ftsQuery(q)
+	if match == "" {
+		return nil, 0, nil
 	}
-	defer rows.Close()
+	var total int
+	if err := s.DB.QueryRowContext(ctx, `SELECT COUNT(*) FROM lists l WHERE l.deleted_at IS NULL AND l.privacy='public'
+		AND l.id IN (SELECT rowid FROM lists_fts WHERE lists_fts MATCH ?)`, match).Scan(&total); err != nil {
+		return nil, 0, err
+	}
+	rows, err := s.DB.QueryContext(ctx, `SELECT `+listCols+` FROM lists l WHERE l.deleted_at IS NULL AND l.privacy='public'
+		AND l.id IN (SELECT rowid FROM lists_fts WHERE lists_fts MATCH ?) ORDER BY l.updated_at DESC, l.id DESC LIMIT ? OFFSET ?`, match, limit, offset)
+	if err != nil {
+		return nil, 0, err
+	}
 	var out []models.List
 	for rows.Next() {
 		l, err := scanList(rows)
 		if err != nil {
-			continue
+			rows.Close()
+			return nil, 0, err
 		}
-		s.hydrateList(ctx, l, false)
 		out = append(out, *l)
 	}
-	return out, rows.Err()
+	err = rows.Err()
+	rows.Close()
+	if err != nil {
+		return nil, 0, err
+	}
+	for i := range out {
+		s.hydrateList(ctx, &out[i], false)
+	}
+	return out, total, nil
 }
 
 func (s *Store) PopularLists(ctx context.Context, limit int) ([]*models.List, error) {

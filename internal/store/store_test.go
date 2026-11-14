@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"math"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"luduslog/internal/models"
@@ -201,6 +202,139 @@ func TestRoleMigrationBackfillsAdmins(t *testing.T) {
 	db.QueryRow(`SELECT COUNT(*) FROM pragma_table_info('users') WHERE name IN ('is_admin','is_supporter')`).Scan(&cols)
 	if cols != 0 {
 		t.Fatalf("legacy role columns remain: %d", cols)
+	}
+}
+
+func TestSearchGamesUsesDirectFTSJoin(t *testing.T) {
+	st := testStore(t)
+	ctx := context.Background()
+	if _, err := st.SaveGame(ctx, &models.Game{IGDBID: -1, Slug: "celeste", Title: "Celeste", ReleaseStatus: "released"}); err != nil {
+		t.Fatal(err)
+	}
+	games, total, err := st.SearchGames(ctx, "celeste", 30, 0, false)
+	if err != nil {
+		t.Fatalf("SearchGames: %v", err)
+	}
+	if total != 1 || len(games) != 1 || games[0].Slug != "celeste" {
+		t.Fatalf("SearchGames = %d/%d, want one Celeste", total, len(games))
+	}
+}
+
+func TestFTSQueryAllowsOnlyLettersAndNumbers(t *testing.T) {
+	if got := ftsQuery(`# @ ~ | [ ] \\ " ' -`); got != "" {
+		t.Fatalf("punctuation query = %q, want empty", got)
+	}
+	if got := ftsQuery("Pokémon #1"); got != "Pokémon* 1*" {
+		t.Fatalf("unicode query = %q", got)
+	}
+	long := strings.Repeat("a", 100)
+	got := ftsQuery(long)
+	if got != strings.Repeat("a", 64)+"*" {
+		t.Fatalf("long token = %q", got)
+	}
+	many := strings.TrimSpace(strings.Repeat("word ", 20))
+	if parts := strings.Fields(ftsQuery(many)); len(parts) != 12 {
+		t.Fatalf("token count = %d, want 12", len(parts))
+	}
+}
+
+func TestSearchPaginationAndReviewFilters(t *testing.T) {
+	st := testStore(t)
+	ctx := context.Background()
+	alice, _ := st.CreateUser(ctx, "alice", "alice@example.test", "hash", false)
+	bob, _ := st.CreateUser(ctx, "alicia", "alicia@example.test", "hash", false)
+	private, _ := st.CreateUser(ctx, "private", "private@example.test", "hash", false)
+	st.UpdateProfile(ctx, private.ID, ProfileUpdate{PrivateProfile: true})
+	deactivated, _ := st.CreateUser(ctx, "gone", "gone@example.test", "hash", false)
+	st.SetDeactivated(ctx, deactivated.ID, ptr("2026-01-01T00:00:00Z"))
+
+	celeste, _ := st.SaveGame(ctx, &models.Game{IGDBID: -1, Slug: "celeste", Title: "Celeste", ReleaseStatus: "released"})
+	adult, _ := st.SaveGame(ctx, &models.Game{IGDBID: -2, Slug: "adult-game", Title: "Adult Game", Adult: true, ReleaseStatus: "released"})
+	review, err := st.CreateLog(ctx, LogInput{UserID: alice.ID, GameID: celeste.ID, Name: "Summit", Review: "Celeste is a precise platformer", Status: "played"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	st.CreateLog(ctx, LogInput{UserID: bob.ID, GameID: celeste.ID, Name: "Draft", Review: "Celeste precise draft", Draft: true})
+	privateReview, _ := st.CreateLog(ctx, LogInput{UserID: private.ID, GameID: celeste.ID, Name: "Private", Review: "Celeste precise private"})
+	deletedReview, _ := st.CreateLog(ctx, LogInput{UserID: alice.ID, GameID: celeste.ID, Name: "Deleted", Review: "Celeste precise deleted"})
+	st.DeleteLog(ctx, deletedReview.ID, alice.ID)
+	adultReview, _ := st.CreateLog(ctx, LogInput{UserID: alice.ID, GameID: adult.ID, Name: "Adult", Review: "Celeste precise adult"})
+	st.CreateLog(ctx, LogInput{UserID: alice.ID, GameID: celeste.ID, Review: "", Status: "played"})
+
+	reviews, total, err := st.SearchReviews(ctx, "precise", 30, 0, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if total != 1 || len(reviews) != 1 || reviews[0].ID != review.ID {
+		t.Fatalf("SearchReviews precise = %d/%d: %+v", total, len(reviews), reviews)
+	}
+	for _, hidden := range []int64{privateReview.ID, deletedReview.ID, adultReview.ID} {
+		for _, r := range reviews {
+			if r.ID == hidden {
+				t.Fatalf("hidden review %d leaked", hidden)
+			}
+		}
+	}
+	if got, _, _ := st.SearchReviews(ctx, "Celeste", 30, 0, true); got == nil {
+		t.Fatal("game-title review search returned nothing")
+	}
+	if got, _, _ := st.SearchReviews(ctx, "Summit", 30, 0, false); len(got) != 1 {
+		t.Fatalf("review-name search = %d", len(got))
+	}
+
+	users, total, err := st.SearchUsers(ctx, "ali", 1, 0)
+	if err != nil || total != 2 || len(users) != 1 {
+		t.Fatalf("SearchUsers first page = %d/%d err=%v", total, len(users), err)
+	}
+	users2, _, _ := st.SearchUsers(ctx, "ali", 1, 1)
+	if len(users2) != 1 || users2[0].ID == users[0].ID {
+		t.Fatalf("SearchUsers offset did not advance: %+v %+v", users, users2)
+	}
+
+	for i := 0; i < 3; i++ {
+		st.CreateList(ctx, ListInput{UserID: alice.ID, Title: "Best Platformers " + itoa(i), Description: "Celeste"})
+	}
+	st.CreateList(ctx, ListInput{UserID: alice.ID, Title: "Secret Platformers", Privacy: "private"})
+	lists, total, err := st.SearchLists(ctx, "platformers", 2, 0)
+	if err != nil || total != 3 || len(lists) != 2 {
+		t.Fatalf("SearchLists first page = %d/%d err=%v", total, len(lists), err)
+	}
+	more, _, _ := st.SearchLists(ctx, "platformers", 2, 2)
+	if len(more) != 1 || more[0].ID == lists[0].ID {
+		t.Fatalf("SearchLists offset = %+v", more)
+	}
+}
+
+func ptr[T any](v T) *T { return &v }
+
+func TestGameReviewSorting(t *testing.T) {
+	st := testStore(t)
+	ctx := context.Background()
+	g, _ := st.SaveGame(ctx, &models.Game{IGDBID: -1, Slug: "sort-game", Title: "Sort Game", ReleaseStatus: "released"})
+	var logs []*models.Log
+	for i, rating := range []float64{2, 5, 3} {
+		u, _ := st.CreateUser(ctx, "sortuser"+itoa(i), "sort"+itoa(i)+"@example.test", "hash", false)
+		l, err := st.CreateLog(ctx, LogInput{UserID: u.ID, GameID: g.ID, Review: "review " + itoa(i), Rating: rating, Status: "played"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		logs = append(logs, l)
+	}
+	liker, _ := st.CreateUser(ctx, "liker", "liker@example.test", "hash", false)
+	st.LikeLog(ctx, logs[0].ID, liker.ID, true)
+	st.LikeLog(ctx, logs[0].ID, logs[1].UserID, true)
+
+	rated, _, err := st.ReviewsForGame(ctx, g.ID, "rating", 10, 0)
+	if err != nil || len(rated) != 3 || rated[0].Rating != 5 || rated[1].Rating != 3 || rated[2].Rating != 2 {
+		t.Fatalf("rating sort = %+v err=%v", rated, err)
+	}
+	popular, _, err := st.ReviewsForGame(ctx, g.ID, "likes", 10, 0)
+	if err != nil || len(popular) != 3 || popular[0].ID != logs[0].ID {
+		t.Fatalf("popular sort = %+v err=%v", popular, err)
+	}
+	newest, _, err := st.ReviewsForGame(ctx, g.ID, "new", 10, 0)
+	if err != nil || newest[0].ID != logs[2].ID {
+		t.Fatalf("new sort = %+v err=%v", newest, err)
 	}
 }
 

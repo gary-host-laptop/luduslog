@@ -118,6 +118,7 @@ type Page struct {
 	IsAdmin     bool
 	CanModerate bool
 	SearchQuery string
+	SearchTab   string
 }
 
 type Flash struct {

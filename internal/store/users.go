@@ -199,23 +199,30 @@ func (s *Store) DeleteUser(ctx context.Context, id int64) error {
 }
 
 // SearchUsers powers @mention completion and user search.
-func (s *Store) SearchUsers(ctx context.Context, q string, limit int) ([]*models.User, error) {
+func (s *Store) SearchUsers(ctx context.Context, q string, limit, offset int) ([]*models.User, int, error) {
+	likeName := "%" + strings.ToLower(q) + "%"
+	likeBio := "%" + q + "%"
+	var total int
+	if err := s.DB.QueryRowContext(ctx, `SELECT COUNT(*) FROM users
+		WHERE deactivated_at IS NULL AND (username_lower LIKE ? OR bio LIKE ?)`, likeName, likeBio).Scan(&total); err != nil {
+		return nil, 0, err
+	}
 	rows, err := s.DB.QueryContext(ctx, `SELECT `+userCols+` FROM users
-		WHERE deactivated_at IS NULL AND (username_lower LIKE ? OR bio LIKE ?) ORDER BY username LIMIT ?`,
-		"%"+strings.ToLower(q)+"%", "%"+q+"%", limit)
+		WHERE deactivated_at IS NULL AND (username_lower LIKE ? OR bio LIKE ?) ORDER BY username LIMIT ? OFFSET ?`,
+		likeName, likeBio, limit, offset)
 	if err != nil {
-		return nil, err
+		return nil, 0, err
 	}
 	defer rows.Close()
 	var out []*models.User
 	for rows.Next() {
 		u, err := scanUser(rows)
 		if err != nil {
-			return nil, err
+			return nil, 0, err
 		}
 		out = append(out, u)
 	}
-	return out, rows.Err()
+	return out, total, rows.Err()
 }
 
 // ---- follows / blocks ----

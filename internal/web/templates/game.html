@@ -91,12 +91,46 @@
       {{if .Game.Themes}}<dt class="muted">Themes</dt><dd style="margin:0">{{range .Game.Themes}}{{.}} {{end}}</dd>{{end}}
       {{if .Game.ReleaseDates}}<dt class="muted">Releases</dt><dd style="margin:0">{{range .Game.ReleaseDates}}{{.Platform}} {{.Date}}<br>{{end}}</dd>{{end}}
     </dl>
-    {{if .Game.Screenshots}}<div class="grid grid-3 mt1">{{range .Game.Screenshots}}<img src="{{.}}" alt="" style="border-radius:6px" loading="lazy">{{end}}</div>{{end}}
-    {{if .Game.Videos}}<div class="pill-row mt1">{{range .Game.Videos}}<a class="pill" href="https://www.youtube.com/watch?v={{.}}" rel="noopener">Watch video</a>{{end}}</div>{{end}}
     <div class="mt1"><a class="btn btn-sm" href="/report?target_type=game&target_id={{.Game.ID}}">Report an issue</a>
       {{if .IsAdmin}}<form class="inline-form" method="post" action="/admin/games/{{.Game.Slug}}/refresh"><input type="hidden" name="_csrf" value="{{.CSRF}}"><button class="btn btn-sm" type="submit">Refresh from IGDB</button></form>{{end}}</div>
   </section>
 </div>
+
+{{if or .Game.Screenshots .Game.Videos}}
+<section class="section media-section">
+  <div class="section-head"><h2>Media</h2></div>
+  {{if .Game.Screenshots}}
+  <div class="screenshot-grid">
+    {{range $i, $shot := .Game.Screenshots}}
+    <a href="{{screenshotFull $shot}}" data-lightbox data-full="{{screenshotFull $shot}}" data-alt="Screenshot {{inc $i}} of {{$.Game.Title}}" target="_blank" rel="noopener">
+      <img src="{{screenshotThumb $shot}}" alt="Screenshot {{inc $i}} of {{$.Game.Title}}" loading="lazy">
+    </a>
+    {{end}}
+  </div>
+  {{end}}
+  {{if .Game.Videos}}
+  <div class="video-grid mt2">
+    {{range $i, $id := .Game.Videos}}
+    <a class="video-card" href="https://www.youtube.com/watch?v={{$id}}" data-video-id="{{$id}}" target="_blank" rel="noopener noreferrer" aria-label="Video {{inc $i}}">
+      <span class="play-icon" aria-hidden="true"></span>
+      <span>Video {{inc $i}}</span>
+    </a>
+    {{end}}
+  </div>
+  {{end}}
+</section>
+<dialog id="screenshot-lightbox" class="media-dialog" aria-label="Screenshot viewer">
+  <form method="dialog"><button class="dialog-close" aria-label="Close screenshot viewer">×</button></form>
+  <button class="dialog-nav prev" type="button" data-lightbox-prev aria-label="Previous screenshot">‹</button>
+  <img data-lightbox-image alt="">
+  <button class="dialog-nav next" type="button" data-lightbox-next aria-label="Next screenshot">›</button>
+  <div class="dialog-count" data-lightbox-count></div>
+</dialog>
+<dialog id="video-player" class="media-dialog video-dialog" aria-label="Video player">
+  <form method="dialog"><button class="dialog-close" aria-label="Close video player">×</button></form>
+  <div class="video-frame" data-video-frame></div>
+</dialog>
+{{end}}
 
 {{if .Game.Editions}}
 <section class="section">
@@ -112,12 +146,13 @@
 {{end}}
 
 <section class="section">
-  <div class="section-head"><h2>Reviews</h2><a class="more" href="/games/{{.Game.Slug}}/reviews">All {{.ReviewTotal}} →</a></div>
+  <div class="section-head"><h2>Reviews</h2>{{if gt .ReviewTotal 0}}<a class="more" href="/games/{{.Game.Slug}}/reviews">All {{.ReviewTotal}} →</a>{{end}}</div>
   {{if .Reviews}}
     {{range .Reviews}}<div class="review-card mb1">
       <div class="log-head">{{if .User}}<a href="/users/{{.User.Username}}">{{.User.Username}}</a>{{end}} {{stars .Rating 5}} {{timeago .CreatedAt}}</div>
       {{if .Name}}<h3 class="mt1"><a href="{{reviewPath .}}">{{.Name}}</a></h3>{{end}}
-      <div class="prose">{{truncate (plain .Review) 420}}</div>
+      {{template "review_preview" .}}
+      {{template "review_actions" .}}
     </div>{{end}}
   {{else}}<div class="empty">No reviews yet. {{if .LoggedIn}}<a href="/games/{{.Game.Slug}}/log?review=1">Write the first one</a>.{{end}}</div>{{end}}
 </section>

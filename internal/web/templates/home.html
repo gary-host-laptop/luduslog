@@ -47,9 +47,10 @@
   {{range .Reviews}}
     <article class="review-card">
       <div class="log-head">{{if .User}}<a href="/users/{{.User.Username}}">{{.User.Username}}</a>{{end}} {{stars .Rating 5}} <span>{{timeago .CreatedAt}}</span></div>
-      {{if .Name}}<h3 class="mt1"><a href="{{reviewPath .}}">{{.Name}}</a></h3>{{end}}
+      {{if .Name}}<h3 class="mt1">{{if .Review}}<a href="{{reviewPath .}}">{{.Name}}</a>{{else}}{{.Name}}{{end}}</h3>{{end}}
       {{if .Game}}<div class="muted"><a href="/games/{{.Game.Slug}}">{{.Game.Title}}</a></div>{{end}}
-      <div class="prose mt1">{{truncate (plain .Review) 260}}</div>
+      {{template "review_preview" .}}
+      {{template "review_actions" .}}
     </article>
   {{end}}
   </div>

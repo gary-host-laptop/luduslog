@@ -1,18 +1,16 @@
 {{define "content"}}
 <h1>Search</h1>
-<form method="get" action="/search" class="row mb2">
-  <input type="search" name="q" value="{{.Q}}" placeholder="Games, people, lists…" style="max-width:420px" autofocus>
-  <button class="btn btn-primary" type="submit">Search</button>
-</form>
 {{if .Q}}
+<div class="tabs">
+  <a href="/search?q={{urlquery .Q}}&tab=games" class="{{if eq .Tab "games"}}on{{end}}">Games</a>
+  <a href="/search?q={{urlquery .Q}}&tab=reviews" class="{{if eq .Tab "reviews"}}on{{end}}">Reviews</a>
+  <a href="/search?q={{urlquery .Q}}&tab=people" class="{{if eq .Tab "people"}}on{{end}}">People</a>
+  <a href="/search?q={{urlquery .Q}}&tab=lists" class="{{if eq .Tab "lists"}}on{{end}}">Lists</a>
+</div>
+
+{{if eq .Tab "games"}}
   {{if .Games}}
-  <section class="section" style="margin-top:0"><div class="section-head"><h2>Games</h2><span class="muted">{{.Total}} matches</span></div>{{template "game_grid" .Games}}</section>
-  {{end}}
-  {{if .Users}}
-  <section class="section"><div class="section-head"><h2>People</h2></div><div class="card">{{range .Users}}{{template "user_row" .}}{{end}}</div></section>
-  {{end}}
-  {{if .Lists}}
-  <section class="section"><div class="section-head"><h2>Lists</h2></div><div class="grid grid-2">{{range .Lists}}<a class="list-card" href="/users/{{.User.Username}}/lists/{{.Slug}}"><div><h3>{{.Title}}</h3><div class="muted">{{.User.Username}}</div></div></a>{{end}}</div></section>
+  <section class="section" style="margin-top:0"><div class="section-head"><h2>Games</h2><span class="muted">{{.Total}} matches</span></div>{{template "game_grid" .Games}}{{template "pager" .}}</section>
   {{end}}
   {{if .Remote}}
   <section class="section"><div class="section-head"><h2>Add from IGDB</h2><span class="muted">Not in the local catalog yet</span></div>
@@ -29,10 +27,47 @@
     </div>
   </section>
   {{end}}
-  {{if and (not .Games) (not .Remote) (not .Users) (not .Lists)}}
-  <div class="empty"><h3>No results for “{{.Q}}”</h3><p>Try a different spelling, or <a href="/games">browse the catalog</a>.</p></div>
+  {{if and (not .Games) (not .Remote)}}
+  <div class="empty"><h3>No games for “{{.Q}}”</h3><p>Try another spelling, or search <a href="/search?q={{urlquery .Q}}&tab=reviews">reviews</a>, <a href="/search?q={{urlquery .Q}}&tab=people">people</a>, or <a href="/search?q={{urlquery .Q}}&tab=lists">lists</a>.</p></div>
+  {{end}}
+{{else if eq .Tab "reviews"}}
+  {{if .Reviews}}
+  <section class="section" style="margin-top:0"><div class="section-head"><h2>Reviews</h2><span class="muted">{{.Total}} matches</span></div>
+    {{range .Reviews}}<div class="review-card mb1">
+      <div class="log-head">
+        {{if .User}}<a href="/users/{{.User.Username}}"><img class="avatar avatar-sm" src="{{avatar .User}}" alt=""> {{.User.Username}}</a>{{end}}
+        {{stars .Rating 5}} <span>{{timeago .CreatedAt}}</span>
+        {{if .Game}}<span class="muted">· <a href="/games/{{.Game.Slug}}">{{.Game.Title}}</a></span>{{end}}
+      </div>
+      {{if .Name}}<h2 class="mt1" style="font-size:1.15rem"><a href="{{reviewPath .}}">{{.Name}}</a></h2>{{end}}
+      {{if .Spoiler}}<div class="mt1"><span class="pill">Spoiler review</span></div>{{else}}{{template "review_preview" .}}{{end}}
+      {{template "review_actions" .}}
+    </div>{{end}}
+    {{template "pager" .}}
+  </section>
+  {{else}}
+  <div class="empty"><h3>No reviews for “{{.Q}}”</h3><p>Try <a href="/search?q={{urlquery .Q}}&tab=games">games</a>, <a href="/search?q={{urlquery .Q}}&tab=people">people</a>, or <a href="/search?q={{urlquery .Q}}&tab=lists">lists</a>.</p></div>
+  {{end}}
+{{else if eq .Tab "people"}}
+  {{if .Users}}
+  <section class="section" style="margin-top:0"><div class="section-head"><h2>People</h2><span class="muted">{{.Total}} matches</span></div><div class="card">{{range .Users}}{{template "user_row" .}}{{end}}</div>{{template "pager" .}}</section>
+  {{else}}
+  <div class="empty"><h3>No people for “{{.Q}}”</h3><p>Try <a href="/search?q={{urlquery .Q}}&tab=games">games</a>, <a href="/search?q={{urlquery .Q}}&tab=reviews">reviews</a>, or <a href="/search?q={{urlquery .Q}}&tab=lists">lists</a>.</p></div>
   {{end}}
 {{else}}
-  <p class="muted">Search across game titles, alternate names, people and lists.</p>
+  {{if .Lists}}
+  <section class="section" style="margin-top:0"><div class="section-head"><h2>Lists</h2><span class="muted">{{.Total}} matches</span></div><div class="grid grid-2">{{range .Lists}}<a class="list-card" href="/users/{{.User.Username}}/lists/{{.Slug}}"><div><h3>{{.Title}}</h3><div class="muted">{{.User.Username}}</div></div></a>{{end}}</div>{{template "pager" .}}</section>
+  {{else}}
+  <div class="empty"><h3>No lists for “{{.Q}}”</h3><p>Try <a href="/search?q={{urlquery .Q}}&tab=games">games</a>, <a href="/search?q={{urlquery .Q}}&tab=reviews">reviews</a>, or <a href="/search?q={{urlquery .Q}}&tab=people">people</a>.</p></div>
+  {{end}}
+{{end}}
+{{else}}
+  <div class="tabs">
+    <a href="/search?tab=games" class="{{if eq .Tab "games"}}on{{end}}">Games</a>
+    <a href="/search?tab=reviews" class="{{if eq .Tab "reviews"}}on{{end}}">Reviews</a>
+    <a href="/search?tab=people" class="{{if eq .Tab "people"}}on{{end}}">People</a>
+    <a href="/search?tab=lists" class="{{if eq .Tab "lists"}}on{{end}}">Lists</a>
+  </div>
+  <p class="muted">Use the search bar above to search games, reviews, people and lists.</p>
 {{end}}
 {{end}}

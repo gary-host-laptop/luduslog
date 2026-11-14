@@ -229,17 +229,24 @@ func (s *Store) LogsForGame(ctx context.Context, gameID, viewerID int64, limit, 
 	if err != nil {
 		return nil, 0, err
 	}
-	defer rows.Close()
 	var out []*models.Log
 	for rows.Next() {
 		l, err := scanLog(rows)
 		if err != nil {
+			rows.Close()
 			return nil, 0, err
 		}
-		s.hydrateLog(ctx, l)
 		out = append(out, l)
 	}
-	return out, total, rows.Err()
+	err = rows.Err()
+	rows.Close()
+	if err != nil {
+		return nil, 0, err
+	}
+	for _, l := range out {
+		s.hydrateLog(ctx, l)
+	}
+	return out, total, nil
 }
 
 // ReviewsForGame lists only reviews (not bare logs).
@@ -250,11 +257,15 @@ func (s *Store) ReviewsForGame(ctx context.Context, gameID int64, sortKey string
 	order := "l.updated_at DESC"
 	switch sortKey {
 	case "rating":
-		order = "l.rating DESC, l.updated_at DESC"
+		order = "l.rating DESC, l.updated_at DESC, l.id DESC"
 	case "likes":
-		order = "(SELECT COUNT(*) FROM log_likes ll WHERE ll.log_id=l.id) DESC, l.updated_at DESC"
+		order = "(SELECT COUNT(*) FROM log_likes ll WHERE ll.log_id=l.id) DESC, l.updated_at DESC, l.id DESC"
 	case "oldest":
-		order = "l.created_at ASC"
+		order = "l.created_at ASC, l.id ASC"
+	case "new":
+		order = "l.updated_at DESC, l.id DESC"
+	default:
+		order = "l.updated_at DESC, l.id DESC"
 	}
 	rows, err := s.DB.QueryContext(ctx, `SELECT `+logCols+` FROM logs l JOIN users u ON u.id=l.user_id
 		WHERE l.game_id=? AND l.review<>'' AND l.draft=0 AND l.deleted_at IS NULL AND u.private_profile=0
@@ -262,17 +273,24 @@ func (s *Store) ReviewsForGame(ctx context.Context, gameID int64, sortKey string
 	if err != nil {
 		return nil, 0, err
 	}
-	defer rows.Close()
 	var out []*models.Log
 	for rows.Next() {
 		l, err := scanLog(rows)
 		if err != nil {
+			rows.Close()
 			return nil, 0, err
 		}
-		s.hydrateLog(ctx, l)
 		out = append(out, l)
 	}
-	return out, total, rows.Err()
+	err = rows.Err()
+	rows.Close()
+	if err != nil {
+		return nil, 0, err
+	}
+	for _, l := range out {
+		s.hydrateLog(ctx, l)
+	}
+	return out, total, nil
 }
 
 // ReviewsFeed is the global reviews page, filtered by feed tabs.
@@ -301,17 +319,85 @@ func (s *Store) ReviewsFeed(ctx context.Context, viewerID int64, tab string, gam
 	if err != nil {
 		return nil, 0, err
 	}
-	defer rows.Close()
 	var out []*models.Log
 	for rows.Next() {
 		l, err := scanLog(rows)
 		if err != nil {
+			rows.Close()
 			return nil, 0, err
 		}
-		s.hydrateLog(ctx, l)
 		out = append(out, l)
 	}
-	return out, total, rows.Err()
+	err = rows.Err()
+	rows.Close()
+	if err != nil {
+		return nil, 0, err
+	}
+	for _, l := range out {
+		s.hydrateLog(ctx, l)
+	}
+	return out, total, nil
+}
+
+// SearchReviews searches published review titles and bodies, plus the game
+// title so a game-name query finds reviews of that game.
+func (s *Store) SearchReviews(ctx context.Context, q string, limit, offset int, includeAdult bool) ([]*models.Log, int, error) {
+	if strings.TrimSpace(q) == "" {
+		return nil, 0, nil
+	}
+	conds := []string{
+		"l.review<>''", "l.draft=0", "l.deleted_at IS NULL",
+		"u.private_profile=0", "u.deactivated_at IS NULL",
+	}
+	args := []any{}
+	match := ftsQuery(q)
+	title := "%" + escapeLike(q) + "%"
+	if match != "" {
+		conds = append(conds, `(l.id IN (SELECT rowid FROM logs_fts WHERE logs_fts MATCH ?) OR g.title LIKE ? ESCAPE '\')`)
+		args = append(args, match, title)
+	} else {
+		conds = append(conds, `g.title LIKE ? ESCAPE '\'`)
+		args = append(args, title)
+	}
+	if !includeAdult {
+		conds = append(conds, "g.adult=0")
+	}
+	where := " WHERE " + strings.Join(conds, " AND ")
+	from := ` FROM logs l JOIN users u ON u.id=l.user_id JOIN games g ON g.id=l.game_id`
+	var total int
+	if err := s.DB.QueryRowContext(ctx, `SELECT COUNT(*)`+from+where, args...).Scan(&total); err != nil {
+		return nil, 0, err
+	}
+	rows, err := s.DB.QueryContext(ctx, `SELECT `+logCols+from+where+`
+		ORDER BY l.updated_at DESC, l.id DESC LIMIT ? OFFSET ?`, append(args, limit, offset)...)
+	if err != nil {
+		return nil, 0, err
+	}
+	var out []*models.Log
+	for rows.Next() {
+		l, err := scanLog(rows)
+		if err != nil {
+			rows.Close()
+			return nil, 0, err
+		}
+		out = append(out, l)
+	}
+	err = rows.Err()
+	rows.Close()
+	if err != nil {
+		return nil, 0, err
+	}
+	for _, l := range out {
+		s.hydrateLog(ctx, l)
+	}
+	return out, total, nil
+}
+
+func escapeLike(s string) string {
+	s = strings.ReplaceAll(s, `\`, `\\`)
+	s = strings.ReplaceAll(s, `%`, `\%`)
+	s = strings.ReplaceAll(s, `_`, `\_`)
+	return s
 }
 
 // UserLogs returns a user's journal respecting profile privacy for viewers.
@@ -327,17 +413,24 @@ func (s *Store) UserLogs(ctx context.Context, userID int64, hasReview bool, limi
 	if err != nil {
 		return nil, 0, err
 	}
-	defer rows.Close()
 	var out []*models.Log
 	for rows.Next() {
 		l, err := scanLog(rows)
 		if err != nil {
+			rows.Close()
 			return nil, 0, err
 		}
-		s.hydrateLog(ctx, l)
 		out = append(out, l)
 	}
-	return out, total, rows.Err()
+	err = rows.Err()
+	rows.Close()
+	if err != nil {
+		return nil, 0, err
+	}
+	for _, l := range out {
+		s.hydrateLog(ctx, l)
+	}
+	return out, total, nil
 }
 
 func (s *Store) DraftsFor(ctx context.Context, userID int64) ([]*models.Log, error) {
@@ -345,17 +438,24 @@ func (s *Store) DraftsFor(ctx context.Context, userID int64) ([]*models.Log, err
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
 	var out []*models.Log
 	for rows.Next() {
 		l, err := scanLog(rows)
 		if err != nil {
+			rows.Close()
 			return nil, err
 		}
-		s.hydrateLog(ctx, l)
 		out = append(out, l)
 	}
-	return out, rows.Err()
+	err = rows.Err()
+	rows.Close()
+	if err != nil {
+		return nil, err
+	}
+	for _, l := range out {
+		s.hydrateLog(ctx, l)
+	}
+	return out, nil
 }
 
 func (s *Store) LikeLog(ctx context.Context, logID, userID int64, like bool) error {

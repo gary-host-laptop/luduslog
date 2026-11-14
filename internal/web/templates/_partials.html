@@ -12,6 +12,18 @@
 </div>
 {{end}}
 
+{{define "review_preview"}}
+{{if .Review}}
+<div class="prose review-preview">{{if .Spoiler}}<details><summary>This review contains spoilers</summary>{{truncate (plain .Review) 500}}</details>{{else}}{{truncate (plain .Review) 500}}{{end}}</div>
+{{end}}
+{{end}}
+
+{{define "review_actions"}}
+{{if .Review}}
+<div class="log-actions"><a href="{{reviewPath .}}">Read more →</a><span>{{.Likes}} likes</span><span>{{.CommentCount}} comments</span></div>
+{{end}}
+{{end}}
+
 {{define "log_row"}}
 <article class="log-entry">
   {{if .Game}}<a href="/games/{{.Game.Slug}}"><img class="game-cover" loading="lazy" src="{{cover .Game}}" alt=""></a>{{end}}
@@ -24,13 +36,10 @@
       {{if .Spoiler}}<span class="pill">Spoilers</span>{{end}}
       <span class="pill">{{.Status}}</span>
     </div>
-    {{if .Name}}<div class="log-title"><a href="{{reviewPath .}}">{{.Name}}</a></div>{{end}}
+    {{if .Name}}<div class="log-title">{{if .Review}}<a href="{{reviewPath .}}">{{.Name}}</a>{{else}}{{.Name}}{{end}}</div>{{end}}
     {{if .Game}}<div class="muted"><a href="/games/{{.Game.Slug}}">{{.Game.Title}}</a>{{if .PlatformName}} · {{.PlatformName}}{{end}}{{if .Playtime}} · {{hours .Playtime}}{{end}}</div>{{end}}
-    {{if .Review}}<div class="prose">{{if .Spoiler}}<details><summary>This review contains spoilers</summary>{{md .Review}}</details>{{else}}{{md .Review}}{{end}}</div>{{end}}
-    <div class="log-actions">
-      <a href="{{reviewPath .}}">Permalink</a>
-      {{if .Review}}<span>{{.Likes}} likes</span>{{end}}
-    </div>
+    {{template "review_preview" .}}
+    {{template "review_actions" .}}
   </div>
 </article>
 {{end}}

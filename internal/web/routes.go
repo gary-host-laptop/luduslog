@@ -11,6 +11,7 @@ func (s *Server) routes() {
 	m.HandleFunc("GET /{$}", s.home)
 	m.HandleFunc("GET /games", s.gamesIndex)
 	m.HandleFunc("GET /games/{slug}", s.gamePage)
+	m.HandleFunc("GET /games/{slug}/reviews", s.gameReviews)
 	m.HandleFunc("GET /reviews", s.reviewsPage)
 	m.HandleFunc("GET /reviews/{id}", s.reviewByID)
 	m.HandleFunc("GET /lists", s.listsDiscover)

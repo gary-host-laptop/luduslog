@@ -76,4 +76,88 @@
     var target = document.getElementById(btn.getAttribute("data-spoiler-toggle"));
     if (target) target.hidden = !target.hidden;
   });
+
+  // Account menu: native details handles opening and keyboard use. Close it
+  // when clicking elsewhere or pressing Escape.
+  function closeUserMenus(except) {
+    document.querySelectorAll(".user-menu[open]").forEach(function (menu) {
+      if (menu !== except) menu.removeAttribute("open");
+    });
+  }
+  document.addEventListener("click", function (evt) {
+    var menu = evt.target.closest(".user-menu");
+    closeUserMenus(menu);
+  });
+  document.addEventListener("keydown", function (evt) {
+    if (evt.key !== "Escape") return;
+    var open = document.querySelector(".user-menu[open]");
+    if (!open) return;
+    open.removeAttribute("open");
+    var summary = open.querySelector("summary");
+    if (summary) summary.focus();
+  });
+
+  // Screenshot lightbox. Without dialog support the thumbnail links open the
+  // full image in a new tab exactly as they do without JavaScript.
+  var lightbox = document.getElementById("screenshot-lightbox");
+  var shots = Array.prototype.slice.call(document.querySelectorAll("[data-lightbox]"));
+  if (lightbox && lightbox.showModal && shots.length) {
+    var lightboxImg = lightbox.querySelector("[data-lightbox-image]");
+    var lightboxCount = lightbox.querySelector("[data-lightbox-count]");
+    var shotIndex = 0;
+    function showShot(index) {
+      shotIndex = (index + shots.length) % shots.length;
+      var link = shots[shotIndex];
+      lightboxImg.src = link.getAttribute("data-full") || link.href;
+      lightboxImg.alt = link.getAttribute("data-alt") || "Screenshot";
+      lightboxCount.textContent = (shotIndex + 1) + " / " + shots.length;
+    }
+    shots.forEach(function (link, index) {
+      link.addEventListener("click", function (evt) {
+        evt.preventDefault();
+        showShot(index);
+        lightbox.showModal();
+      });
+    });
+    lightbox.querySelector("[data-lightbox-prev]").addEventListener("click", function () { showShot(shotIndex - 1); });
+    lightbox.querySelector("[data-lightbox-next]").addEventListener("click", function () { showShot(shotIndex + 1); });
+    lightbox.addEventListener("click", function (evt) {
+      if (evt.target === lightbox) lightbox.close();
+    });
+    lightbox.addEventListener("keydown", function (evt) {
+      if (evt.key === "ArrowLeft") { evt.preventDefault(); showShot(shotIndex - 1); }
+      if (evt.key === "ArrowRight") { evt.preventDefault(); showShot(shotIndex + 1); }
+    });
+    lightbox.addEventListener("close", function () {
+      lightboxImg.removeAttribute("src");
+      lightboxImg.alt = "";
+    });
+  }
+
+  // No-cookie video player: the iframe is created only after a click, and
+  // removed on close so playback stops and no further requests are made.
+  var videoDialog = document.getElementById("video-player");
+  var videoLinks = document.querySelectorAll("[data-video-id]");
+  if (videoDialog && videoDialog.showModal && videoLinks.length) {
+    var videoFrame = videoDialog.querySelector("[data-video-frame]");
+    videoLinks.forEach(function (link) {
+      link.addEventListener("click", function (evt) {
+        evt.preventDefault();
+        var frame = document.createElement("iframe");
+        frame.src = "https://www.youtube-nocookie.com/embed/" + encodeURIComponent(link.getAttribute("data-video-id")) + "?autoplay=1&rel=0";
+        frame.title = link.textContent.trim();
+        frame.allow = "autoplay; encrypted-media; picture-in-picture";
+        frame.setAttribute("allowfullscreen", "");
+        frame.setAttribute("referrerpolicy", "strict-origin-when-cross-origin");
+        videoFrame.replaceChildren(frame);
+        videoDialog.showModal();
+      });
+    });
+    videoDialog.addEventListener("click", function (evt) {
+      if (evt.target === videoDialog) videoDialog.close();
+    });
+    videoDialog.addEventListener("close", function () {
+      videoFrame.replaceChildren();
+    });
+  }
 })();

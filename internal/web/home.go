@@ -262,14 +262,16 @@ func (s *Server) gamePage(w http.ResponseWriter, r *http.Request) {
 
 type reviewsData struct {
 	Page
-	Reviews  []*models.Log
-	Total    int
-	Tab      string
-	PageNum  int
-	Pages    int
-	Base     string
-	Game     *models.Game
-	LoggedIn bool
+	Reviews   []*models.Log
+	Total     int
+	Tab       string
+	Sort      string
+	PageNum   int
+	Pages     int
+	Base      string
+	BaseQuery string
+	Game      *models.Game
+	LoggedIn  bool
 }
 
 func (s *Server) reviewsPage(w http.ResponseWriter, r *http.Request) {
@@ -291,31 +293,72 @@ func (s *Server) reviewsPage(w http.ResponseWriter, r *http.Request) {
 		s.serverError(w, r, err)
 		return
 	}
+	base := url.Values{"tab": {tab}}
 	data := reviewsData{
-		Page:     s.page(r, "Reviews"),
-		Reviews:  reviews,
-		Total:    total,
-		Tab:      tab,
-		PageNum:  page,
-		Pages:    (total + 29) / 30,
-		LoggedIn: u != nil,
+		Page:      s.page(r, "Reviews"),
+		Reviews:   reviews,
+		Total:     total,
+		Tab:       tab,
+		PageNum:   page,
+		Pages:     (total + 29) / 30,
+		Base:      "/reviews",
+		BaseQuery: base.Encode(),
+		LoggedIn:  u != nil,
 	}
 	s.render(w, r, "reviews", data)
 }
 
-func (s *Server) reviewsByGame(w http.ResponseWriter, r *http.Request, g *models.Game) {
+func (s *Server) gameReviews(w http.ResponseWriter, r *http.Request) {
+	g, err := s.st.GameBySlug(r.Context(), r.PathValue("slug"))
+	if err == store.ErrNotFound {
+		s.notFound(w, r)
+		return
+	}
+	if err != nil {
+		s.serverError(w, r, err)
+		return
+	}
+	u := currentUser(r)
+	if g.Adult && (u == nil || !u.AdultOptIn) {
+		s.render(w, r, "adult_gate", struct {
+			Page
+			Game *models.Game
+		}{s.page(r, g.Title), g})
+		return
+	}
+	sortKey := r.URL.Query().Get("sort")
+	storeSort := "likes"
+	switch sortKey {
+	case "newest":
+		storeSort = "new"
+	case "rating":
+		storeSort = "rating"
+	case "oldest":
+		storeSort = "oldest"
+	default:
+		sortKey = "popular"
+	}
 	page := atoi(r.URL.Query().Get("page"))
 	if page < 1 {
 		page = 1
 	}
-	reviews, total, _ := s.st.ReviewsForGame(r.Context(), g.ID, r.URL.Query().Get("sort"), 20, (page-1)*20)
+	reviews, total, err := s.st.ReviewsForGame(r.Context(), g.ID, storeSort, 20, (page-1)*20)
+	if err != nil {
+		s.serverError(w, r, err)
+		return
+	}
+	base := url.Values{"sort": {sortKey}}
 	data := reviewsData{
-		Page:    s.page(r, "Reviews of "+g.Title),
-		Reviews: reviews,
-		Total:   total,
-		Game:    g,
-		PageNum: page,
-		Pages:   (total + 19) / 20,
+		Page:      s.page(r, "Reviews of "+g.Title),
+		Reviews:   reviews,
+		Total:     total,
+		Sort:      sortKey,
+		Game:      g,
+		PageNum:   page,
+		Pages:     (total + 19) / 20,
+		Base:      "/games/" + g.Slug + "/reviews",
+		BaseQuery: base.Encode(),
+		LoggedIn:  u != nil,
 	}
 	s.render(w, r, "reviews", data)
 }
@@ -330,26 +373,60 @@ func (s *Server) listsDiscover(w http.ResponseWriter, r *http.Request) {
 
 type searchData struct {
 	Page
-	Q      string
-	Games  []models.Game
-	Remote []models.Game
-	Users  []*models.User
-	Lists  []models.List
-	Total  int
+	Q         string
+	Tab       string
+	PageNum   int
+	Pages     int
+	Total     int
+	BaseQuery string
+	Games     []models.Game
+	Remote    []models.Game
+	Users     []*models.User
+	Lists     []models.List
+	Reviews   []*models.Log
 }
 
 func (s *Server) searchPage(w http.ResponseWriter, r *http.Request) {
-	q := strings.TrimSpace(r.URL.Query().Get("q"))
+	query := r.URL.Query()
+	q := strings.TrimSpace(query.Get("q"))
+	tab := query.Get("tab")
+	switch tab {
+	case "games", "reviews", "people", "lists":
+	default:
+		tab = "games"
+	}
+	page := atoi(query.Get("page"))
+	if page < 1 {
+		page = 1
+	}
 	u := currentUser(r)
 	includeAdult := u != nil && u.AdultOptIn
-	data := searchData{Page: s.page(r, "Search"), Q: q}
+	data := searchData{Page: s.page(r, "Search"), Q: q, Tab: tab, PageNum: page}
+	data.SearchTab = tab
+	base := url.Values{"q": {q}, "tab": {tab}}
+	data.BaseQuery = base.Encode()
 	if q != "" {
+		const limit = 30
+		offset := (page - 1) * limit
 		var total int
-		data.Games, total, _ = s.st.SearchGames(r.Context(), q, 30, 0, includeAdult)
+		var err error
+		switch tab {
+		case "reviews":
+			data.Reviews, total, err = s.st.SearchReviews(r.Context(), q, limit, offset, includeAdult)
+		case "people":
+			data.Users, total, err = s.st.SearchUsers(r.Context(), q, limit, offset)
+		case "lists":
+			data.Lists, total, err = s.st.SearchLists(r.Context(), q, limit, offset)
+		default:
+			data.Games, total, err = s.st.SearchGames(r.Context(), q, limit, offset, includeAdult)
+		}
+		if err != nil {
+			s.serverError(w, r, err)
+			return
+		}
 		data.Total = total
-		data.Users, _ = s.st.SearchUsers(r.Context(), q, 10)
-		data.Lists, _ = s.st.SearchLists(r.Context(), q, 10)
-		if len(data.Games) == 0 && s.igdb != nil {
+		data.Pages = (total + limit - 1) / limit
+		if tab == "games" && page == 1 && total == 0 && s.igdb != nil {
 			data.Remote, _ = s.igdb.Search(r.Context(), q, 6)
 		}
 	}
