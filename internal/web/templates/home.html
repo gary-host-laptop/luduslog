@@ -1,0 +1,90 @@
+{{define "content"}}
+{{if .User}}
+<section class="section" style="margin-top:0">
+  <div class="section-head"><h2>Welcome back, {{.User.Username}}</h2><a class="more" href="/library">Your library →</a></div>
+</section>
+{{else}}
+<section class="card" style="margin-top:0;padding:2rem">
+  <h1 style="font-size:2.1rem;max-width:22ch">Every game you play, kept in one place — and shared on your terms.</h1>
+  <p class="muted" style="max-width:60ch">Rate and review games, keep a journal of play sessions, build ranked lists, follow friends, and publish to the fediverse over ActivityPub. No ads, no tracking, no JavaScript required.</p>
+  <div class="btn-group mt1"><a class="btn btn-primary" href="/register">Create an account</a><a class="btn" href="/games">Browse games</a></div>
+</section>
+{{end}}
+
+{{if .News}}
+<section class="section">
+  <div class="section-head"><h2>Instance news</h2></div>
+  {{range .News}}<div class="card mb1"><h3>{{.Title}}</h3><div class="muted">{{timeago .CreatedAt}}</div><div class="prose mt1">{{md .Body}}</div></div>{{end}}
+</section>
+{{end}}
+
+{{if .Trending}}
+<section class="section">
+  <div class="section-head"><h2>Trending this week</h2><a class="more" href="/games?sort=trending">All games →</a></div>
+  {{template "game_grid" .Trending}}
+</section>
+{{end}}
+
+<div class="grid grid-2">
+  {{if .Sleepers}}
+  <section class="section">
+    <div class="section-head"><h2>Sleeper hits</h2></div>
+    {{template "game_grid" .Sleepers}}
+  </section>
+  {{end}}
+  {{if .Anticipated}}
+  <section class="section">
+    <div class="section-head"><h2>Recently anticipated</h2></div>
+    {{template "game_grid" .Anticipated}}
+  </section>
+  {{end}}
+</div>
+
+{{if .Reviews}}
+<section class="section">
+  <div class="section-head"><h2>Latest reviews</h2><a class="more" href="/reviews">All reviews →</a></div>
+  <div class="grid grid-2">
+  {{range .Reviews}}
+    <article class="review-card">
+      <div class="log-head">{{if .User}}<a href="/users/{{.User.Username}}">{{.User.Username}}</a>{{end}} {{stars .Rating 5}} <span>{{timeago .CreatedAt}}</span></div>
+      {{if .Name}}<h3 class="mt1"><a href="{{reviewPath .}}">{{.Name}}</a></h3>{{end}}
+      {{if .Game}}<div class="muted"><a href="/games/{{.Game.Slug}}">{{.Game.Title}}</a></div>{{end}}
+      <div class="prose mt1">{{truncate (plain .Review) 260}}</div>
+    </article>
+  {{end}}
+  </div>
+</section>
+{{end}}
+
+{{if .Lists}}
+<section class="section">
+  <div class="section-head"><h2>Popular lists</h2><a class="more" href="/lists">All lists →</a></div>
+  <div class="grid grid-2">
+  {{range .Lists}}
+    <a class="list-card" href="/users/{{.User.Username}}/lists/{{.Slug}}">
+      <div class="list-thumbs">{{range .Entries}}<img src="{{cover .Game}}" alt="">{{end}}</div>
+      <div><h3>{{.Title}}</h3><div class="muted">{{if .User}}{{.User.Username}}{{end}} · {{.Likes}} likes</div></div>
+    </a>
+  {{end}}
+  </div>
+</section>
+{{end}}
+
+{{if .Feed}}
+<section class="section">
+  <div class="section-head"><h2>From people you follow</h2></div>
+  <div class="card">
+  {{range .Feed}}
+    <div class="feed-item">
+      <img class="avatar avatar-sm" src="/static/avatar.svg" alt="">
+      <div class="grow"><a href="/users/{{.User.Username}}">{{.User.Username}}</a>
+        {{if eq .Type "log"}}logged{{else if eq .Type "liked"}}liked{{else if eq .Type "status"}}updated a status for{{else if eq .Type "list_add"}}added a game to a list{{else}}shared{{end}}
+        {{if .Game}}<a href="/games/{{.Game.Slug}}">{{.Game.Title}}</a>{{end}}
+      </div>
+      <span class="feed-time">{{timeago .CreatedAt}}</span>
+    </div>
+  {{end}}
+  </div>
+</section>
+{{end}}
+{{end}}

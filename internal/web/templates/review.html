@@ -1,0 +1,57 @@
+{{define "content"}}
+{{with .Log}}
+<article class="card">
+  <div class="log-head">
+    <a href="/users/{{.User.Username}}"><img class="avatar avatar-md" src="{{avatar .User}}" alt=""> <strong>{{.User.Username}}</strong></a>
+    <span>{{timeago .CreatedAt}}</span>
+    {{if .Spoiler}}<span class="pill">Spoilers</span>{{end}}
+  </div>
+  {{if .Game}}
+  <div class="row mt2" style="align-items:flex-start;gap:1.2rem">
+    <a href="/games/{{.Game.Slug}}" style="flex:none"><img src="{{cover .Game}}" alt="" style="width:110px;border-radius:8px"></a>
+    <div>
+      <h1 style="margin-bottom:.15rem">{{if .Name}}{{.Name}}{{else}}Review of {{.Game.Title}}{{end}}</h1>
+      <div class="muted"><a href="/games/{{.Game.Slug}}">{{.Game.Title}}</a>{{if .PlatformName}} · {{.PlatformName}}{{end}}{{if .Playtime}} · {{hours .Playtime}}{{end}}</div>
+      <div class="mt1">{{stars .Rating 5}} <span class="muted">{{rating .Rating 10}}/10</span> · <span class="pill">{{.Status}}</span></div>
+    </div>
+  </div>
+  {{else}}<h1 class="mt2">{{.Name}}</h1>{{end}}
+  <div class="prose mt2">{{if .Spoiler}}<details open><summary>Spoiler warning</summary>{{md .Review}}</details>{{else}}{{md .Review}}{{end}}</div>
+  <div class="log-actions">
+    {{if $.Liked}}<form method="post" action="/logs/{{.ID}}/like"><input type="hidden" name="_csrf" value="{{$.CSRF}}"><button class="linklike on" type="submit">♥ Liked · {{$.Likes}}</button></form>
+    {{else if $.CanReply}}<form method="post" action="/logs/{{.ID}}/like"><input type="hidden" name="_csrf" value="{{$.CSRF}}"><button class="linklike" type="submit">♥ Like · {{$.Likes}}</button></form>
+    {{else}}<span>♥ {{$.Likes}}</span>{{end}}
+    {{if $.IsOwner}}
+      <a href="/logs/{{.ID}}/edit">Edit</a>
+      <a href="/logs/{{.ID}}/sessions">Sessions</a>
+      <form method="post" action="/logs/{{.ID}}/delete" onsubmit="return confirm('Delete this log?')"><input type="hidden" name="_csrf" value="{{$.CSRF}}"><button class="linklike" type="submit">Delete</button></form>
+    {{end}}
+  </div>
+</article>
+{{end}}
+
+<section class="section">
+  <div class="section-head"><h2>Comments</h2><span class="muted">{{len .Comments}}</span></div>
+  <div class="card">
+    {{range .Comments}}{{template "comment" .}}{{else}}<div class="muted">No comments yet.</div>{{end}}
+  </div>
+  {{if .CanReply}}
+  <form class="card mt1 stack" method="post" action="/comments">
+    <input type="hidden" name="_csrf" value="{{.CSRF}}">
+    <input type="hidden" name="subject_type" value="log">
+    <input type="hidden" name="subject_id" value="{{.Log.ID}}">
+    <input type="hidden" name="return_to" value="{{.Path}}">
+    <label for="comment-body">Add a comment</label>
+    <textarea id="comment-body" name="body" rows="3" required maxlength="5000" placeholder="Be kind. Markdown works."></textarea>
+    <div><button class="btn btn-primary" type="submit">Post comment</button></div>
+  </form>
+  {{else}}<div class="card mt1"><a href="/login?next={{.Path}}">Log in</a> to join the conversation.</div>{{end}}
+</section>
+
+{{if .MoreBy}}
+<section class="section">
+  <div class="section-head"><h2>More from {{.Log.User.Username}}</h2></div>
+  {{range .MoreBy}}{{template "log_row" .}}{{end}}
+</section>
+{{end}}
+{{end}}

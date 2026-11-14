@@ -1,0 +1,22 @@
+{{define "content"}}
+<div class="section-head"><div><h1 class="mb0">Administration</h1><div class="muted">{{.Instance.Name}} · {{.Instance.BaseURL}}</div></div></div>
+<div class="tabs">
+  <a href="/admin" class="on">Overview</a><a href="/admin/users">Users</a><a href="/admin/reports">Reports</a><a href="/admin/federation">Federation</a><a href="/admin/jobs">Jobs</a><a href="/admin/news">News</a>
+</div>
+<div class="kpi-grid">
+  <div class="kpi"><strong>{{index .Stats "users"}}</strong><span class="muted">accounts</span></div>
+  <div class="kpi"><strong>{{index .Stats "games"}}</strong><span class="muted">games</span></div>
+  <div class="kpi"><strong>{{index .Stats "logs"}}</strong><span class="muted">logs</span></div>
+  <div class="kpi"><strong>{{index .Stats "reviews"}}</strong><span class="muted">reviews</span></div>
+  <div class="kpi"><strong>{{index .Stats "lists"}}</strong><span class="muted">lists</span></div>
+  <div class="kpi"><strong>{{index .Stats "reports"}}</strong><span class="muted">open reports</span></div>
+  <div class="kpi"><strong>{{index .Stats "remote"}}</strong><span class="muted">remote actors</span></div>
+  <div class="kpi"><strong>{{index .Stats "deliveries"}}</strong><span class="muted">retried deliveries</span></div>
+</div>
+<section class="section card">
+  <div class="card-head"><h2>Recent jobs</h2><a href="/admin/jobs">All jobs →</a></div>
+  <div class="table-wrap"><table><thead><tr><th>ID</th><th>Kind</th><th>Run at</th><th>Attempts</th><th>Last error</th></tr></thead><tbody>
+  {{range .Jobs}}<tr><td>{{.ID}}</td><td>{{.Kind}}</td><td>{{.RunAt}}</td><td>{{.Attempts}}</td><td class="muted">{{truncate .LastError 80}}</td></tr>{{else}}<tr><td colspan="5" class="muted">Queue is empty.</td></tr>{{end}}
+  </tbody></table></div>
+</section>
+{{end}}

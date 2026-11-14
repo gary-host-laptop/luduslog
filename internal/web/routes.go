@@ -1,0 +1,111 @@
+package web
+
+func (s *Server) routes() {
+	m := s.mux
+	m.Handle("GET /static/", s.static)
+	m.HandleFunc("GET /healthz", s.health)
+	m.HandleFunc("GET /about", s.about)
+
+	// Discovery
+	m.HandleFunc("GET /{$}", s.home)
+	m.HandleFunc("GET /games", s.gamesIndex)
+	m.HandleFunc("GET /games/{slug}", s.gamePage)
+	m.HandleFunc("GET /reviews", s.reviewsPage)
+	m.HandleFunc("GET /reviews/{id}", s.reviewByID)
+	m.HandleFunc("GET /lists", s.listsDiscover)
+	m.HandleFunc("GET /search", s.searchPage)
+
+	// Auth
+	m.HandleFunc("GET /login", s.loginForm)
+	m.HandleFunc("POST /login", s.loginSubmit)
+	m.HandleFunc("POST /logout", s.logout)
+	m.HandleFunc("GET /register", s.registerForm)
+	m.HandleFunc("POST /register", s.registerSubmit)
+	m.HandleFunc("GET /verify", s.verifyEmail)
+	m.HandleFunc("GET /forgot", s.forgotForm)
+	m.HandleFunc("POST /forgot", s.forgotSubmit)
+	m.HandleFunc("GET /reset", s.resetForm)
+	m.HandleFunc("POST /reset", s.resetSubmit)
+
+	// Users
+	m.HandleFunc("GET /users/{name}", s.profile)
+	m.HandleFunc("GET /users/{name}/reviews/{id}", s.reviewPage)
+	m.HandleFunc("GET /users/{name}/lists/{slug}", s.listPage)
+	m.HandleFunc("GET /users/{name}/stats", s.statsPage)
+	m.HandleFunc("GET /users/{name}/year/{year}", s.yearPage)
+	m.HandleFunc("GET /users/{name}/followers", s.followersRoute)
+	m.HandleFunc("GET /users/{name}/following", s.followingRoute)
+	m.HandleFunc("POST /users/{name}/follow", s.requireUser(s.followUser))
+	m.HandleFunc("POST /users/{name}/unfollow", s.requireUser(s.unfollowUser))
+	m.HandleFunc("POST /users/{name}/block", s.requireUser(s.blockUser))
+	m.HandleFunc("POST /users/{name}/unblock", s.requireUser(s.unblockUser))
+
+	// Statuses & logs
+	m.HandleFunc("POST /games/{slug}/status", s.requireUser(s.setStatus))
+	m.HandleFunc("POST /games/{slug}/like", s.requireUser(s.likeGame))
+	m.HandleFunc("GET /games/{slug}/log", s.requireUser(s.logForm))
+	m.HandleFunc("POST /games/{slug}/log", s.requireUser(s.logSubmit))
+	m.HandleFunc("GET /logs/{id}/edit", s.requireUser(s.logEditForm))
+	m.HandleFunc("POST /logs/{id}/edit", s.requireUser(s.logEdit))
+	m.HandleFunc("POST /logs/{id}/delete", s.requireUser(s.logDelete))
+	m.HandleFunc("POST /logs/{id}/like", s.requireUser(s.likeLog))
+	m.HandleFunc("GET /logs/{id}/sessions", s.requireUser(s.sessionList))
+	m.HandleFunc("POST /logs/{id}/sessions", s.requireUser(s.sessionCreate))
+	m.HandleFunc("POST /sessions/{id}/delete", s.requireUser(s.sessionDelete))
+
+	// Lists
+	m.HandleFunc("GET /lists/new", s.requireUser(s.listForm))
+	m.HandleFunc("POST /lists/new", s.requireUser(s.listCreate))
+	m.HandleFunc("GET /lists/{id}/edit", s.requireUser(s.listEditForm))
+	m.HandleFunc("POST /lists/{id}/edit", s.requireUser(s.listUpdate))
+	m.HandleFunc("POST /lists/{id}/delete", s.requireUser(s.listDelete))
+	m.HandleFunc("POST /lists/{id}/add", s.requireUser(s.listAddGame))
+	m.HandleFunc("POST /lists/{id}/remove", s.requireUser(s.listRemoveGame))
+	m.HandleFunc("POST /lists/{id}/reorder", s.requireUser(s.listReorder))
+	m.HandleFunc("POST /lists/{id}/like", s.requireUser(s.likeList))
+	m.HandleFunc("POST /lists/{id}/folder", s.requireUser(s.listFolderAdd))
+
+	// Social
+	m.HandleFunc("POST /comments", s.requireUser(s.commentCreate))
+	m.HandleFunc("POST /comments/{id}/delete", s.requireUser(s.commentDelete))
+	m.HandleFunc("POST /report", s.requireUser(s.reportCreate))
+	m.HandleFunc("GET /notifications", s.requireUser(s.notificationsPage))
+	m.HandleFunc("POST /notifications/read", s.requireUser(s.notificationsRead))
+
+	// Library & settings
+	m.HandleFunc("GET /library", s.requireUser(s.libraryPage))
+	m.HandleFunc("POST /library", s.requireUser(s.librarySave))
+	m.HandleFunc("POST /library/remove", s.requireUser(s.libraryRemove))
+	m.HandleFunc("GET /settings", s.requireUser(s.settingsPage))
+	m.HandleFunc("POST /settings/profile", s.requireUser(s.settingsProfile))
+	m.HandleFunc("POST /settings/account", s.requireUser(s.settingsAccount))
+	m.HandleFunc("POST /settings/privacy", s.requireUser(s.settingsPrivacy))
+	m.HandleFunc("POST /settings/preferences", s.requireUser(s.settingsPreferences))
+	m.HandleFunc("POST /settings/federation", s.requireUser(s.settingsFederation))
+	m.HandleFunc("POST /settings/deactivate", s.requireUser(s.settingsDeactivate))
+	m.HandleFunc("GET /settings/export", s.requireUser(s.exportData))
+	m.HandleFunc("POST /settings/import", s.requireUser(s.importData))
+	m.HandleFunc("GET /settings/blocks", s.requireUser(s.blocksPage))
+
+	// Admin
+	m.HandleFunc("GET /admin", s.requireAdmin(s.adminHome))
+	m.HandleFunc("GET /admin/users", s.requireAdmin(s.adminUsers))
+	m.HandleFunc("POST /admin/users/{id}/admin", s.requireAdmin(s.adminToggleAdmin))
+	m.HandleFunc("POST /admin/users/{id}/suspend", s.requireAdmin(s.adminSuspend))
+	m.HandleFunc("GET /admin/reports", s.requireAdmin(s.adminReports))
+	m.HandleFunc("POST /admin/reports/{id}", s.requireAdmin(s.adminResolveReport))
+	m.HandleFunc("GET /admin/federation", s.requireAdmin(s.adminFederation))
+	m.HandleFunc("POST /admin/federation/domain", s.requireAdmin(s.adminDomainBlock))
+	m.HandleFunc("POST /admin/federation/domain/remove", s.requireAdmin(s.adminDomainUnblock))
+	m.HandleFunc("GET /admin/jobs", s.requireAdmin(s.adminJobs))
+	m.HandleFunc("GET /admin/news", s.requireAdmin(s.adminNews))
+	m.HandleFunc("POST /admin/news", s.requireAdmin(s.adminNewsCreate))
+
+	// Federation endpoints
+	m.HandleFunc("GET /.well-known/webfinger", s.webfinger)
+	m.HandleFunc("GET /.well-known/nodeinfo", s.nodeinfoDiscovery)
+	m.HandleFunc("GET /nodeinfo/2.1", s.nodeinfo)
+	m.HandleFunc("GET /users/{name}/outbox", s.apOutbox)
+	m.HandleFunc("POST /users/{name}/inbox", s.apInbox)
+	m.HandleFunc("GET /games/{slug}/activity", s.apGameActivity)
+}

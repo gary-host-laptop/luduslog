@@ -1,0 +1,23 @@
+{{define "content"}}
+<div class="section-head">
+  <div><h1 class="mb0">Lists</h1><div class="muted">Collections made by the community</div></div>
+  {{if .User}}<a class="btn btn-primary" href="/lists/new">New list</a>{{end}}
+</div>
+{{if .Lists}}
+<div class="grid grid-2">
+{{range .Lists}}
+  <a class="list-card" href="/users/{{.User.Username}}/lists/{{.Slug}}">
+    <div class="list-thumbs">{{range .Entries}}<img src="{{cover .Game}}" alt="">{{end}}</div>
+    <div>
+      <h3>{{.Title}}</h3>
+      <div class="muted">{{.User.Username}} · {{.Likes}} likes · {{len .Entries}} games</div>
+      {{if .Description}}<div class="muted mt1">{{truncate .Description 110}}</div>{{end}}
+      {{if .Tags}}<div class="pill-row">{{range .Tags}}<span class="pill">{{.}}</span>{{end}}</div>{{end}}
+    </div>
+  </a>
+{{end}}
+</div>
+{{else}}
+<div class="empty"><h3>No public lists yet</h3><p>{{if .User}}Start one and add a few favourites.{{else}}Log in to create the first list.{{end}}</p></div>
+{{end}}
+{{end}}

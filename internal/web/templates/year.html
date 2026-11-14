@@ -1,0 +1,19 @@
+{{define "content"}}
+<div class="section-head">
+  <div><h1 class="mb0">{{.Year}} in review</h1><div class="muted">{{.Profile.Username}}'s year in games</div></div>
+  <a class="btn btn-sm" href="/users/{{.Profile.Username}}/stats">All-time stats</a>
+</div>
+<div class="kpi-grid">
+  <div class="kpi"><strong>{{index .Recap "games"}}</strong><span class="muted">games played</span></div>
+  <div class="kpi"><strong>{{hoursAny (index .Recap "hours")}}</strong><span class="muted">hours played</span></div>
+  <div class="kpi"><strong>{{index .Recap "reviews"}}</strong><span class="muted">reviews written</span></div>
+</div>
+{{if .Logs}}
+<section class="section">
+  <div class="section-head"><h2>Games that defined the year</h2></div>
+  {{range .Logs}}{{template "log_row" .}}{{end}}
+</section>
+{{else}}
+<div class="empty mt2"><h3>Nothing logged in {{.Year}}</h3><p>Pick a game and start a journal entry.</p></div>
+{{end}}
+{{end}}

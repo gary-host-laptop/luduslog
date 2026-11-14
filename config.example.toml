@@ -1,0 +1,28 @@
+# LudusLog configuration. Every value can also be set with LUDUSLOG_* env vars.
+name = "LudusLog"
+base_url = "http://localhost:8080"
+listen = ":8080"
+data_dir = "./data"
+# db = "./data/luduslog.db"
+registration = "open"          # open | invite | approval | closed
+# invite_code = "change-me"
+session_key = "replace-with-a-long-random-string"
+
+# Optional: enable TLS directly instead of running behind a reverse proxy.
+# tls_cert = "/etc/luduslog/fullchain.pem"
+# tls_key  = "/etc/luduslog/privkey.pem"
+
+# Optional: game metadata. Without these, games can still be added manually.
+# igdb_client_id = "..."
+# igdb_secret = "..."
+
+# Optional: transactional email. Without SMTP, links are logged to stderr.
+# smtp_host = "smtp.example.com"
+# smtp_port = 587
+# smtp_user = "..."
+# smtp_pass = "..."
+# smtp_from = "noreply@example.com"
+
+# admin_email = "admin@example.com"
+# contact_email = "admin@example.com"
+instance_desc = "A federated place to log the games you play."

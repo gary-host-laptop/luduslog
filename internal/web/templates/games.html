@@ -1,0 +1,86 @@
+{{define "content"}}
+<div class="section-head">
+  <div><h1 class="mb0">Games</h1><div class="muted">{{.Total}} titles in the catalog</div></div>
+  <form method="get" action="/games" class="row">
+    <input type="search" name="q" value="{{.Q}}" placeholder="Search titles…" aria-label="Search games">
+    <button class="btn" type="submit">Search</button>
+  </form>
+</div>
+
+<div class="games-layout">
+  <aside class="filters card">
+    <form method="get" action="/games">
+      <input type="hidden" name="q" value="{{.Q}}">
+      <div class="row between"><strong>Filters</strong><a href="/games" class="muted" style="font-size:.8rem">Reset</a></div>
+      <details open>
+        <summary>Sort</summary>
+        <select name="sort" class="mt1">
+          <option value="popular" {{if or (eq .Sort "") (eq .Sort "popular")}}selected{{end}}>Popularity</option>
+          <option value="rating" {{if eq .Sort "rating"}}selected{{end}}>Weighted rating</option>
+          <option value="released" {{if eq .Sort "released"}}selected{{end}}>Release date</option>
+          <option value="title" {{if eq .Sort "title"}}selected{{end}}>Title</option>
+          <option value="reviews" {{if eq .Sort "reviews"}}selected{{end}}>Reviews</option>
+          <option value="trending" {{if eq .Sort "trending"}}selected{{end}}>Trending</option>
+        </select>
+        <select name="dir" class="mt1">
+          <option value="desc" {{if or (eq .Dir "") (eq .Dir "desc")}}selected{{end}}>Descending</option>
+          <option value="asc" {{if eq .Dir "asc"}}selected{{end}}>Ascending</option>
+        </select>
+      </details>
+      {{if .Facets.Genres}}
+      <details>
+        <summary>Genre</summary>
+        {{range .Facets.Genres}}<label class="check"><input type="checkbox" name="genre" value="{{.Name}}" {{if contains $.Genres .Name}}checked{{end}}> {{.Name}} <span class="muted">({{.Count}})</span></label>{{end}}
+      </details>{{end}}
+      {{if .Facets.Platforms}}
+      <details>
+        <summary>Platform</summary>
+        {{range .Facets.Platforms}}<label class="check"><input type="checkbox" name="platform" value="{{.ID}}" {{if contains $.Platforms (printf "%d" .ID)}}checked{{end}}> {{.Name}}</label>{{end}}
+      </details>{{end}}
+      {{if .Facets.Themes}}
+      <details>
+        <summary>Theme</summary>
+        {{range .Facets.Themes}}<label class="check"><input type="checkbox" name="theme" value="{{.Name}}" {{if contains $.Themes .Name}}checked{{end}}> {{.Name}}</label>{{end}}
+      </details>{{end}}
+      <details>
+        <summary>Release year</summary>
+        <div class="form-row mt1"><input type="number" name="from" placeholder="From" value="{{.YearFrom}}" min="1950" max="2100"><input type="number" name="to" placeholder="To" value="{{.YearTo}}" min="1950" max="2100"></div>
+        <select name="release" class="mt1">
+          <option value="">Any status</option>
+          <option value="released" {{if eq .Release "released"}}selected{{end}}>Released</option>
+          <option value="upcoming" {{if eq .Release "upcoming"}}selected{{end}}>Upcoming</option>
+        </select>
+      </details>
+      <details>
+        <summary>Rating</summary>
+        <select name="min_rating" class="mt1">
+          <option value="">Any rating</option>
+          <option value="9" {{if eq .MinRating "9"}}selected{{end}}>9+</option>
+          <option value="8" {{if eq .MinRating "8"}}selected{{end}}>8+</option>
+          <option value="7" {{if eq .MinRating "7"}}selected{{end}}>7+</option>
+          <option value="6" {{if eq .MinRating "6"}}selected{{end}}>6+</option>
+        </select>
+      </details>
+      {{if .LoggedIn}}
+      <details>
+        <summary>Your shelf</summary>
+        <label class="check"><input type="checkbox" name="friends" value="1" {{if .FriendsOnly}}checked{{end}}> Friends' games only</label>
+        <label class="check"><input type="checkbox" name="hide_owned" value="1" {{if .HideOwned}}checked{{end}}> Hide games I own</label>
+        <label class="check"><input type="checkbox" name="no_status" value="1" {{if .NoStatus}}checked{{end}}> Hide games on my shelves</label>
+        <label class="check"><input type="checkbox" name="status" value="backlog"> Backlog</label>
+        <label class="check"><input type="checkbox" name="status" value="wishlist"> Wishlist</label>
+      </details>
+      {{end}}
+      <div class="filter-actions"><button class="btn btn-primary btn-sm" type="submit">Apply</button></div>
+    </form>
+  </aside>
+  <div>
+    {{if .Games}}
+      {{template "game_grid" .Games}}
+      {{template "pager" .}}
+    {{else}}
+      <div class="empty"><h3>No games match</h3><p>Try removing a filter or searching for a different title.</p><a class="btn" href="/games">Clear filters</a></div>
+    {{end}}
+  </div>
+</div>
+{{end}}

@@ -1,0 +1,61 @@
+{{define "layout"}}
+<!doctype html>
+<html lang="en"{{if .User}}{{if eq .User.Theme "dark"}} data-theme="dark"{{else if eq .User.Theme "light"}} data-theme="light"{{end}}{{if .User.HighContrast}} data-theme="contrast"{{end}}{{end}}>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{{if .Title}}{{.Title}} · {{.Instance.Name}}{{else}}{{.Instance.Name}} — your game diary, federated{{end}}</title>
+<meta name="description" content="{{if .Desc}}{{.Desc}}{{else}}Track the games you play, rate and review them, build lists, and share your backlog across the fediverse.{{end}}">
+<link rel="stylesheet" href="/static/style.css?v=3">
+<link rel="icon" href="/static/avatar.svg" type="image/svg+xml">
+{{block "head" .}}{{end}}
+</head>
+<body>
+<a class="skip-link" href="#main">Skip to content</a>
+<header class="site-header">
+  <div class="wrap">
+    <a class="brand" href="/"><span class="brand-mark" aria-hidden="true">L</span>{{.Instance.Name}}</a>
+    <nav class="nav" aria-label="Main">
+      <a href="/games" {{if hasPrefix .Path "/games"}}class="active"{{end}}>Games</a>
+      <a href="/reviews" {{if hasPrefix .Path "/reviews"}}class="active"{{end}}>Reviews</a>
+      <a href="/lists" {{if eq .Path "/lists"}}class="active"{{end}}>Lists</a>
+    </nav>
+    <form class="nav-search" action="/search" method="get" role="search">
+      <label class="sr-only" for="nav-q">Search games, people and lists</label>
+      <input id="nav-q" type="search" name="q" placeholder="Search…" value="{{.SearchQuery}}">
+    </form>
+    <div class="header-actions">
+      {{if .User}}
+        <a class="icon-btn" href="/notifications" aria-label="Notifications ({{.Unread}} unread)">🔔{{if gt .Unread 0}}<span class="badge-dot">{{.Unread}}</span>{{end}}</a>
+        <a href="/users/{{.User.Username}}" aria-label="Your profile"><img class="avatar avatar-sm" src="{{avatar .User}}" alt=""></a>
+        <a class="btn btn-sm" href="/games">+ Log</a>
+      {{else}}
+        <a class="btn btn-sm" href="/login">Log in</a>
+        <a class="btn btn-sm btn-primary" href="/register">Join</a>
+      {{end}}
+    </div>
+  </div>
+</header>
+<main id="main" class="wrap">
+  {{if .Flash}}<div class="flashes" role="status">{{range .Flash}}<div class="alert alert-{{.Kind}}">{{.Text}}</div>{{end}}</div>{{end}}
+  {{template "content" .}}
+</main>
+<footer class="site-footer">
+  <div class="wrap">
+    <div>
+      <strong>{{.Instance.Name}}</strong> — a self-hostable, federated game diary.
+      {{if .Instance.HasIGDB}}<br><small>Game metadata by IGDB. Covers served from the IGDB image CDN.</small>{{end}}
+    </div>
+    <div>
+      <a href="/about">About</a> · <a href="/games">Browse</a> · <a href="/lists">Lists</a>
+      {{if .User}}{{if .User.IsAdmin}} · <a href="/admin">Admin</a>{{end}}{{end}}
+      <br><a href="/.well-known/nodeinfo">NodeInfo</a> · <a href="/nodeinfo/2.1">2.1</a>
+    </div>
+  </div>
+</footer>
+<script src="/static/htmx.min.js" defer></script>
+<script src="/static/hyperscript.min.js" defer></script>
+<script src="/static/app.js" defer></script>
+</body>
+</html>
+{{end}}

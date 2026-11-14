@@ -1,0 +1,91 @@
+{{define "game_card"}}
+<a class="game-card" href="/games/{{.Slug}}">
+  <div class="cover-wrap"><img class="game-cover" loading="lazy" src="{{cover .}}" alt="Cover of {{.Title}}"></div>
+  <div class="game-title">{{.Title}}</div>
+  <div class="game-meta">{{if .ReleaseYear}}{{.ReleaseYear}}{{end}}{{if .Franchise}} · {{.Franchise}}{{end}}</div>
+</a>
+{{end}}
+
+{{define "game_grid"}}
+<div class="grid grid-cards">
+  {{range .}}{{template "game_card" .}}{{end}}
+</div>
+{{end}}
+
+{{define "log_row"}}
+<article class="log-entry">
+  {{if .Game}}<a href="/games/{{.Game.Slug}}"><img class="game-cover" loading="lazy" src="{{cover .Game}}" alt=""></a>{{end}}
+  <div class="log-body">
+    <div class="log-head">
+      {{if .User}}<a href="/users/{{.User.Username}}"><img class="avatar avatar-sm" src="{{avatar .User}}" alt=""> {{.User.Username}}</a>{{end}}
+      {{if .Rating}}<span>{{stars .Rating 5}}</span>{{end}}
+      <span>{{timeago .CreatedAt}}</span>
+      {{if .Draft}}<span class="draft-badge">Draft</span>{{end}}
+      {{if .Spoiler}}<span class="pill">Spoilers</span>{{end}}
+      <span class="pill">{{.Status}}</span>
+    </div>
+    {{if .Name}}<div class="log-title"><a href="{{reviewPath .}}">{{.Name}}</a></div>{{end}}
+    {{if .Game}}<div class="muted"><a href="/games/{{.Game.Slug}}">{{.Game.Title}}</a>{{if .PlatformName}} · {{.PlatformName}}{{end}}{{if .Playtime}} · {{hours .Playtime}}{{end}}</div>{{end}}
+    {{if .Review}}<div class="prose">{{if .Spoiler}}<details><summary>This review contains spoilers</summary>{{md .Review}}</details>{{else}}{{md .Review}}{{end}}</div>{{end}}
+    <div class="log-actions">
+      <a href="{{reviewPath .}}">Permalink</a>
+      {{if .Review}}<span>{{.Likes}} likes</span>{{end}}
+    </div>
+  </div>
+</article>
+{{end}}
+
+{{define "like_button"}}
+<form class="inline-form" method="post" action="{{.Action}}">
+  <input type="hidden" name="_csrf" value="{{.CSRF}}">
+  <button class="linklike {{if .On}}on{{end}}" type="submit">♥ Like{{if .Count}} · {{.Count}}{{end}}</button>
+</form>
+{{end}}
+
+{{define "comment"}}
+<div class="feed-item" id="c{{.ID}}">
+  <img class="avatar avatar-sm" src="{{if .User}}{{avatar .User}}{{else}}/static/avatar.svg{{end}}" alt="">
+  <div class="grow">
+    <div class="log-head">
+      {{if .User}}<a href="/users/{{.User.Username}}">{{.User.Username}}</a>{{else}}<span>{{.RemoteName}}</span>{{end}}
+      <span>{{timeago .CreatedAt}}</span>
+    </div>
+    <div class="prose">{{md .Body}}</div>
+    {{if .User}}
+    <div class="log-actions">
+      {{if $.CanReply}}<button class="linklike" type="button" onclick="document.getElementById('reply-{{.ID}}').hidden = !document.getElementById('reply-{{.ID}}').hidden">Reply</button>{{end}}
+    </div>
+    <form id="reply-{{.ID}}" hidden class="stack mt1" method="post" action="/comments">
+      <input type="hidden" name="_csrf" value="{{$.CSRF}}">
+      <input type="hidden" name="subject_type" value="{{$.SubjectType}}">
+      <input type="hidden" name="subject_id" value="{{$.SubjectID}}">
+      <input type="hidden" name="parent_id" value="{{.ID}}">
+      <input type="hidden" name="return_to" value="{{$.Path}}">
+      <textarea name="body" rows="2" required placeholder="Write a reply…"></textarea>
+      <button class="btn btn-sm btn-primary" type="submit">Reply</button>
+    </form>
+    {{end}}
+    {{range .Replies}}<div class="mt1">{{template "comment" .}}{{end}}
+  </div>
+</div>
+{{end}}
+
+{{define "user_row"}}
+<div class="feed-item">
+  <img class="avatar avatar-md" src="{{avatar .}}" alt="">
+  <div class="grow">
+    <a href="/users/{{.Username}}"><strong>{{.Username}}</strong></a>
+    {{if .Bio}}<div class="muted">{{truncate .Bio 140}}</div>{{end}}
+  </div>
+</div>
+{{end}}
+
+{{define "pager"}}
+{{if gt .Pages 1}}
+<nav class="pager" aria-label="Pagination">
+  {{if gt .PageNum 1}}<a href="?{{.BaseQuery}}{{if .BaseQuery}}&{{end}}page={{dec .PageNum}}">← Prev</a>{{end}}
+  <span class="on">{{.PageNum}} / {{.Pages}}</span>
+  {{if lt .PageNum .Pages}}<a href="?{{.BaseQuery}}{{if .BaseQuery}}&{{end}}page={{inc .PageNum}}">Next →</a>{{end}}
+</nav>
+{{end}}
+{{end}}

@@ -1,0 +1,25 @@
+{{define "content"}}
+<div class="section-head"><h1 class="mb0">Federation</h1><span class="muted">{{len .Domains}} blocked domains</span></div>
+<div class="tabs"><a href="/admin">Overview</a><a href="/admin/users">Users</a><a href="/admin/reports">Reports</a><a href="/admin/federation" class="on">Federation</a><a href="/admin/jobs">Jobs</a><a href="/admin/news">News</a></div>
+<div class="grid grid-2">
+<section class="card">
+  <h2>Block a domain</h2>
+  <p class="muted">Inbound and outbound federation with this host stops immediately. Existing content is retained.</p>
+  <form class="stack" method="post" action="/admin/federation/domain">
+    <input type="hidden" name="_csrf" value="{{.CSRF}}">
+    <div><label for="domain">Domain</label><input id="domain" type="text" name="domain" placeholder="spam.example" required></div>
+    <div><label for="reason">Reason</label><input id="reason" type="text" name="reason" placeholder="Spam / abuse"></div>
+    <button class="btn btn-danger" type="submit">Block domain</button>
+  </form>
+</section>
+<section class="card">
+  <h2>Blocked domains</h2>
+  {{range .Domains}}
+  <div class="row between" style="padding:.4rem 0;border-bottom:1px solid var(--border)">
+    <div><strong>{{.Domain}}</strong>{{if .Reason}}<div class="muted">{{.Reason}}</div>{{end}}</div>
+    <form method="post" action="/admin/federation/domain/remove"><input type="hidden" name="_csrf" value="{{$.CSRF}}"><input type="hidden" name="domain" value="{{.Domain}}"><button class="btn btn-sm" type="submit">Unblock</button></form>
+  </div>
+  {{else}}<p class="muted">No domains are blocked.</p>{{end}}
+</section>
+</div>
+{{end}}

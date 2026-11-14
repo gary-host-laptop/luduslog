@@ -1,0 +1,18 @@
+{{define "content"}}
+<div class="section-head"><h1 class="mb0">Instance news</h1><span class="muted">Shown on the home page</span></div>
+<div class="tabs"><a href="/admin">Overview</a><a href="/admin/users">Users</a><a href="/admin/reports">Reports</a><a href="/admin/federation">Federation</a><a href="/admin/jobs">Jobs</a><a href="/admin/news" class="on">News</a></div>
+<div class="grid grid-2">
+<section class="card">
+  <h2>Post an update</h2>
+  <form class="stack" method="post" action="/admin/news">
+    <input type="hidden" name="_csrf" value="{{.CSRF}}">
+    <div><label for="title">Title</label><input id="title" type="text" name="title" required></div>
+    <div><label for="body">Body <span class="muted">(Markdown)</span></label><textarea id="body" name="body" rows="4" required></textarea></div>
+    <button class="btn btn-primary" type="submit">Publish</button>
+  </form>
+</section>
+<section>
+  {{range .News}}<div class="card mb1"><strong>{{.Title}}</strong><div class="muted">{{timeago .CreatedAt}}</div><div class="prose mt1">{{md .Body}}</div></div>{{else}}<div class="empty">No news yet.</div>{{end}}
+</section>
+</div>
+{{end}}

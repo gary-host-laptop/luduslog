@@ -1,0 +1,29 @@
+{{define "content"}}
+<div class="section-head">
+  <div><h1 class="mb0">{{if .Game}}Reviews of {{.Game.Title}}{{else}}Reviews{{end}}</h1><div class="muted">{{.Total}} published</div></div>
+</div>
+<div class="tabs">
+  <a href="/reviews?tab=all" class="{{if eq .Tab "all"}}on{{end}}">Everyone</a>
+  <a href="/reviews?tab=friends" class="{{if eq .Tab "friends"}}on{{end}}">Friends</a>
+  <a href="/reviews?tab=following" class="{{if eq .Tab "following"}}on{{end}}">Following</a>
+</div>
+{{if .Reviews}}
+  {{range .Reviews}}<div class="review-card mb1">
+    <div class="log-head">
+      {{if .User}}<a href="/users/{{.User.Username}}"><img class="avatar avatar-sm" src="{{avatar .User}}" alt=""> {{.User.Username}}</a>{{end}}
+      {{stars .Rating 5}} <span>{{timeago .CreatedAt}}</span>
+      {{if .Game}}<span class="muted">· <a href="/games/{{.Game.Slug}}">{{.Game.Title}}</a></span>{{end}}
+    </div>
+    {{if .Name}}<h2 class="mt1" style="font-size:1.2rem"><a href="{{reviewPath .}}">{{.Name}}</a></h2>{{end}}
+    <div class="prose mt1">{{truncate (plain .Review) 700}}</div>
+    <div class="log-actions"><a href="{{reviewPath .}}">Read more →</a><span>{{.Likes}} likes</span><span>{{.CommentCount}} comments</span></div>
+  </div>{{end}}
+  {{if not .Game}}{{if gt .Pages 1}}<nav class="pager">
+    {{if gt .PageNum 1}}<a href="?tab={{.Tab}}&page={{dec .PageNum}}">← Prev</a>{{end}}
+    <span class="on">{{.PageNum}} / {{.Pages}}</span>
+    {{if lt .PageNum .Pages}}<a href="?tab={{.Tab}}&page={{inc .PageNum}}">Next →</a>{{end}}
+  </nav>{{end}}{{end}}
+{{else}}
+  <div class="empty"><h3>No reviews here yet</h3><p>Follow more people or write the first review.</p><a class="btn" href="/games">Find a game</a></div>
+{{end}}
+{{end}}

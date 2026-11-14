@@ -1,0 +1,13 @@
+{{define "content"}}
+<article class="card prose" style="max-width:760px;margin:0 auto">
+  <h1>About {{.Instance.Name}}</h1>
+  <p>{{.Instance.Name}} is a self-hostable video game diary: track what you play, rate and review it, keep a journal of sessions, build lists, and follow friends. It speaks ActivityPub, so your profile and public reviews can be followed from Mastodon and other fediverse servers.</p>
+  <h2>Your data</h2>
+  <p>Everything is stored in a single SQLite database on the instance. You can export a full JSON copy of your logs, lists and library at any time from <a href="/settings">Settings → Import &amp; export</a>. There are no analytics, ads or third-party trackers.</p>
+  <h2>Privacy</h2>
+  <p>Profiles, logs, reviews and lists can be public, unlisted, followers-only or private. Federation is opt-in per account, and separately for statuses, reviews and lists. Blocking works in both directions.</p>
+  <h2>Federation</h2>
+  <p>The server publishes an actor at <code>/users/&lt;name&gt;</code>, an outbox, followers collection and a game-aware ActivityPub extension. See <a href="/.well-known/nodeinfo">NodeInfo</a> for software details.</p>
+  {{if .Instance.HasIGDB}}<h2>Metadata</h2><p>Game metadata and cover art come from <a href="https://www.igdb.com" rel="noopener">IGDB</a>. This product uses the IGDB API but is not endorsed or certified by Twitch Interactive.</p>{{end}}
+</article>
+{{end}}

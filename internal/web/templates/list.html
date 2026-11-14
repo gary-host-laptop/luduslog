@@ -1,0 +1,62 @@
+{{define "content"}}
+{{with .List}}
+<div class="section-head">
+  <div>
+    <h1 class="mb0">{{.Title}}</h1>
+    <div class="muted">by <a href="/users/{{.User.Username}}">{{.User.Username}}</a> · {{len $.Entries}} games · {{.Likes}} likes · {{privacyLabel .Privacy}}</div>
+  </div>
+  <div class="btn-group">
+    {{if $.IsOwner}}
+      <a class="btn btn-sm" href="/lists/{{.ID}}/edit">Edit</a>
+      <form method="post" action="/lists/{{.ID}}/delete" onsubmit="return confirm('Delete this list?')"><input type="hidden" name="_csrf" value="{{$.CSRF}}"><button class="btn btn-sm btn-danger" type="submit">Delete</button></form>
+    {{else if $.Page.User}}
+      <form method="post" action="/lists/{{.ID}}/like"><input type="hidden" name="_csrf" value="{{$.CSRF}}"><button class="btn btn-sm {{if $.Liked}}btn-primary{{end}}" type="submit">♥ {{if $.Liked}}Liked{{else}}Like{{end}}</button></form>
+    {{end}}
+  </div>
+</div>
+{{if .Description}}<div class="prose card mb2">{{md .Description}}</div>{{end}}
+{{if .Tags}}<div class="pill-row mb2">{{range .Tags}}<span class="pill">{{.}}</span>{{end}}</div>{{end}}
+{{end}}
+
+{{if .Entries}}
+<ol style="list-style:none;padding:0;margin:0">
+{{range $i, $e := .Entries}}
+  <li class="log-entry">
+    <div style="width:2rem;color:var(--muted);font-weight:700">{{inc $i}}</div>
+    <a href="/games/{{$e.Game.Slug}}"><img class="game-cover" src="{{cover $e.Game}}" alt="" loading="lazy" style="width:74px"></a>
+    <div class="log-body">
+      <h3 class="mt0"><a href="/games/{{$e.Game.Slug}}">{{$e.Game.Title}}</a></h3>
+      {{if $e.Game.ReleaseYear}}<div class="muted">{{$e.Game.ReleaseYear}}</div>{{end}}
+      {{if $e.Note}}<div class="prose mt1">{{md $e.Note}}</div>{{end}}
+      {{if $.IsOwner}}
+      <div class="log-actions">
+        <form method="post" action="/lists/{{$.List.ID}}/remove"><input type="hidden" name="_csrf" value="{{$.CSRF}}"><input type="hidden" name="game_id" value="{{$e.GameID}}"><button class="linklike" type="submit">Remove</button></form>
+      </div>
+      {{end}}
+    </div>
+  </li>
+{{end}}
+</ol>
+{{else}}
+<div class="empty"><h3>This list is empty</h3>{{if .IsOwner}}<p>Add games from any game page.</p>{{end}}</div>
+{{end}}
+
+{{if .IsOwner}}
+<section class="card mt2">
+  <div class="card-head"><h2>Add a game</h2></div>
+  <form class="row" method="post" action="/lists/{{.List.ID}}/add">
+    <input type="hidden" name="_csrf" value="{{.CSRF}}">
+    <input type="text" name="game_slug" placeholder="Game slug, e.g. hollow-knight" required style="flex:1">
+    <button class="btn btn-primary" type="submit">Add</button>
+  </form>
+  <p class="field-hint">Tip: open a game and use the URL slug. A full game picker comes with search.</p>
+  {{if .Folders}}
+  <form class="row mt1" method="post" action="/lists/{{.List.ID}}/folder">
+    <input type="hidden" name="_csrf" value="{{.CSRF}}">
+    <select name="folder_id" class="select-inline">{{range .Folders}}<option value="{{.ID}}">{{.Name}}</option>{{end}}</select>
+    <button class="btn btn-sm" type="submit">Add to folder</button>
+  </form>
+  {{end}}
+</section>
+{{end}}
+{{end}}

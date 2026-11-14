@@ -1,0 +1,12 @@
+{{define "content"}}
+<div style="max-width:420px;margin:2rem auto">
+  <h1>Reset your password</h1>
+  <p class="muted">Enter the email on your account and we'll send a reset link if it exists.</p>
+  <form class="card stack" method="post" action="/forgot">
+    <input type="hidden" name="_csrf" value="{{.CSRF}}">
+    <div><label for="email">Email</label><input id="email" type="email" name="email" required autofocus autocomplete="email"></div>
+    <button class="btn btn-primary btn-block" type="submit">Send reset link</button>
+    <div class="text-right" style="font-size:.85rem"><a href="/login">Back to login</a></div>
+  </form>
+</div>
+{{end}}

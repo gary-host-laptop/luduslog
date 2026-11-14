@@ -1,0 +1,7 @@
+{{define "content"}}
+<div class="section-head"><h1 class="mb0">{{.Title}}</h1><a class="more" href="/users/{{.Profile.Username}}">Back to profile →</a></div>
+<div class="card">
+{{range .Users}}{{template "user_row" .}}{{else}}<div class="muted">Nobody here yet.</div>{{end}}
+</div>
+{{if gt .Pages 1}}<nav class="pager">{{if gt .PageNum 1}}<a href="?page={{dec .PageNum}}">← Prev</a>{{end}}<span class="on">{{.PageNum}} / {{.Pages}}</span>{{if lt .PageNum .Pages}}<a href="?page={{inc .PageNum}}">Next →</a>{{end}}</nav>{{end}}
+{{end}}

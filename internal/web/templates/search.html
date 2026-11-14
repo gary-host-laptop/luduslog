@@ -1,0 +1,23 @@
+{{define "content"}}
+<h1>Search</h1>
+<form method="get" action="/search" class="row mb2">
+  <input type="search" name="q" value="{{.Q}}" placeholder="Games, people, lists…" style="max-width:420px" autofocus>
+  <button class="btn btn-primary" type="submit">Search</button>
+</form>
+{{if .Q}}
+  {{if .Games}}
+  <section class="section" style="margin-top:0"><div class="section-head"><h2>Games</h2><span class="muted">{{.Total}} matches</span></div>{{template "game_grid" .Games}}</section>
+  {{end}}
+  {{if .Users}}
+  <section class="section"><div class="section-head"><h2>People</h2></div><div class="card">{{range .Users}}{{template "user_row" .}}{{end}}</div></section>
+  {{end}}
+  {{if .Lists}}
+  <section class="section"><div class="section-head"><h2>Lists</h2></div><div class="grid grid-2">{{range .Lists}}<a class="list-card" href="/users/{{.User.Username}}/lists/{{.Slug}}"><div><h3>{{.Title}}</h3><div class="muted">{{.User.Username}}</div></div></a>{{end}}</div></section>
+  {{end}}
+  {{if and (not .Games) (not .Users) (not .Lists)}}
+  <div class="empty"><h3>No results for “{{.Q}}”</h3><p>Try a different spelling, or <a href="/games">browse the catalog</a>.</p></div>
+  {{end}}
+{{else}}
+  <p class="muted">Search across game titles, alternate names, people and lists.</p>
+{{end}}
+{{end}}

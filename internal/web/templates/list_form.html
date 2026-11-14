@@ -1,0 +1,58 @@
+{{define "content"}}
+<div class="section-head"><h1 class="mb0">{{if .List}}Edit list{{else}}New list{{end}}</h1></div>
+{{if .Error}}<div class="alert alert-error">{{.Error}}</div>{{end}}
+<form class="card stack" method="post" action="{{.Action}}">
+  <input type="hidden" name="_csrf" value="{{.CSRF}}">
+  <div>
+    <label for="title">Title</label>
+    <input id="title" type="text" name="title" required maxlength="120" value="{{if .List}}{{.List.Title}}{{end}}">
+  </div>
+  <div>
+    <label for="description">Description <span class="muted">(Markdown)</span></label>
+    <textarea id="description" name="description" rows="4">{{if .List}}{{.List.Description}}{{end}}</textarea>
+  </div>
+  <div>
+    <label for="tags">Tags <span class="muted">(comma separated)</span></label>
+    <input id="tags" type="text" name="tags" value="{{if .List}}{{range $i, $t := .List.Tags}}{{if $i}}, {{end}}{{$t}}{{end}}{{end}}">
+  </div>
+  <div class="form-row">
+    <div>
+      <label for="privacy">Privacy</label>
+      <select id="privacy" name="privacy">
+        <option value="public" {{if and .List (eq .List.Privacy "public")}}selected{{end}}>Public — anyone, federated</option>
+        <option value="unlisted" {{if and .List (eq .List.Privacy "unlisted")}}selected{{end}}>Unlisted — link only</option>
+        <option value="personal" {{if and .List (eq .List.Privacy "personal")}}selected{{end}}>Personal — followers only</option>
+        <option value="private" {{if and .List (eq .List.Privacy "private")}}selected{{end}}>Private — just you</option>
+      </select>
+    </div>
+    <div>
+      <label for="display_mode">Display</label>
+      <select id="display_mode" name="display_mode">
+        <option value="grid" {{if and .List (eq .List.DisplayMode "grid")}}selected{{end}}>Grid</option>
+        <option value="list" {{if and .List (eq .List.DisplayMode "list")}}selected{{end}}>List</option>
+        <option value="table" {{if and .List (eq .List.DisplayMode "table")}}selected{{end}}>Table</option>
+      </select>
+    </div>
+  </div>
+  <div class="form-row">
+    <div>
+      <label for="default_sort">Default sort</label>
+      <select id="default_sort" name="default_sort">
+        <option value="user" {{if and .List (eq .List.DefaultSort "user")}}selected{{end}}>Custom order</option>
+        <option value="title" {{if and .List (eq .List.DefaultSort "title")}}selected{{end}}>Title</option>
+        <option value="release" {{if and .List (eq .List.DefaultSort "release")}}selected{{end}}>Release date</option>
+        <option value="rating" {{if and .List (eq .List.DefaultSort "rating")}}selected{{end}}>Rating</option>
+      </select>
+    </div>
+    <div>
+      <label for="sort_dir">Direction</label>
+      <select id="sort_dir" name="sort_dir"><option value="asc" {{if and .List (eq .List.SortDir "asc")}}selected{{end}}>Ascending</option><option value="desc" {{if and .List (eq .List.SortDir "desc")}}selected{{end}}>Descending</option></select>
+    </div>
+  </div>
+  <label class="check"><input type="checkbox" name="ranked" value="1" {{if and .List .List.Ranked}}checked{{end}}> Ranked list (numbered)</label>
+  <label class="check"><input type="checkbox" name="progress" value="1" {{if and .List .List.Progress}}checked{{end}}> Show my progress through the list</label>
+  <label class="check"><input type="checkbox" name="fade_played" value="1" {{if and .List .List.FadePlayed}}checked{{end}}> Fade games I've played</label>
+  <label class="check"><input type="checkbox" name="immersive" value="1" {{if and .List .List.Immersive}}checked{{end}}> Immersive view</label>
+  <div class="btn-group"><button class="btn btn-primary" type="submit">{{if .List}}Save list{{else}}Create list{{end}}</button><a class="btn" href="/lists">Cancel</a></div>
+</form>
+{{end}}

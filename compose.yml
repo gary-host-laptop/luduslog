@@ -1,0 +1,21 @@
+services:
+  luduslog:
+    build: .
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+    environment:
+      LUDUSLOG_BASE_URL: "https://log.example.com"
+      LUDUSLOG_LISTEN: ":8080"
+      LUDUSLOG_DATA_DIR: "/data"
+      LUDUSLOG_DB: "/data/luduslog.db"
+      LUDUSLOG_NAME: "LudusLog"
+      LUDUSLOG_REGISTRATION: "open"
+      LUDUSLOG_SESSION_KEY: "replace-with-a-long-random-string"
+      # LUDUSLOG_IGDB_CLIENT_ID: ""
+      # LUDUSLOG_IGDB_SECRET: ""
+      # LUDUSLOG_SMTP_HOST: ""
+    volumes:
+      - luduslog-data:/data
+volumes:
+  luduslog-data:

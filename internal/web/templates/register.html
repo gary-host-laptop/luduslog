@@ -1,0 +1,17 @@
+{{define "content"}}
+<div style="max-width:460px;margin:2rem auto">
+  <h1>Create an account</h1>
+  <p class="muted">Your profile is yours: choose what is public, what is friends-only, and whether it federates.</p>
+  {{if .Error}}<div class="alert alert-error">{{.Error}}</div>{{end}}
+  <form class="card stack" method="post" action="/register">
+    <input type="hidden" name="_csrf" value="{{.CSRF}}">
+    <div><label for="username">Username</label><input id="username" type="text" name="username" value="{{.Identifier}}" required minlength="3" maxlength="24" pattern="[A-Za-z0-9_]+" autocomplete="username"><div class="field-hint">Letters, numbers and underscores. This becomes your fediverse handle.</div></div>
+    <div><label for="email">Email</label><input id="email" type="email" name="email" required autocomplete="email"></div>
+    <div><label for="password">Password</label><input id="password" type="password" name="password" required minlength="10" autocomplete="new-password"><div class="field-hint">At least 10 characters. Use a password manager.</div></div>
+    <div><label for="confirm">Confirm password</label><input id="confirm" type="password" name="confirm" required autocomplete="new-password"></div>
+    <div><label for="invite_code">Invite code <span class="muted">(if required)</span></label><input id="invite_code" type="text" name="invite_code"></div>
+    <button class="btn btn-primary btn-block" type="submit">Create account</button>
+    <div class="text-right" style="font-size:.85rem"><a href="/login">Already have an account?</a></div>
+  </form>
+</div>
+{{end}}

@@ -1,0 +1,51 @@
+{{define "content"}}
+<div class="section-head">
+  <div><h1 class="mb0">{{.Profile.Username}}'s stats</h1><div class="muted">All time</div></div>
+  <a class="btn btn-sm" href="/users/{{.Profile.Username}}/year/{{.Year}}">{{.Year}} in review</a>
+</div>
+
+<div class="kpi-grid">
+  <div class="kpi"><strong>{{.Stats.GamesPlayed}}</strong><span class="muted">games played</span></div>
+  <div class="kpi"><strong>{{.Stats.GamesPlaying}}</strong><span class="muted">playing</span></div>
+  <div class="kpi"><strong>{{.Stats.GamesBacklog}}</strong><span class="muted">backlog</span></div>
+  <div class="kpi"><strong>{{.Stats.GamesWishlist}}</strong><span class="muted">wishlist</span></div>
+  <div class="kpi"><strong>{{hours .Stats.TotalHours}}</strong><span class="muted">total playtime</span></div>
+  <div class="kpi"><strong>{{if .Stats.AvgRating}}{{rating .Stats.AvgRating 10}}{{else}}—{{end}}</strong><span class="muted">average rating</span></div>
+  <div class="kpi"><strong>{{.Stats.Reviews}}</strong><span class="muted">reviews</span></div>
+  <div class="kpi"><strong>{{.Stats.PerfectGames}}</strong><span class="muted">perfect scores</span></div>
+</div>
+
+<div class="grid grid-2 mt2">
+  <section class="card">
+    <div class="card-head"><h2>Rating spread</h2></div>
+    <div class="histogram">
+      {{range $k := seq 5 1}}
+        <div class="hist-row"><span>{{$k}}★</span><div class="hist-bar"><i style="width:{{pct (index $.Stats.RatingCounts $k) (len $.Stats.RatingCounts)}}%"></i></div><span>{{index $.Stats.RatingCounts $k}}</span></div>
+      {{end}}
+    </div>
+  </section>
+  <section class="card">
+    <div class="card-head"><h2>Highlights</h2></div>
+    <p>{{if .Stats.TopGenre}}Favourite genre: <strong>{{.Stats.TopGenre}}</strong> ({{.Stats.TopGenreCount}} games).{{else}}Not enough games for a favourite genre yet.{{end}}</p>
+    {{if .Stats.TopPlatform}}<p>Most played on: <strong>{{.Stats.TopPlatform}}</strong>.</p>{{end}}
+    {{if .Stats.LongestGame}}<p>Longest game: <strong>{{.Stats.LongestGame}}</strong> at {{hours .Stats.LongestHours}}.</p>{{end}}
+    <p>{{.Stats.ThisYear}} games finished this year.</p>
+  </section>
+</div>
+
+{{if .Stats.TopRated}}
+<section class="section">
+  <div class="section-head"><h2>Highest rated</h2></div>
+  <div class="log-list">{{range .Stats.TopRated}}{{template "log_row" .}}{{end}}</div>
+</section>
+{{end}}
+
+{{if .Badges}}
+<section class="section">
+  <div class="section-head"><h2>Badges</h2></div>
+  <div class="grid grid-3">
+    {{range .Badges}}{{if .EarnedAt}}<div class="card"><strong>{{.Title}}</strong><div class="muted">{{.Desc}}</div><div class="muted mt1">Earned {{.EarnedAt.Format "Jan 2, 2006"}}</div></div>{{end}}{{end}}
+  </div>
+</section>
+{{end}}
+{{end}}

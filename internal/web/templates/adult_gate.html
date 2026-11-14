@@ -1,0 +1,10 @@
+{{define "content"}}
+<div class="card" style="max-width:560px;margin:3rem auto;text-align:center">
+  <h1>Age-restricted entry</h1>
+  <p class="muted">“{{.Game.Title}}” is marked as adult content. {{if .User}}Enable the adult content opt-in in your privacy settings to view it.{{else}}Log in with an account that has opted in to adult content to view it.{{end}}</p>
+  <div class="btn-group mt2">
+    {{if .User}}<a class="btn btn-primary" href="/settings?tab=privacy">Privacy settings</a>{{else}}<a class="btn btn-primary" href="/login">Log in</a>{{end}}
+    <a class="btn" href="/games">Back to games</a>
+  </div>
+</div>
+{{end}}

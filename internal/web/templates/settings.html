@@ -1,0 +1,141 @@
+{{define "content"}}
+<h1>Settings</h1>
+<div class="settings-layout">
+  <nav class="settings-nav">
+    <a href="/settings" class="{{if or (eq .Tab "") (eq .Tab "profile")}}on{{end}}">Profile</a>
+    <a href="/settings?tab=account" class="{{if eq .Tab "account"}}on{{end}}">Account</a>
+    <a href="/settings?tab=privacy" class="{{if eq .Tab "privacy"}}on{{end}}">Privacy</a>
+    <a href="/settings?tab=preferences" class="{{if eq .Tab "preferences"}}on{{end}}">Preferences</a>
+    <a href="/settings?tab=federation" class="{{if eq .Tab "federation"}}on{{end}}">Federation</a>
+    <a href="/settings?tab=blocks" class="{{if eq .Tab "blocks"}}on{{end}}">Blocks</a>
+    <a href="/settings?tab=folders" class="{{if eq .Tab "folders"}}on{{end}}">Folders</a>
+    <a href="/settings?tab=import" class="{{if eq .Tab "import"}}on{{end}}">Import &amp; export</a>
+    <a href="/users/{{.User.Username}}">View profile →</a>
+  </nav>
+  <div>
+    {{if or (eq .Tab "") (eq .Tab "profile")}}
+    <form class="card stack" method="post" action="/settings/profile">
+      <input type="hidden" name="_csrf" value="{{.CSRF}}">
+      <h2>Profile</h2>
+      <div><label for="bio">Bio <span class="muted">(Markdown)</span></label><textarea id="bio" name="bio" rows="4">{{.User.Bio}}</textarea></div>
+      <div class="form-row">
+        <div><label for="avatar">Avatar URL</label><input id="avatar" type="url" name="avatar" value="{{.User.Avatar}}" placeholder="https://…"></div>
+        <div><label for="header">Header image URL</label><input id="header" type="url" name="header" value="{{.User.Header}}" placeholder="https://…"></div>
+      </div>
+      <div><label for="links">Links <span class="muted">(one per line, optionally site:url)</span></label><textarea id="links" name="links" rows="3">{{range .Links}}{{.Site}}:{{.URL}}
+{{end}}</textarea></div>
+      <label class="check"><input type="checkbox" name="hide_social_graph" value="1" {{if .User.HideSocialGraph}}checked{{end}}> Hide my followers/following lists</label>
+      <label class="check"><input type="checkbox" name="manually_approves" value="1" {{if .User.ManuallyApproves}}checked{{end}}> Manually approve follow requests</label>
+      <div><button class="btn btn-primary" type="submit">Save profile</button></div>
+    </form>
+    {{else if eq .Tab "account"}}
+    <div class="card">
+      <h2>Account</h2>
+      <p class="muted">Signed in as <strong>{{.User.Username}}</strong> · {{.User.Email}} {{if .User.EmailVerified}}<span class="pill">verified</span>{{else}}<span class="pill">unverified</span>{{end}}</p>
+      <form class="stack mt2" method="post" action="/settings/account">
+        <input type="hidden" name="_csrf" value="{{.CSRF}}"><input type="hidden" name="action" value="username">
+        <div><label for="username">Change username</label><input id="username" type="text" name="username" value="{{.User.Username}}" pattern="[A-Za-z0-9_]+" minlength="3" maxlength="24"><div class="field-hint">Once every 30 days. Your fediverse handle changes with it.</div></div>
+        <div><button class="btn" type="submit">Update username</button></div>
+      </form>
+      <hr>
+      <form class="stack" method="post" action="/settings/account">
+        <input type="hidden" name="_csrf" value="{{.CSRF}}"><input type="hidden" name="action" value="email">
+        <div><label for="email">Change email</label><input id="email" type="email" name="email" value="{{.User.Email}}"></div>
+        <div><button class="btn" type="submit">Update email</button></div>
+      </form>
+      <hr>
+      <form class="stack" method="post" action="/settings/account">
+        <input type="hidden" name="_csrf" value="{{.CSRF}}"><input type="hidden" name="action" value="password">
+        <div><label for="current">Current password</label><input id="current" type="password" name="current" required autocomplete="current-password"></div>
+        <div><label for="new-password">New password</label><input id="new-password" type="password" name="password" required minlength="10" autocomplete="new-password"></div>
+        <div><button class="btn" type="submit">Change password</button></div>
+      </form>
+    </div>
+    <div class="card">
+      <h2>Deactivate account</h2>
+      <p class="muted">Your profile disappears and sessions are signed out. Data is retained; contact the admin to restore or delete it.</p>
+      <form class="row" method="post" action="/settings/deactivate" onsubmit="return confirm('Deactivate your account?')">
+        <input type="hidden" name="_csrf" value="{{.CSRF}}">
+        <input type="password" name="password" placeholder="Confirm password" required>
+        <button class="btn btn-danger" type="submit">Deactivate</button>
+      </form>
+    </div>
+    {{else if eq .Tab "privacy"}}
+    <form class="card stack" method="post" action="/settings/privacy">
+      <input type="hidden" name="_csrf" value="{{.CSRF}}">
+      <h2>Privacy</h2>
+      <label class="check"><input type="checkbox" name="private_profile" value="1" {{if .User.PrivateProfile}}checked{{end}}> Private profile — only approved followers see your logs and lists</label>
+      <label class="check"><input type="checkbox" name="hide_activity" value="1" {{if .User.HideActivity}}checked{{end}}> Hide my activity from public feeds</label>
+      <label class="check"><input type="checkbox" name="hide_social_graph" value="1" {{if .User.HideSocialGraph}}checked{{end}}> Hide followers/following</label>
+      <label class="check"><input type="checkbox" name="manually_approves" value="1" {{if .User.ManuallyApproves}}checked{{end}}> Manually approve follow requests</label>
+      <label class="check"><input type="checkbox" name="adult_optin" value="1" {{if .User.AdultOptIn}}checked{{end}}> Show adult content</label>
+      <div class="form-row">
+        <div><label for="comment_privacy">Who can comment</label><select id="comment_privacy" name="comment_privacy"><option value="everyone" {{if eq .User.CommentPrivacy "everyone"}}selected{{end}}>Everyone</option><option value="friends" {{if eq .User.CommentPrivacy "friends"}}selected{{end}}>Friends</option><option value="none" {{if eq .User.CommentPrivacy "none"}}selected{{end}}>Nobody</option></select></div>
+        <div><label for="note_privacy">Default session note privacy</label><select id="note_privacy" name="note_privacy"><option value="everyone" {{if eq .User.NotePrivacy "everyone"}}selected{{end}}>Everyone</option><option value="friends" {{if eq .User.NotePrivacy "friends"}}selected{{end}}>Friends</option><option value="none" {{if eq .User.NotePrivacy "none"}}selected{{end}}>Private</option></select></div>
+      </div>
+      <div><button class="btn btn-primary" type="submit">Save privacy</button></div>
+    </form>
+    {{else if eq .Tab "preferences"}}
+    <form class="card stack" method="post" action="/settings/preferences">
+      <input type="hidden" name="_csrf" value="{{.CSRF}}">
+      <h2>Preferences</h2>
+      <div class="form-row">
+        <div><label for="star_scale">Rating scale</label><select id="star_scale" name="star_scale"><option value="5" {{if eq .User.StarScale 5}}selected{{end}}>5 stars</option><option value="10" {{if eq .User.StarScale 10}}selected{{end}}>10 points</option></select></div>
+        <div><label for="theme">Theme</label><select id="theme" name="theme"><option value="system" {{if eq .User.Theme "system"}}selected{{end}}>Match system</option><option value="dark" {{if eq .User.Theme "dark"}}selected{{end}}>Dark</option><option value="light" {{if eq .User.Theme "light"}}selected{{end}}>Light</option></select></div>
+      </div>
+      <label class="check"><input type="checkbox" name="high_contrast" value="1" {{if .User.HighContrast}}checked{{end}}> High contrast mode</label>
+      <div class="form-row">
+        <div><label for="cover_mode">Covers show</label><select id="cover_mode" name="cover_mode"><option value="any" {{if eq .User.CoverMode "any"}}selected{{end}}>Community covers</option><option value="mine" {{if eq .User.CoverMode "mine"}}selected{{end}}>My covers only</option><option value="none" {{if eq .User.CoverMode "none"}}selected{{end}}>No covers</option></select></div>
+        <div><label for="time_display">Playtime display</label><select id="time_display" name="time_display"><option value="always" {{if eq .User.TimeDisplay "always"}}selected{{end}}>Always</option><option value="played" {{if eq .User.TimeDisplay "played"}}selected{{end}}>Only played</option><option value="click" {{if eq .User.TimeDisplay "click"}}selected{{end}}>On click</option></select></div>
+      </div>
+      <div class="form-row">
+        <div><label for="timezone">Timezone</label><input id="timezone" type="text" name="timezone" value="{{.User.Timezone}}" placeholder="Europe/London"></div>
+        <div><label for="journal_view">Journal view</label><select id="journal_view" name="journal_view"><option value="calendar" {{if eq .User.JournalView "calendar"}}selected{{end}}>Calendar</option><option value="activity" {{if eq .User.JournalView "activity"}}selected{{end}}>Activity</option><option value="list" {{if eq .User.JournalView "list"}}selected{{end}}>List</option></select></div>
+      </div>
+      <label class="check"><input type="checkbox" name="infinite_scroll" value="1" {{if .User.InfiniteScroll}}checked{{end}}> Infinite scroll (htmx)</label>
+      <label class="check"><input type="checkbox" name="fade_played" value="1" {{if .User.FadePlayed}}checked{{end}}> Fade played games in lists</label>
+      <div><button class="btn btn-primary" type="submit">Save preferences</button></div>
+    </form>
+    {{else if eq .Tab "federation"}}
+    <form class="card stack" method="post" action="/settings/federation">
+      <input type="hidden" name="_csrf" value="{{.CSRF}}">
+      <h2>Federation</h2>
+      <p class="muted">Your actor: <code>{{abs (printf "/users/%s" .User.Username)}}</code></p>
+      <label class="check"><input type="checkbox" name="federation" value="1" {{if .User.Federation}}checked{{end}}> Publish my profile over ActivityPub</label>
+      <label class="check"><input type="checkbox" name="fed_statuses" value="1" {{if .User.FedStatuses}}checked{{end}}> Federate status changes</label>
+      <label class="check"><input type="checkbox" name="fed_reviews" value="1" {{if .User.FedReviews}}checked{{end}}> Federate public reviews</label>
+      <label class="check"><input type="checkbox" name="fed_lists" value="1" {{if .User.FedLists}}checked{{end}}> Federate public lists</label>
+      <p class="field-hint">Followers on other servers receive these as ActivityPub objects. Replies and likes federate back to your inbox.</p>
+      <div><button class="btn btn-primary" type="submit">Save federation</button></div>
+    </form>
+    {{else if eq .Tab "blocks"}}
+    <div class="card">
+      <h2>Blocked accounts</h2>
+      {{range .Blocks}}{{template "user_row" .}}{{else}}<p class="muted">You haven't blocked anyone.</p>{{end}}
+    </div>
+    {{else if eq .Tab "folders"}}
+    <div class="card">
+      <h2>List folders</h2>
+      <p class="muted">Group your lists on your profile.</p>
+      {{range .Folders}}<div class="row between"><span>{{.Name}}</span></div>{{else}}<p class="muted">No folders yet.</p>{{end}}
+      <p class="field-hint mt2">Folder management UI is coming next; folders can already hold lists from any list page.</p>
+    </div>
+    {{else if eq .Tab "import"}}
+    <div class="card">
+      <h2>Export</h2>
+      <p class="muted">Download every log, review, list and library entry as JSON.</p>
+      <a class="btn" href="/settings/export">Download my data</a>
+    </div>
+    <div class="card">
+      <h2>Import</h2>
+      <p class="muted">Upload a Backloggd JSON or CSV export. Shelf flags, ratings, reviews, dates and playtime are imported. Games already in the catalog link immediately; for a full library, run <code>luduslog import backloggd</code> from the command line so missing games can be fetched from IGDB.</p>
+      <form class="stack" method="post" action="/settings/import" enctype="multipart/form-data">
+        <input type="hidden" name="_csrf" value="{{.CSRF}}">
+        <input type="file" name="file" accept=".json,.csv,application/json,text/csv" required>
+        <div><button class="btn btn-primary" type="submit">Import Backloggd export</button></div>
+      </form>
+    </div>
+    {{end}}
+  </div>
+</div>
+{{end}}

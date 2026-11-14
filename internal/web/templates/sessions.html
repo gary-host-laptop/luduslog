@@ -1,0 +1,35 @@
+{{define "content"}}
+<div class="section-head">
+  <div><h1 class="mb0">Play sessions</h1><div class="muted">{{if .Game}}{{.Game.Title}}{{end}} · {{hours .Log.Playtime}} total</div></div>
+  <a class="btn btn-sm" href="/users/{{.User.Username}}/reviews/{{.Log.ID}}">Back to log</a>
+</div>
+<div class="grid grid-2">
+  <section>
+    {{if .Sessions}}
+      {{range .Sessions}}
+      <div class="card mb1">
+        <div class="row between"><strong>{{if .StartedOn}}{{.StartedOn}}{{else}}{{date .CreatedAt}}{{end}}{{if .EndedOn}} → {{.EndedOn}}{{end}}</strong><span>{{hours .Playtime}}</span></div>
+        {{if .Note}}<div class="prose mt1">{{md .Note}}</div>{{end}}
+        {{if .Days}}<div class="pill-row">{{range .Days}}<span class="pill">{{.}}</span>{{end}}</div>{{end}}
+        {{if .Tags}}<div class="pill-row">{{range .Tags}}<span class="pill">#{{.}}</span>{{end}}</div>{{end}}
+        <form method="post" action="/sessions/{{.ID}}/delete" class="mt1"><input type="hidden" name="_csrf" value="{{$.CSRF}}"><button class="linklike" type="submit">Delete session</button></form>
+      </div>
+      {{end}}
+    {{else}}<div class="empty"><h3>No sessions logged</h3><p>Write down what you played today — it feeds your journal and playtime.</p></div>{{end}}
+  </section>
+  <aside class="card">
+    <h2>Add a session</h2>
+    <form class="stack" method="post" action="/logs/{{.Log.ID}}/sessions">
+      <input type="hidden" name="_csrf" value="{{.CSRF}}">
+      <div><label for="note">What happened?</label><textarea id="note" name="note" rows="3" placeholder="Beat the third boss, found the hidden path…"></textarea></div>
+      <div class="form-row">
+        <div><label for="playtime">Hours</label><input id="playtime" type="number" step="0.1" min="0" name="playtime" placeholder="1.5"></div>
+        <div><label for="privacy">Note privacy</label><select id="privacy" name="privacy"><option value="friends">Friends</option><option value="private">Private</option><option value="public">Public</option></select></div>
+      </div>
+      <div><label for="days">Days played</label><input id="days" type="date" name="days"><div class="field-hint">One session can cover several days; add another date for each.</div></div>
+      <div><label for="tags">Tags <span class="muted">(comma separated)</span></label><input id="tags" type="text" name="tags" placeholder="boss, co-op, stream"></div>
+      <button class="btn btn-primary" type="submit">Add session</button>
+    </form>
+  </aside>
+</div>
+{{end}}

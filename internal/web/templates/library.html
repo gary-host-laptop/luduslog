@@ -1,0 +1,26 @@
+{{define "content"}}
+<div class="section-head">
+  <div><h1 class="mb0">Your library</h1><div class="muted">{{len .Entries}} games owned, borrowed or subscribed</div></div>
+  <a class="btn btn-sm" href="/games">Add games</a>
+</div>
+{{if .Entries}}
+<div class="table-wrap card">
+<table>
+  <thead><tr><th>Game</th><th>Platform</th><th>Ownership</th><th>Storefront</th><th></th></tr></thead>
+  <tbody>
+  {{range .Entries}}
+    <tr>
+      <td>{{if .Game}}<a href="/games/{{.Game.Slug}}">{{.Game.Title}}</a>{{else}}#{{.GameID}}{{end}}</td>
+      <td>{{.Platform}}</td>
+      <td>{{.Ownership}}</td>
+      <td>{{.Storefront}}</td>
+      <td class="text-right"><form method="post" action="/library/remove"><input type="hidden" name="_csrf" value="{{$.CSRF}}"><input type="hidden" name="game_id" value="{{.GameID}}"><button class="linklike" type="submit">Remove</button></form></td>
+    </tr>
+  {{end}}
+  </tbody>
+</table>
+</div>
+{{else}}
+<div class="empty"><h3>Your library is empty</h3><p>Add games you own so you can filter your collection and pick covers.</p><a class="btn btn-primary" href="/games">Browse games</a></div>
+{{end}}
+{{end}}

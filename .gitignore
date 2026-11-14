@@ -1,0 +1,10 @@
+/data/
+*.db
+*.db-wal
+*.db-shm
+/config.toml
+/luduslog
+/dist/
+.DS_Store
+/backloggd-*.json
+/backloggd-*.csv
