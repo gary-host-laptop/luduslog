@@ -27,9 +27,18 @@ row. This keeps counts cheap and avoids overloading the activity model.
 
 ## Library flags separate from logs
 
-`statuses` holds current intent (playing, backlog, wishlist, …) while `logs`
-holds diary entries. A user can log a game without changing their library, and
-vice versa. Counters are derived from statuses.
+`statuses` holds current intent (playing, backlog, wishlist) while `logs` holds
+diary entries. A user can log a game without changing their library, and vice
+versa. Counters are derived from statuses.
+
+## Played is a count, not a flag
+
+`statuses.played` records how many times a user has played a game. The game
+page shows it as a compact pill that links to the log editor; the log form owns
+the counter, and completed/replayed log saves keep it at least one. Public
+aggregates count distinct player rows (`played > 0`) rather than summing
+completions. Playing, backlog, and wishlist remain boolean flags. Likes live in
+`game_likes`, separate from statuses and play counts.
 
 ## Sessions and CSRF
 

@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"math"
 	"path/filepath"
 	"strings"
@@ -338,6 +339,135 @@ func TestGameReviewSorting(t *testing.T) {
 	}
 }
 
+func TestPlayedCountAndLikeToggle(t *testing.T) {
+	ctx := context.Background()
+	st := testStore(t)
+	alice, _ := st.CreateUser(ctx, "alice", "alice@example.test", "hash", false)
+	bob, _ := st.CreateUser(ctx, "bob", "bob@example.test", "hash", false)
+	game, _ := st.SaveGame(ctx, &models.Game{IGDBID: -2, Slug: "counter-game", Title: "Counter Game", ReleaseStatus: "released"})
+
+	if err := st.SetPlayedCount(ctx, alice.ID, game.ID, -1); err != nil {
+		t.Fatal(err)
+	}
+	stStatus, _ := st.StatusFor(ctx, alice.ID, game.ID)
+	if stStatus.Played != 0 {
+		t.Fatalf("played went below zero: %d", stStatus.Played)
+	}
+	var rows int
+	st.DB.QueryRowContext(ctx, `SELECT COUNT(*) FROM statuses WHERE user_id=? AND game_id=?`, alice.ID, game.ID).Scan(&rows)
+	if rows != 0 {
+		t.Fatal("empty status row was not deleted")
+	}
+
+	if err := st.SetPlayedCount(ctx, alice.ID, game.ID, 2); err != nil {
+		t.Fatal(err)
+	}
+	stStatus, _ = st.StatusFor(ctx, alice.ID, game.ID)
+	if stStatus.Played != 2 {
+		t.Fatalf("played count = %d, want 2", stStatus.Played)
+	}
+	if err := st.SetPlayedCount(ctx, bob.ID, game.ID, 4); err != nil {
+		t.Fatal(err)
+	}
+	updated, _ := st.GameByID(ctx, game.ID)
+	if updated.Plays != 2 {
+		t.Fatalf("public played count = %d, want 2 distinct players", updated.Plays)
+	}
+	if counts := st.GameStatusCounts(ctx, game.ID); counts["played"] != 2 {
+		t.Fatalf("status counts played = %d, want 2", counts["played"])
+	}
+	stats, _ := st.StatsFor(ctx, alice.ID)
+	if stats.GamesPlayed != 1 {
+		t.Fatalf("alice games played = %d, want 1", stats.GamesPlayed)
+	}
+	if err := st.SetStatuses(ctx, alice.ID, game.ID, true, false, false, true, false); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.SetStatuses(ctx, alice.ID, game.ID, false, false, false, true, false); err != nil {
+		t.Fatal(err)
+	}
+	stStatus, _ = st.StatusFor(ctx, alice.ID, game.ID)
+	if stStatus.Played != 2 || !stStatus.Wishlist {
+		t.Fatalf("import did not retain count and wishlist: %+v", stStatus)
+	}
+	if err := st.SetPlayedCount(ctx, alice.ID, game.ID, 0); err != nil {
+		t.Fatal(err)
+	}
+	stStatus, _ = st.StatusFor(ctx, alice.ID, game.ID)
+	if stStatus.Played != 0 || !stStatus.Wishlist {
+		t.Fatalf("wishlist was lost with the play count: %+v", stStatus)
+	}
+	if err := st.SetPlayedCount(ctx, alice.ID, game.ID, -1); err != nil {
+		t.Fatal(err)
+	}
+	stStatus, _ = st.StatusFor(ctx, alice.ID, game.ID)
+	if stStatus.Played != 0 || !stStatus.Wishlist {
+		t.Fatalf("negative adjustment changed a wishlist-only row: %+v", stStatus)
+	}
+	updated, _ = st.GameByID(ctx, game.ID)
+	if updated.Plays != 1 || updated.Wishlists != 1 {
+		t.Fatalf("counts after decrement: plays=%d wishlists=%d", updated.Plays, updated.Wishlists)
+	}
+	stats, _ = st.StatsFor(ctx, alice.ID)
+	if stats.GamesPlayed != 0 || stats.GamesWishlist != 1 {
+		t.Fatalf("stats after decrement: %+v", stats)
+	}
+
+	liked, err := st.ToggleGameLike(ctx, alice.ID, game.ID)
+	if err != nil || !liked {
+		t.Fatalf("like toggle = %v, %v", liked, err)
+	}
+	stStatus, _ = st.StatusFor(ctx, alice.ID, game.ID)
+	updated, _ = st.GameByID(ctx, game.ID)
+	if !stStatus.Liked || !stStatus.Wishlist || stStatus.Played != 0 || updated.Likes != 1 || updated.Plays != 1 {
+		t.Fatalf("like leaked into status/play counts: status=%+v game likes=%d plays=%d", stStatus, updated.Likes, updated.Plays)
+	}
+	liked, err = st.ToggleGameLike(ctx, alice.ID, game.ID)
+	if err != nil || liked {
+		t.Fatalf("second like toggle = %v, %v", liked, err)
+	}
+	updated, _ = st.GameByID(ctx, game.ID)
+	if updated.Likes != 0 {
+		t.Fatalf("game likes after unlike = %d", updated.Likes)
+	}
+
+	if err := st.SetStatusFlag(ctx, alice.ID, game.ID, "played", true); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("played should not be a settable flag: %v", err)
+	}
+	if err := st.EnsurePlayed(ctx, alice.ID, game.ID); err != nil {
+		t.Fatal(err)
+	}
+	stStatus, _ = st.StatusFor(ctx, alice.ID, game.ID)
+	if stStatus.Played != 1 || !stStatus.Wishlist {
+		t.Fatalf("EnsurePlayed did not preserve the wishlist: %+v", stStatus)
+	}
+
+	empty, _ := st.SaveGame(ctx, &models.Game{IGDBID: -3, Slug: "empty-status-game", Title: "Empty Status Game", ReleaseStatus: "released"})
+	if _, err := st.DB.ExecContext(ctx, `INSERT INTO statuses(user_id,game_id,played,playing,backlog,wishlist,updated_at) VALUES(?,?,0,0,0,0,?)`, alice.ID, empty.ID, Now()); err != nil {
+		t.Fatal(err)
+	}
+	games, _, err := st.ListGames(ctx, GameFilter{UserID: alice.ID, NoStatus: true, Limit: 100})
+	if err != nil {
+		t.Fatal(err)
+	}
+	found := false
+	for _, g := range games {
+		if g.ID == empty.ID {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatal("NoStatus filter did not ignore an empty status row")
+	}
+	if err := st.RefreshGameStats(ctx, empty.ID); err != nil {
+		t.Fatal(err)
+	}
+	empty, _ = st.GameByID(ctx, empty.ID)
+	if empty.Popularity != 0 {
+		t.Fatalf("empty status row contributed popularity: %d", empty.Popularity)
+	}
+}
+
 func TestStatsAndPrivacy(t *testing.T) {
 	ctx := context.Background()
 	st := testStore(t)
@@ -349,7 +479,7 @@ func TestStatsAndPrivacy(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := st.SetStatusFlag(ctx, alice.ID, game.ID, "played", true); err != nil {
+	if err := st.EnsurePlayed(ctx, alice.ID, game.ID); err != nil {
 		t.Fatal(err)
 	}
 	_, err = st.CreateLog(ctx, LogInput{UserID: alice.ID, GameID: game.ID, Rating: 8, Status: "played", Playtime: 4})

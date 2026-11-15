@@ -387,7 +387,7 @@ func (s *Store) FriendsWhoInteracted(ctx context.Context, me, gameID int64, n in
 		st, _ := s.StatusFor(ctx, fid, gameID)
 		var rating float64
 		s.DB.QueryRowContext(ctx, `SELECT COALESCE(MAX(rating),0) FROM logs WHERE user_id=? AND game_id=? AND deleted_at IS NULL`, fid, gameID).Scan(&rating)
-		if st.Played || st.Playing || st.Backlog || st.Wishlist || rating > 0 {
+		if st.Played > 0 || st.Playing || st.Backlog || st.Wishlist || rating > 0 {
 			out = append(out, struct {
 				User   *models.User
 				Rating float64

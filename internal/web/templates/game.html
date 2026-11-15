@@ -7,20 +7,21 @@
   <div>
     <img class="cover" src="{{cover .Game}}" alt="Cover of {{.Game.Title}}">
     {{if .LoggedIn}}
-    <div class="card mt1" style="padding:.8rem">
-      <div class="muted" style="font-size:.8rem">In your library</div>
+    <div class="card mt1 game-library-card">
+      <div class="library-card-head">
+        <span class="muted">In your library</span>
+        <a class="played-pill" href="/games/{{.Game.Slug}}/log" title="Edit your log to change the played count" aria-label="Played {{.Status.Played}} times. Edit your log to change the count."><i class="ph-light ph-check-circle icon" aria-hidden="true"></i><span>Played</span><strong>{{.Status.Played}}</strong></a>
+      </div>
       <div class="status-bar">
-        <form method="post" action="/games/{{.Game.Slug}}/status"><input type="hidden" name="_csrf" value="{{.CSRF}}"><input type="hidden" name="flag" value="played"><input type="hidden" name="on" value="{{if .Status.Played}}0{{else}}1{{end}}"><button class="{{if .Status.Played}}on{{end}}" type="submit">Played</button></form>
-        <form method="post" action="/games/{{.Game.Slug}}/status"><input type="hidden" name="_csrf" value="{{.CSRF}}"><input type="hidden" name="flag" value="playing"><input type="hidden" name="on" value="{{if .Status.Playing}}0{{else}}1{{end}}"><button class="{{if .Status.Playing}}on{{end}}" type="submit">Playing</button></form>
-        <form method="post" action="/games/{{.Game.Slug}}/status"><input type="hidden" name="_csrf" value="{{.CSRF}}"><input type="hidden" name="flag" value="backlog"><input type="hidden" name="on" value="{{if .Status.Backlog}}0{{else}}1{{end}}"><button class="{{if .Status.Backlog}}on{{end}}" type="submit">Backlog</button></form>
-        <form method="post" action="/games/{{.Game.Slug}}/status"><input type="hidden" name="_csrf" value="{{.CSRF}}"><input type="hidden" name="flag" value="wishlist"><input type="hidden" name="on" value="{{if .Status.Wishlist}}0{{else}}1{{end}}"><button class="{{if .Status.Wishlist}}on{{end}}" type="submit">Wishlist</button></form>
-        <form method="post" action="/games/{{.Game.Slug}}/status"><input type="hidden" name="_csrf" value="{{.CSRF}}"><input type="hidden" name="flag" value="liked"><input type="hidden" name="on" value="{{if .Status.Liked}}0{{else}}1{{end}}"><button class="{{if .Status.Liked}}on{{end}}" type="submit">♥ Liked</button></form>
+        <form method="post" action="/games/{{.Game.Slug}}/status"><input type="hidden" name="_csrf" value="{{.CSRF}}"><input type="hidden" name="flag" value="playing"><input type="hidden" name="on" value="{{if .Status.Playing}}0{{else}}1{{end}}"><button class="{{if .Status.Playing}}on{{end}}" type="submit"><i class="ph-light ph-play icon" aria-hidden="true"></i>Playing</button></form>
+        <form method="post" action="/games/{{.Game.Slug}}/status"><input type="hidden" name="_csrf" value="{{.CSRF}}"><input type="hidden" name="flag" value="backlog"><input type="hidden" name="on" value="{{if .Status.Backlog}}0{{else}}1{{end}}"><button class="{{if .Status.Backlog}}on{{end}}" type="submit"><i class="ph-light ph-stack icon" aria-hidden="true"></i>Backlog</button></form>
+        <form method="post" action="/games/{{.Game.Slug}}/status"><input type="hidden" name="_csrf" value="{{.CSRF}}"><input type="hidden" name="flag" value="wishlist"><input type="hidden" name="on" value="{{if .Status.Wishlist}}0{{else}}1{{end}}"><button class="{{if .Status.Wishlist}}on{{end}}" type="submit"><i class="ph-light ph-heart icon" aria-hidden="true"></i>Wishlist</button></form>
       </div>
-      <div class="mt1">
-        <a class="btn btn-primary btn-block" href="/games/{{.Game.Slug}}/log">{{if .UserLog}}Edit your log{{else}}Log this game{{end}}</a>
-        {{if .UserLog}}<a class="btn btn-sm btn-block mt1" href="/logs/{{.UserLog.ID}}/sessions">Play sessions</a>{{end}}
+      <div class="game-log-actions">
+        <a class="btn btn-primary btn-block" href="/games/{{.Game.Slug}}/log"><i class="ph-light ph-notebook icon" aria-hidden="true"></i>{{if .UserLog}}Edit your log{{else}}Log this game{{end}}</a>
+        {{if .UserLog}}<a class="btn btn-sm btn-block" href="/logs/{{.UserLog.ID}}/sessions"><i class="ph-light ph-clock-counter-clockwise icon" aria-hidden="true"></i>Play sessions</a>{{end}}
       </div>
-      {{if .UserRating}}<div class="mt1">Your rating: {{stars .UserRating 5}} <span class="muted">{{rating .UserRating 10}}/10</span></div>{{end}}
+      {{if .UserRating}}<div class="game-user-rating"><i class="ph-light ph-star icon" aria-hidden="true"></i>Your rating: {{stars .UserRating 5}} <span class="muted">{{rating .UserRating 10}}/10</span></div>{{end}}
     </div>
     {{else}}
     <div class="card mt1"><a class="btn btn-primary btn-block" href="/login">Log in to track this game</a></div>
@@ -35,12 +36,13 @@
     </div>
 
     <div class="stat-strip">
-      <div><strong>{{if .Game.RatingCount}}{{rating .Game.Weighted 10}}{{else}}—{{end}}</strong>weighted rating</div>
-      <div><strong>{{.Game.RatingCount}}</strong>ratings</div>
-      <div><strong>{{.Game.Reviews}}</strong>reviews</div>
-      <div><strong>{{.Game.Plays}}</strong>played</div>
-      <div><strong>{{.Game.Backlogs}}</strong>backlogged</div>
-      <div><strong>{{.Game.ListsCount}}</strong>lists</div>
+      <div><strong>{{if .Game.RatingCount}}{{rating .Game.Weighted 10}}{{else}}—{{end}}</strong><span class="stat-label"><i class="ph-light ph-star icon" aria-hidden="true"></i>weighted rating</span></div>
+      <div><strong>{{.Game.RatingCount}}</strong><span class="stat-label"><i class="ph-light ph-users icon" aria-hidden="true"></i>ratings</span></div>
+      <div><strong>{{.Game.Reviews}}</strong><span class="stat-label"><i class="ph-light ph-chat-circle icon" aria-hidden="true"></i>reviews</span></div>
+      <div><strong>{{.Game.Plays}}</strong><span class="stat-label"><i class="ph-light ph-game-controller icon" aria-hidden="true"></i>played</span></div>
+      <div><strong>{{.Game.Backlogs}}</strong><span class="stat-label"><i class="ph-light ph-stack icon" aria-hidden="true"></i>backlogged</span></div>
+      <div><strong>{{.Game.ListsCount}}</strong><span class="stat-label"><i class="ph-light ph-list icon" aria-hidden="true"></i>lists</span></div>
+      {{if .LoggedIn}}{{template "game_like" dict "Slug" .Game.Slug "Liked" .Status.Liked "Likes" .Game.Likes "CSRF" .CSRF}}{{else}}<span class="game-like like-count-only" aria-label="{{.Game.Likes}} likes">{{.Game.Likes}}</span>{{end}}
     </div>
 
     {{if .Game.Genres}}<div class="pill-row">{{range .Game.Genres}}<a class="pill" href="/games?genre={{.}}">{{.}}</a>{{end}}</div>{{end}}
@@ -168,4 +170,11 @@
 </section>
 {{end}}
 </article>
+{{end}}
+
+{{define "game_like"}}
+<form class="game-like" method="post" action="/games/{{.Slug}}/like" hx-post="/games/{{.Slug}}/like" hx-target="this" hx-swap="outerHTML">
+  <input type="hidden" name="_csrf" value="{{.CSRF}}">
+  <button class="heart{{if .Liked}} on{{end}}" type="submit" aria-pressed="{{if .Liked}}true{{else}}false{{end}}" aria-label="{{if .Liked}}Unlike{{else}}Like{{end}} this game"><i class="ph-light ph-heart icon" aria-hidden="true"></i>{{if .Likes}}<span class="heart-count">{{.Likes}}</span>{{end}}</button>
+</form>
 {{end}}

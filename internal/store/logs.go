@@ -478,15 +478,14 @@ func (s *Store) HasLikedLog(ctx context.Context, logID, userID int64) bool {
 
 func (s *Store) StatusFor(ctx context.Context, userID, gameID int64) (models.Status, error) {
 	st := models.Status{UserID: userID, GameID: gameID}
-	var played, playing, backlog, wishlist, liked int
+	var playing, backlog, wishlist, liked int
 	var updated string
 	err := s.DB.QueryRowContext(ctx, `SELECT played,playing,backlog,wishlist,updated_at FROM statuses WHERE user_id=? AND game_id=?`, userID, gameID).
-		Scan(&played, &playing, &backlog, &wishlist, &updated)
+		Scan(&st.Played, &playing, &backlog, &wishlist, &updated)
 	if err != nil && err != sql.ErrNoRows {
 		return st, err
 	}
 	s.DB.QueryRowContext(ctx, `SELECT COUNT(*) FROM game_likes WHERE user_id=? AND game_id=?`, userID, gameID).Scan(&liked)
-	st.Played = played == 1
 	st.Playing = playing == 1
 	st.Backlog = backlog == 1
 	st.Wishlist = wishlist == 1
@@ -499,20 +498,10 @@ func (s *Store) StatusFor(ctx context.Context, userID, gameID int64) (models.Sta
 
 // SetStatusFlag turns one shelf flag on or off and keeps the others.
 func (s *Store) SetStatusFlag(ctx context.Context, userID, gameID int64, flag string, on bool) error {
-	valid := map[string]bool{"played": true, "playing": true, "backlog": true, "wishlist": true, "liked": true}
-	if !valid[flag] {
+	switch flag {
+	case "playing", "backlog", "wishlist":
+	default:
 		return ErrNotFound
-	}
-	if flag == "liked" {
-		if on {
-			_, err := s.DB.ExecContext(ctx, `INSERT INTO game_likes(user_id,game_id,created_at) VALUES(?,?,?) ON CONFLICT DO NOTHING`, userID, gameID, Now())
-			if err != nil {
-				return err
-			}
-		} else if _, err := s.DB.ExecContext(ctx, `DELETE FROM game_likes WHERE user_id=? AND game_id=?`, userID, gameID); err != nil {
-			return err
-		}
-		return s.RefreshGameStats(ctx, gameID)
 	}
 	now := Now()
 	_, err := s.DB.ExecContext(ctx, `INSERT INTO statuses(user_id,game_id,`+flag+`,updated_at) VALUES(?,?,?,?)
@@ -520,25 +509,107 @@ func (s *Store) SetStatusFlag(ctx context.Context, userID, gameID int64, flag st
 	if err != nil {
 		return err
 	}
+	if err := s.cleanupEmptyStatus(ctx, userID, gameID); err != nil {
+		return err
+	}
 	return s.RefreshGameStats(ctx, gameID)
 }
 
-// SetStatuses replaces all shelf flags in one write. Imports use this so a
-// single game refresh covers every flag instead of one per shelf.
-func (s *Store) SetStatuses(ctx context.Context, userID, gameID int64, played, playing, backlog, wishlist, liked bool) error {
+// SetPlayedCount sets the user's play counter exactly, clamping it at zero.
+func (s *Store) SetPlayedCount(ctx context.Context, userID, gameID int64, count int) error {
+	if count < 0 {
+		count = 0
+	}
 	now := Now()
-	_, err := s.DB.ExecContext(ctx, `INSERT INTO statuses(user_id,game_id,played,playing,backlog,wishlist,updated_at)
-		VALUES(?,?,?,?,?,?,?)
-		ON CONFLICT(user_id,game_id) DO UPDATE SET played=excluded.played,playing=excluded.playing,
-		backlog=excluded.backlog,wishlist=excluded.wishlist,updated_at=excluded.updated_at`,
-		userID, gameID, b2i(played), b2i(playing), b2i(backlog), b2i(wishlist), now)
+	_, err := s.DB.ExecContext(ctx, `INSERT INTO statuses(user_id,game_id,played,updated_at)
+		VALUES(?,?,?,?)
+		ON CONFLICT(user_id,game_id) DO UPDATE SET played=?,updated_at=?`,
+		userID, gameID, count, now, count, now)
 	if err != nil {
 		return err
 	}
+	if err := s.cleanupEmptyStatus(ctx, userID, gameID); err != nil {
+		return err
+	}
+	return s.RefreshGameStats(ctx, gameID)
+}
+
+// EnsurePlayed raises the play counter to at least one.
+func (s *Store) EnsurePlayed(ctx context.Context, userID, gameID int64) error {
+	now := Now()
+	_, err := s.DB.ExecContext(ctx, `INSERT INTO statuses(user_id,game_id,played,updated_at)
+		VALUES(?,?,1,?)
+		ON CONFLICT(user_id,game_id) DO UPDATE SET played=MAX(played,1),updated_at=?`,
+		userID, gameID, now, now)
+	if err != nil {
+		return err
+	}
+	return s.RefreshGameStats(ctx, gameID)
+}
+
+func (s *Store) cleanupEmptyStatus(ctx context.Context, userID, gameID int64) error {
+	_, err := s.DB.ExecContext(ctx, `DELETE FROM statuses
+		WHERE user_id=? AND game_id=? AND played=0 AND playing=0 AND backlog=0 AND wishlist=0`, userID, gameID)
+	return err
+}
+
+// ToggleGameLike flips a game like and reports the new state. Likes stay
+// separate from shelf flags and play counts.
+func (s *Store) ToggleGameLike(ctx context.Context, userID, gameID int64) (bool, error) {
+	tx, err := s.DB.BeginTx(ctx, nil)
+	if err != nil {
+		return false, err
+	}
+	defer tx.Rollback()
+	var existing int
+	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM game_likes WHERE user_id=? AND game_id=?`, userID, gameID).Scan(&existing); err != nil {
+		return false, err
+	}
+	liked := existing == 0
 	if liked {
-		s.DB.ExecContext(ctx, `INSERT INTO game_likes(user_id,game_id,created_at) VALUES(?,?,?) ON CONFLICT DO NOTHING`, userID, gameID, now)
+		_, err = tx.ExecContext(ctx, `INSERT INTO game_likes(user_id,game_id,created_at) VALUES(?,?,?)`, userID, gameID, Now())
 	} else {
-		s.DB.ExecContext(ctx, `DELETE FROM game_likes WHERE user_id=? AND game_id=?`, userID, gameID)
+		_, err = tx.ExecContext(ctx, `DELETE FROM game_likes WHERE user_id=? AND game_id=?`, userID, gameID)
+	}
+	if err != nil {
+		return false, err
+	}
+	if err := tx.Commit(); err != nil {
+		return false, err
+	}
+	if err := s.RefreshGameStats(ctx, gameID); err != nil {
+		return false, err
+	}
+	return liked, nil
+}
+
+// SetStatuses replaces all shelf flags in one write. Imports use this so a
+// single game refresh covers every flag instead of one per shelf. A played
+// import keeps any higher play count the user has already recorded.
+func (s *Store) SetStatuses(ctx context.Context, userID, gameID int64, played, playing, backlog, wishlist, liked bool) error {
+	now := Now()
+	playedCount := 0
+	if played {
+		playedCount = 1
+	}
+	_, err := s.DB.ExecContext(ctx, `INSERT INTO statuses(user_id,game_id,played,playing,backlog,wishlist,updated_at)
+		VALUES(?,?,?,?,?,?,?)
+		ON CONFLICT(user_id,game_id) DO UPDATE SET
+		played=CASE WHEN excluded.played>0 THEN MAX(statuses.played,1) ELSE statuses.played END,
+		playing=excluded.playing,backlog=excluded.backlog,wishlist=excluded.wishlist,updated_at=excluded.updated_at`,
+		userID, gameID, playedCount, b2i(playing), b2i(backlog), b2i(wishlist), now)
+	if err != nil {
+		return err
+	}
+	if err := s.cleanupEmptyStatus(ctx, userID, gameID); err != nil {
+		return err
+	}
+	if liked {
+		if _, err := s.DB.ExecContext(ctx, `INSERT INTO game_likes(user_id,game_id,created_at) VALUES(?,?,?) ON CONFLICT DO NOTHING`, userID, gameID, now); err != nil {
+			return err
+		}
+	} else if _, err := s.DB.ExecContext(ctx, `DELETE FROM game_likes WHERE user_id=? AND game_id=?`, userID, gameID); err != nil {
+		return err
 	}
 	return s.RefreshGameStats(ctx, gameID)
 }
@@ -554,19 +625,22 @@ func (s *Store) ClearStatus(ctx context.Context, userID, gameID int64) error {
 // GameStatusCounts returns counts per shelf and the viewer's status.
 func (s *Store) GameStatusCounts(ctx context.Context, gameID int64) map[string]int {
 	out := map[string]int{}
-	rows, err := s.DB.QueryContext(ctx, `SELECT SUM(played),SUM(playing),SUM(backlog),SUM(wishlist) FROM statuses WHERE game_id=?`, gameID)
+	rows, err := s.DB.QueryContext(ctx, `SELECT
+		COALESCE(SUM(CASE WHEN played>0 THEN 1 ELSE 0 END),0),
+		COALESCE(SUM(playing),0),COALESCE(SUM(backlog),0),COALESCE(SUM(wishlist),0)
+		FROM statuses WHERE game_id=?`, gameID)
 	if err != nil {
 		return out
 	}
-	var p, pl, b, w sql.NullInt64
+	var p, pl, b, w int
 	if rows.Next() {
 		rows.Scan(&p, &pl, &b, &w)
 	}
 	rows.Close()
-	out["played"] = int(p.Int64)
-	out["playing"] = int(pl.Int64)
-	out["backlog"] = int(b.Int64)
-	out["wishlist"] = int(w.Int64)
+	out["played"] = p
+	out["playing"] = pl
+	out["backlog"] = b
+	out["wishlist"] = w
 	var likes int
 	s.DB.QueryRowContext(ctx, `SELECT COUNT(*) FROM game_likes WHERE game_id=?`, gameID).Scan(&likes)
 	out["liked"] = likes

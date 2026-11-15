@@ -1,6 +1,7 @@
 package web
 
 import (
+	"context"
 	"net/http"
 	"strconv"
 	"strings"
@@ -20,7 +21,7 @@ func (s *Server) setStatus(w http.ResponseWriter, r *http.Request) {
 	flag := r.FormValue("flag")
 	on := r.FormValue("on") != "0"
 	switch flag {
-	case "played", "playing", "backlog", "wishlist", "liked":
+	case "playing", "backlog", "wishlist":
 	default:
 		s.notFound(w, r)
 		return
@@ -29,49 +30,8 @@ func (s *Server) setStatus(w http.ResponseWriter, r *http.Request) {
 		s.serverError(w, r, err)
 		return
 	}
-	if flag == "liked" {
-		s.st.AddActivity(r.Context(), u.ID, "liked", &g.ID, nil, nil, "", "public")
-	} else {
-		s.st.AddActivity(r.Context(), u.ID, "status", &g.ID, nil, nil, flag, "public")
-	}
-	if s.isHTMX(r) {
-		st, _ := s.st.StatusFor(r.Context(), u.ID, g.ID)
-		w.Header().Set("Content-Type", "text/html; charset=utf-8")
-		csrf, _ := r.Context().Value(ctxCSRF).(string)
-		w.Write([]byte(statusBarHTML(g, st, true, csrf)))
-		return
-	}
+	s.st.AddActivity(r.Context(), u.ID, "status", &g.ID, nil, nil, flag, "public")
 	s.redirect(w, r, "/games/"+g.Slug)
-}
-
-func statusBarHTML(g *models.Game, st models.Status, loggedIn bool, csrf string) string {
-	if !loggedIn {
-		return `<a class="btn btn-sm" href="/login">Log in to track this game</a>`
-	}
-	flags := []struct {
-		key, label string
-		on         bool
-	}{
-		{"played", "Played", st.Played},
-		{"playing", "Playing", st.Playing},
-		{"backlog", "Backlog", st.Backlog},
-		{"wishlist", "Wishlist", st.Wishlist},
-		{"liked", "Liked", st.Liked},
-	}
-	var b strings.Builder
-	b.WriteString(`<form class="status-bar" hx-post="/games/` + g.Slug + `/status" hx-target="this" hx-swap="outerHTML">`)
-	b.WriteString(`<input type="hidden" name="_csrf" value="` + csrf + `">`)
-	for _, f := range flags {
-		on := "0"
-		cls := ""
-		if f.on {
-			on = "1"
-			cls = " on"
-		}
-		b.WriteString(`<button type="submit" name="flag" value="` + f.key + `" data-on="` + on + `" class="` + strings.TrimSpace(cls) + `">` + f.label + `</button>`)
-	}
-	b.WriteString(`</form>`)
-	return b.String()
 }
 
 func (s *Server) likeGame(w http.ResponseWriter, r *http.Request) {
@@ -81,11 +41,20 @@ func (s *Server) likeGame(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	u := currentUser(r)
-	st, _ := s.st.StatusFor(r.Context(), u.ID, g.ID)
-	s.st.SetStatusFlag(r.Context(), u.ID, g.ID, "liked", !st.Liked)
-	likes, users := s.st.GameLikes(r.Context(), g.ID, 5)
+	liked, err := s.st.ToggleGameLike(r.Context(), u.ID, g.ID)
+	if err != nil {
+		s.serverError(w, r, err)
+		return
+	}
+	if liked {
+		s.st.AddActivity(r.Context(), u.ID, "liked", &g.ID, nil, nil, "", "public")
+	}
 	if s.isHTMX(r) {
-		s.renderFragment(w, "game", "game_likes", map[string]any{"Game": g, "Likes": likes, "Likers": users, "User": u})
+		likes, _ := s.st.GameLikes(r.Context(), g.ID, 0)
+		csrf, _ := r.Context().Value(ctxCSRF).(string)
+		s.renderFragment(w, "game", "game_like", map[string]any{
+			"Slug": g.Slug, "Liked": liked, "Likes": likes, "CSRF": csrf,
+		})
 		return
 	}
 	s.redirect(w, r, "/games/"+g.Slug)
@@ -97,8 +66,40 @@ type logFormData struct {
 	Log       *models.Log
 	Platforms []models.Platform
 	Editions  []models.Game
+	Played    int
 	Error     string
 	Action    string
+}
+
+func playedLogStatus(status string) bool {
+	return status == "played" || status == "replayed" || status == "completed"
+}
+
+// logFormPlayed shows the real counter, defaulting a fresh play-like log to 1.
+func (s *Server) logFormPlayed(ctx context.Context, userID, gameID int64, l *models.Log) int {
+	st, _ := s.st.StatusFor(ctx, userID, gameID)
+	if st.Played > 0 {
+		return st.Played
+	}
+	if l == nil || l.Status == "" || playedLogStatus(l.Status) {
+		return 1
+	}
+	return 0
+}
+
+func playedCountFrom(r *http.Request) (int, bool) {
+	raw := strings.TrimSpace(r.FormValue("played"))
+	if raw == "" {
+		return 0, false
+	}
+	n, err := strconv.Atoi(raw)
+	if err != nil {
+		return 0, false
+	}
+	if n < 0 {
+		n = 0
+	}
+	return n, true
 }
 
 func (s *Server) logForm(w http.ResponseWriter, r *http.Request) {
@@ -116,6 +117,7 @@ func (s *Server) logForm(w http.ResponseWriter, r *http.Request) {
 	if r.URL.Query().Get("review") == "1" {
 		data.Log = &models.Log{UserID: u.ID, GameID: g.ID}
 	}
+	data.Played = s.logFormPlayed(r.Context(), u.ID, g.ID, data.Log)
 	data.Action = "/games/" + g.Slug + "/log"
 	s.render(w, r, "log_form", data)
 }
@@ -131,7 +133,8 @@ func (s *Server) logEditForm(w http.ResponseWriter, r *http.Request) {
 	g, _ := s.st.GameByID(r.Context(), l.GameID)
 	g, _ = s.st.GameDetail(r.Context(), g)
 	s.render(w, r, "log_form", logFormData{
-		Page: s.page(r, "Edit log"), Game: g, Log: l, Platforms: s.st.Platforms(r.Context()), Action: "/logs/" + itoa(id) + "/edit",
+		Page: s.page(r, "Edit log"), Game: g, Log: l, Platforms: s.st.Platforms(r.Context()),
+		Played: s.logFormPlayed(r.Context(), u.ID, l.GameID, l), Action: "/logs/" + itoa(id) + "/edit",
 	})
 }
 
@@ -192,9 +195,25 @@ func (s *Server) logSubmit(w http.ResponseWriter, r *http.Request) {
 		s.serverError(w, r, err)
 		return
 	}
-	s.st.SetStatusFlag(r.Context(), u.ID, g.ID, statusFlag(in.Status), !in.Draft)
-	if in.Status != "wishlist" && in.Status != "backlog" {
-		s.st.SetStatusFlag(r.Context(), u.ID, g.ID, "played", true)
+	played, hasPlayed := playedCountFrom(r)
+	if !in.Draft {
+		switch in.Status {
+		case "playing", "backlog", "wishlist":
+			s.st.SetStatusFlag(r.Context(), u.ID, g.ID, in.Status, true)
+		case "played", "replayed", "completed":
+			if !hasPlayed {
+				s.st.EnsurePlayed(r.Context(), u.ID, g.ID)
+			}
+		}
+		if hasPlayed {
+			if playedLogStatus(in.Status) && played < 1 {
+				played = 1
+			}
+			if err := s.st.SetPlayedCount(r.Context(), u.ID, g.ID, played); err != nil {
+				s.serverError(w, r, err)
+				return
+			}
+		}
 	}
 	if !in.Draft {
 		s.st.AddActivity(r.Context(), u.ID, "log", &g.ID, &l.ID, nil, "", "public")
@@ -211,19 +230,6 @@ func (s *Server) logSubmit(w http.ResponseWriter, r *http.Request) {
 	s.redirect(w, r, "/games/"+g.Slug)
 }
 
-func statusFlag(status string) string {
-	switch status {
-	case "playing":
-		return "playing"
-	case "backlog":
-		return "backlog"
-	case "wishlist":
-		return "wishlist"
-	default:
-		return "played"
-	}
-}
-
 func (s *Server) logEdit(w http.ResponseWriter, r *http.Request) {
 	id, _ := strconv.ParseInt(r.PathValue("id"), 10, 64)
 	u := currentUser(r)
@@ -236,6 +242,21 @@ func (s *Server) logEdit(w http.ResponseWriter, r *http.Request) {
 	if _, err := s.st.UpdateLog(r.Context(), id, in); err != nil {
 		s.serverError(w, r, err)
 		return
+	}
+	played, hasPlayed := playedCountFrom(r)
+	if !in.Draft {
+		if playedLogStatus(in.Status) && !hasPlayed {
+			s.st.EnsurePlayed(r.Context(), u.ID, l.GameID)
+		}
+		if hasPlayed {
+			if playedLogStatus(in.Status) && played < 1 {
+				played = 1
+			}
+			if err := s.st.SetPlayedCount(r.Context(), u.ID, l.GameID, played); err != nil {
+				s.serverError(w, r, err)
+				return
+			}
+		}
 	}
 	s.flash(w, r, "success", "Log updated.")
 	s.redirect(w, r, "/users/"+u.Username+"/reviews/"+itoa(id))

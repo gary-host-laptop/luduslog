@@ -33,9 +33,9 @@ CGO_ENABLED=0 go build -o luduslog ./cmd/luduslog
 
 - **Games** with editions, bundles, platforms, genres, companies, relations,
   covers, release dates, and IGDB-backed metadata.
-- **Logging** with statuses (played, playing, backlog, wishlist, abandoned,
-  replayed), ratings, reviews with spoilers, replay/mastered flags, platforms,
-  ownership, dates, playtime, difficulty, and drafts.
+- **Logging** with statuses (played count, playing, backlog, wishlist,
+  abandoned, replayed), ratings, reviews with spoilers, replay/mastered flags,
+  platforms, ownership, dates, playtime, difficulty, and drafts.
 - **Journals and sessions** with per-day playtime, notes, tags, and privacy.
 - **Library** views for playing, backlog, wishlist, completed, and abandoned.
 - **Reviews and comments** with mentions and safe Markdown.

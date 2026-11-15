@@ -47,7 +47,7 @@
 {{define "like_button"}}
 <form class="inline-form" method="post" action="{{.Action}}">
   <input type="hidden" name="_csrf" value="{{.CSRF}}">
-  <button class="linklike {{if .On}}on{{end}}" type="submit">♥ Like{{if .Count}} · {{.Count}}{{end}}</button>
+  <button class="linklike {{if .On}}on{{end}}" type="submit"><i class="ph-light ph-heart icon" aria-hidden="true"></i>Like{{if .Count}} · {{.Count}}{{end}}</button>
 </form>
 {{end}}
 

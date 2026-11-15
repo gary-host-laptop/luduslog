@@ -351,7 +351,9 @@ func (f GameFilter) where(ctx context.Context, s *Store) (string, []any) {
 			var parts []string
 			for _, st := range f.Statuses {
 				switch st {
-				case "played", "playing", "backlog", "wishlist":
+				case "played":
+					parts = append(parts, "st.played>0")
+				case "playing", "backlog", "wishlist":
 					parts = append(parts, "st."+st+"=1")
 				}
 			}
@@ -373,11 +375,11 @@ func (f GameFilter) where(ctx context.Context, s *Store) (string, []any) {
 			args = append(args, f.UserID)
 		}
 		if f.HideOwned {
-			conds = append(conds, "NOT EXISTS(SELECT 1 FROM statuses st WHERE st.game_id=g.id AND st.user_id=? AND (st.played=1 OR st.playing=1 OR st.backlog=1 OR st.wishlist=1))")
+			conds = append(conds, "NOT EXISTS(SELECT 1 FROM statuses st WHERE st.game_id=g.id AND st.user_id=? AND (st.played>0 OR st.playing=1 OR st.backlog=1 OR st.wishlist=1))")
 			args = append(args, f.UserID)
 		}
 		if f.NoStatus {
-			conds = append(conds, "NOT EXISTS(SELECT 1 FROM statuses st WHERE st.game_id=g.id AND st.user_id=?)")
+			conds = append(conds, "NOT EXISTS(SELECT 1 FROM statuses st WHERE st.game_id=g.id AND st.user_id=? AND (st.played>0 OR st.playing=1 OR st.backlog=1 OR st.wishlist=1))")
 			args = append(args, f.UserID)
 		}
 	}
@@ -391,7 +393,7 @@ func (f GameFilter) where(ctx context.Context, s *Store) (string, []any) {
 				ph[i] = "?"
 				args = append(args, id)
 			}
-			conds = append(conds, "EXISTS(SELECT 1 FROM statuses st WHERE st.game_id=g.id AND st.user_id IN ("+strings.Join(ph, ",")+"))")
+			conds = append(conds, "EXISTS(SELECT 1 FROM statuses st WHERE st.game_id=g.id AND st.user_id IN ("+strings.Join(ph, ",")+") AND (st.played>0 OR st.playing=1 OR st.backlog=1 OR st.wishlist=1))")
 		}
 	}
 	if len(conds) == 0 {
@@ -778,14 +780,14 @@ func (s *Store) RefreshGameStats(ctx context.Context, id int64) error {
 		avg_rating=COALESCE((SELECT AVG(l.rating) FROM logs l WHERE l.game_id=games.id AND l.rating>0 AND l.primary_rating=1 AND l.deleted_at IS NULL),0),
 		rating_count=(SELECT COUNT(*) FROM logs l WHERE l.game_id=games.id AND l.rating>0 AND l.primary_rating=1 AND l.deleted_at IS NULL),
 		reviews=(SELECT COUNT(*) FROM logs l WHERE l.game_id=games.id AND l.review<>'' AND l.deleted_at IS NULL),
-		plays=(SELECT COUNT(*) FROM statuses st WHERE st.game_id=games.id AND st.played=1),
+		plays=(SELECT COUNT(*) FROM statuses st WHERE st.game_id=games.id AND st.played>0),
 		playing=(SELECT COUNT(*) FROM statuses st WHERE st.game_id=games.id AND st.playing=1),
 		backlogs=(SELECT COUNT(*) FROM statuses st WHERE st.game_id=games.id AND st.backlog=1),
 		wishlists=(SELECT COUNT(*) FROM statuses st WHERE st.game_id=games.id AND st.wishlist=1),
 		completions=(SELECT COUNT(DISTINCT l.user_id) FROM logs l WHERE l.game_id=games.id AND l.status='completed' AND l.deleted_at IS NULL),
 		likes=(SELECT COUNT(*) FROM game_likes gl WHERE gl.game_id=games.id),
 		lists_count=(SELECT COUNT(DISTINCT le.list_id) FROM list_entries le JOIN lists li ON li.id=le.list_id WHERE le.game_id=games.id AND li.privacy IN ('public','unlisted','personal') AND li.deleted_at IS NULL),
-		popularity=(SELECT COUNT(*) FROM statuses st WHERE st.game_id=games.id)
+		popularity=(SELECT COUNT(*) FROM statuses st WHERE st.game_id=games.id AND (st.played>0 OR st.playing=1 OR st.backlog=1 OR st.wishlist=1))
 			+ 2*(SELECT COUNT(*) FROM game_likes gl WHERE gl.game_id=games.id)
 			+ 3*(SELECT COUNT(*) FROM logs l WHERE l.game_id=games.id AND l.review<>'' AND l.deleted_at IS NULL)
 		WHERE id=?`, id)

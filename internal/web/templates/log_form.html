@@ -30,19 +30,20 @@
     <div><label for="finished_at">Finished</label><input id="finished_at" type="date" name="finished_at" value="{{if .Log}}{{.Log.FinishedAt}}{{end}}"></div>
   </div>
   <div class="form-row">
+    <div><label for="played">Times played</label><input id="played" type="number" step="1" min="0" max="9999" name="played" value="{{.Played}}"><div class="field-hint">Raise this for replays. It appears as the play counter on the game page.</div></div>
     <div><label for="playtime">Playtime (hours)</label><input id="playtime" type="number" step="0.1" min="0" name="playtime" value="{{if .Log}}{{.Log.Playtime}}{{end}}"></div>
+  </div>
+  <div class="form-row">
     <div><label for="difficulty">Difficulty</label><select id="difficulty" name="difficulty">
       {{$diff := ""}}{{if .Log}}{{$diff = .Log.Difficulty}}{{end}}
       <option value="">—</option><option value="easy" {{if eq $diff "easy"}}selected{{end}}>Easy</option><option value="normal" {{if eq $diff "normal"}}selected{{end}}>Normal</option><option value="hard" {{if eq $diff "hard"}}selected{{end}}>Hard</option><option value="brutal" {{if eq $diff "brutal"}}selected{{end}}>Brutal</option>
     </select></div>
-  </div>
-  <div class="form-row">
     <div><label for="ownership">Ownership</label><select id="ownership" name="ownership">
       {{$own := ""}}{{if .Log}}{{$own = .Log.Ownership}}{{end}}
       <option value="">—</option><option value="owned" {{if eq $own "owned"}}selected{{end}}>Owned</option><option value="rented" {{if eq $own "rented"}}selected{{end}}>Rented</option><option value="borrowed" {{if eq $own "borrowed"}}selected{{end}}>Borrowed</option><option value="subscription" {{if eq $own "subscription"}}selected{{end}}>Subscription</option><option value="emulated" {{if eq $own "emulated"}}selected{{end}}>Emulated</option>
     </select></div>
-    <div><label for="storefront">Storefront</label><input id="storefront" type="text" name="storefront" value="{{if .Log}}{{.Log.Storefront}}{{end}}" placeholder="Steam, Itch, retail…"></div>
   </div>
+  <div><label for="storefront">Storefront</label><input id="storefront" type="text" name="storefront" value="{{if .Log}}{{.Log.Storefront}}{{end}}" placeholder="Steam, Itch, retail…"></div>
   <div>
     <label for="review">Review or journal <span class="muted">(Markdown)</span></label>
     <textarea id="review" name="review" rows="10" placeholder="What did you think?">{{if .Log}}{{.Log.Review}}{{end}}</textarea>

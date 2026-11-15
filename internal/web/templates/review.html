@@ -18,9 +18,9 @@
   {{else}}<h1 class="mt2">{{.Name}}</h1>{{end}}
   <div class="prose mt2">{{if .Spoiler}}<details open><summary>Spoiler warning</summary>{{md .Review}}</details>{{else}}{{md .Review}}{{end}}</div>
   <div class="log-actions">
-    {{if $.Liked}}<form method="post" action="/logs/{{.ID}}/like"><input type="hidden" name="_csrf" value="{{$.CSRF}}"><button class="linklike on" type="submit">♥ Liked · {{$.Likes}}</button></form>
-    {{else if $.CanReply}}<form method="post" action="/logs/{{.ID}}/like"><input type="hidden" name="_csrf" value="{{$.CSRF}}"><button class="linklike" type="submit">♥ Like · {{$.Likes}}</button></form>
-    {{else}}<span>♥ {{$.Likes}}</span>{{end}}
+    {{if $.Liked}}<form method="post" action="/logs/{{.ID}}/like"><input type="hidden" name="_csrf" value="{{$.CSRF}}"><button class="linklike on" type="submit"><i class="ph-light ph-heart icon" aria-hidden="true"></i>Liked · {{$.Likes}}</button></form>
+    {{else if $.CanReply}}<form method="post" action="/logs/{{.ID}}/like"><input type="hidden" name="_csrf" value="{{$.CSRF}}"><button class="linklike" type="submit"><i class="ph-light ph-heart icon" aria-hidden="true"></i>Like · {{$.Likes}}</button></form>
+    {{else}}<span><i class="ph-light ph-heart icon" aria-hidden="true"></i> {{$.Likes}}</span>{{end}}
     {{if $.IsOwner}}
       <a href="/logs/{{.ID}}/edit">Edit</a>
       <a href="/logs/{{.ID}}/sessions">Sessions</a>

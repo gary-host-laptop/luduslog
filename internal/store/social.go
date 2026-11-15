@@ -258,7 +258,8 @@ type UserStats struct {
 func (s *Store) StatsFor(ctx context.Context, userID int64) (*UserStats, error) {
 	st := &UserStats{RatingCounts: map[int]int{}, MonthlyPlays: map[string]int{}}
 	s.DB.QueryRowContext(ctx, `SELECT
-		COALESCE(SUM(played),0),COALESCE(SUM(playing),0),COALESCE(SUM(backlog),0),COALESCE(SUM(wishlist),0)
+		COALESCE(SUM(CASE WHEN played>0 THEN 1 ELSE 0 END),0),
+		COALESCE(SUM(playing),0),COALESCE(SUM(backlog),0),COALESCE(SUM(wishlist),0)
 		FROM statuses WHERE user_id=?`, userID).Scan(&st.GamesPlayed, &st.GamesPlaying, &st.GamesBacklog, &st.GamesWishlist)
 	s.DB.QueryRowContext(ctx, `SELECT COALESCE(SUM(playtime),0) FROM logs WHERE user_id=? AND deleted_at IS NULL`, userID).Scan(&st.TotalHours)
 	s.DB.QueryRowContext(ctx, `SELECT COALESCE(AVG(rating),0) FROM logs WHERE user_id=? AND rating>0 AND primary_rating=1 AND deleted_at IS NULL`, userID).Scan(&st.AvgRating)
@@ -270,7 +271,7 @@ func (s *Store) StatsFor(ctx context.Context, userID int64) (*UserStats, error) 
 	st.LongestGame = longest.String
 	var topGenre sql.NullString
 	s.DB.QueryRowContext(ctx, `SELECT gg.genre, COUNT(*) n FROM statuses st2 JOIN game_genres gg ON gg.game_id=st2.game_id
-		WHERE st2.user_id=? AND st2.played=1 GROUP BY gg.genre ORDER BY n DESC LIMIT 1`, userID).Scan(&topGenre, &st.TopGenreCount)
+		WHERE st2.user_id=? AND st2.played>0 GROUP BY gg.genre ORDER BY n DESC LIMIT 1`, userID).Scan(&topGenre, &st.TopGenreCount)
 	st.TopGenre = topGenre.String
 	var topPlatform sql.NullString
 	var topN int
@@ -364,9 +365,9 @@ func (s *Store) CheckBadges(ctx context.Context, userID int64) {
 		"first_log":     `SELECT COUNT(*) FROM logs WHERE user_id=? AND deleted_at IS NULL`,
 		"first_review":  `SELECT COUNT(*) FROM logs WHERE user_id=? AND review<>'' AND deleted_at IS NULL`,
 		"ten_reviews":   `SELECT COUNT(*) FROM logs WHERE user_id=? AND review<>'' AND deleted_at IS NULL`,
-		"ten_games":     `SELECT COALESCE(SUM(played),0) FROM statuses WHERE user_id=?`,
-		"fifty_games":   `SELECT COALESCE(SUM(played),0) FROM statuses WHERE user_id=?`,
-		"hundred_games": `SELECT COALESCE(SUM(played),0) FROM statuses WHERE user_id=?`,
+		"ten_games":     `SELECT COUNT(*) FROM statuses WHERE user_id=? AND played>0`,
+		"fifty_games":   `SELECT COUNT(*) FROM statuses WHERE user_id=? AND played>0`,
+		"hundred_games": `SELECT COUNT(*) FROM statuses WHERE user_id=? AND played>0`,
 		"first_list":    `SELECT COUNT(*) FROM lists WHERE user_id=? AND deleted_at IS NULL`,
 		"five_lists":    `SELECT COUNT(*) FROM lists WHERE user_id=? AND deleted_at IS NULL`,
 		"perfect":       `SELECT COUNT(*) FROM logs WHERE user_id=? AND mastered=1 AND deleted_at IS NULL`,

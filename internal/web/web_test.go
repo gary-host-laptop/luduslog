@@ -421,6 +421,131 @@ func TestGameMediaAndReviewsRoute(t *testing.T) {
 	_ = review
 }
 
+func TestPlayedCountLogFormAndLikeFragment(t *testing.T) {
+	ts, st := testServer(t)
+	ctx := context.Background()
+	alice, _ := st.CreateUser(ctx, "alice", "alice@example.test", "hash", false)
+	game, _ := st.SaveGame(ctx, &models.Game{IGDBID: -5, Slug: "counter", Title: "Counter", ReleaseStatus: "released"})
+	client, sess := authedClient(t, ts, st, alice)
+	noRedirect := &http.Client{Jar: client.Jar, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
+
+	status, body := getBody(t, client, ts.URL+"/games/counter")
+	if status != 200 {
+		t.Fatalf("game = %d", status)
+	}
+	for _, want := range []string{`class="played-pill"`, `href="/games/counter/log"`, `ph-light ph-check-circle`, `hx-post="/games/counter/like"`, `class="heart`, `ph-light ph-bell`, `ph-light ph-play`, `ph-light ph-stack`, `ph-light ph-heart`} {
+		if !strings.Contains(body, want) {
+			t.Errorf("game page missing %q", want)
+		}
+	}
+	for _, unwanted := range []string{`action="/games/counter/played"`, `name="delta"`, `name="flag" value="played"`, `name="flag" value="liked"`, "♥ Liked"} {
+		if strings.Contains(body, unwanted) {
+			t.Errorf("game page still contains %q", unwanted)
+		}
+	}
+
+	post := func(path string, values url.Values) int {
+		t.Helper()
+		resp, err := noRedirect.PostForm(ts.URL+path, values)
+		if err != nil {
+			t.Fatal(err)
+		}
+		resp.Body.Close()
+		return resp.StatusCode
+	}
+
+	if code, form := getBody(t, client, ts.URL+"/games/counter/log"); code != 200 || !strings.Contains(form, `name="played"`) || !strings.Contains(form, `value="1"`) {
+		t.Fatalf("new log form = %d, play count field missing: %s", code, form)
+	}
+	if code := post("/games/counter/status", url.Values{"_csrf": {sess.CSRF}, "flag": {"wishlist"}, "on": {"1"}}); code != http.StatusSeeOther {
+		t.Fatalf("set wishlist = %d", code)
+	}
+
+	if code := post("/games/counter/log", url.Values{"_csrf": {sess.CSRF}, "status": {"completed"}, "played": {"4"}, "review": {""}}); code != http.StatusSeeOther {
+		t.Fatalf("completed log = %d", code)
+	}
+	stStatus, _ := st.StatusFor(ctx, alice.ID, game.ID)
+	if stStatus.Played != 4 || !stStatus.Wishlist {
+		t.Fatalf("completed log did not save played count or lost wishlist: %+v", stStatus)
+	}
+	updated, _ := st.GameByID(ctx, game.ID)
+	if updated.Plays != 1 {
+		t.Fatalf("public played count = %d, want 1 distinct player", updated.Plays)
+	}
+	_, gameBody := getBody(t, client, ts.URL+"/games/counter")
+	if !strings.Contains(gameBody, "Played</span><strong>4</strong>") {
+		t.Fatal("game page did not show the saved play count")
+	}
+
+	created, err := st.LatestLogFor(ctx, alice.ID, game.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if code, form := getBody(t, client, ts.URL+"/logs/"+itoa(created.ID)+"/edit"); code != 200 || !strings.Contains(form, `value="4"`) {
+		t.Fatalf("edit log form = %d, play count missing: %s", code, form)
+	}
+	if code := post("/logs/"+itoa(created.ID)+"/edit", url.Values{"_csrf": {sess.CSRF}, "status": {"completed"}, "played": {"5"}, "review": {""}}); code != http.StatusSeeOther {
+		t.Fatalf("edit played count = %d", code)
+	}
+	stStatus, _ = st.StatusFor(ctx, alice.ID, game.ID)
+	if stStatus.Played != 5 {
+		t.Fatalf("edited played count = %d, want 5", stStatus.Played)
+	}
+	if code := post("/logs/"+itoa(created.ID)+"/edit", url.Values{"_csrf": {sess.CSRF}, "status": {"backlog"}, "played": {"0"}, "review": {""}}); code != http.StatusSeeOther {
+		t.Fatalf("clear played count = %d", code)
+	}
+	stStatus, _ = st.StatusFor(ctx, alice.ID, game.ID)
+	if stStatus.Played != 0 || !stStatus.Wishlist {
+		t.Fatalf("cleared play count or lost wishlist: %+v", stStatus)
+	}
+	updated, _ = st.GameByID(ctx, game.ID)
+	if updated.Plays != 0 {
+		t.Fatalf("public played count after clearing = %d", updated.Plays)
+	}
+
+	req, _ := http.NewRequest(http.MethodPost, ts.URL+"/games/counter/like", strings.NewReader(url.Values{"_csrf": {sess.CSRF}}.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	req.Header.Set("HX-Request", "true")
+	resp, err := client.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	fragment, _ := io.ReadAll(resp.Body)
+	resp.Body.Close()
+	if resp.StatusCode != 200 || !strings.Contains(string(fragment), "hx-post=\"/games/counter/like\"") || !strings.Contains(string(fragment), "heart on") || !strings.Contains(string(fragment), "heart-count") {
+		t.Fatalf("like fragment = %d: %s", resp.StatusCode, fragment)
+	}
+	stStatus, _ = st.StatusFor(ctx, alice.ID, game.ID)
+	updated, _ = st.GameByID(ctx, game.ID)
+	if !stStatus.Liked || stStatus.Played != 0 || !stStatus.Wishlist || updated.Likes != 1 || updated.Plays != 0 {
+		t.Fatalf("like changed status counts: status=%+v likes=%d plays=%d", stStatus, updated.Likes, updated.Plays)
+	}
+	_, publicBody := getBody(t, http.DefaultClient, ts.URL+"/games/counter")
+	if !strings.Contains(publicBody, "like-count-only") || strings.Contains(publicBody, `hx-post="/games/counter/like"`) {
+		t.Fatal("logged-out game page should show a non-interactive like count")
+	}
+	if code := post("/games/counter/like", url.Values{"_csrf": {sess.CSRF}}); code != http.StatusSeeOther {
+		t.Fatalf("normal like POST = %d", code)
+	}
+
+	if code := post("/games/counter/log", url.Values{"_csrf": {sess.CSRF}, "status": {"completed"}, "review": {""}}); code != http.StatusSeeOther {
+		t.Fatalf("completed log = %d", code)
+	}
+	stStatus, _ = st.StatusFor(ctx, alice.ID, game.ID)
+	if stStatus.Played < 1 || !stStatus.Wishlist {
+		t.Fatalf("completed log did not ensure played or lost wishlist: %+v", stStatus)
+	}
+
+	idle, _ := st.SaveGame(ctx, &models.Game{IGDBID: -6, Slug: "idle", Title: "Idle", ReleaseStatus: "released"})
+	if code := post("/games/idle/log", url.Values{"_csrf": {sess.CSRF}, "status": {"abandoned"}, "played": {"0"}, "review": {""}}); code != http.StatusSeeOther {
+		t.Fatalf("abandoned log = %d", code)
+	}
+	idleStatus, _ := st.StatusFor(ctx, alice.ID, idle.ID)
+	if idleStatus.Played != 0 {
+		t.Fatalf("abandoned log counted as played: %+v", idleStatus)
+	}
+}
+
 func TestReviewPreviewsAndSearchTabs(t *testing.T) {
 	ts, st := testServer(t)
 	ctx := context.Background()

@@ -202,7 +202,7 @@ type LibraryEntry struct {
 type Status struct {
 	UserID    int64
 	GameID    int64
-	Played    bool
+	Played    int
 	Playing   bool
 	Backlog   bool
 	Wishlist  bool
