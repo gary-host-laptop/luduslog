@@ -98,7 +98,7 @@ func (s *Server) profile(w http.ResponseWriter, r *http.Request) {
 	}
 	if canView {
 		data.Stats, _ = s.st.StatsFor(r.Context(), p.ID)
-		data.Favorites = s.st.FavoriteGames(r.Context(), p.ID, 8)
+		data.Favorites = s.st.FavoriteGames(r.Context(), p.ID, 5)
 		data.Friends, _ = s.st.MutualUsers(r.Context(), p.ID, 12)
 		switch tab {
 		case "reviews":

@@ -60,6 +60,41 @@ func (s *Server) likeGame(w http.ResponseWriter, r *http.Request) {
 	s.redirect(w, r, "/games/"+g.Slug)
 }
 
+// rateGame stores a half-step 5-star rating (1–10) without opening the log
+// form. Clearing only removes the rating; it never lowers the play counter.
+func (s *Server) rateGame(w http.ResponseWriter, r *http.Request) {
+	g, err := s.st.GameBySlug(r.Context(), r.PathValue("slug"))
+	if err != nil {
+		s.notFound(w, r)
+		return
+	}
+	u := currentUser(r)
+	rating := 0.0
+	if r.FormValue("clear") != "1" {
+		rating = atof(strings.TrimSpace(r.FormValue("rating")))
+		if rating <= 0 || rating > 10 {
+			s.flash(w, r, "error", "Choose a rating between 1 and 10.")
+			s.redirect(w, r, "/games/"+g.Slug)
+			return
+		}
+	}
+	if err := s.st.RateGame(r.Context(), u.ID, g.ID, rating); err != nil {
+		s.serverError(w, r, err)
+		return
+	}
+	if rating > 0 {
+		if err := s.st.EnsurePlayed(r.Context(), u.ID, g.ID); err != nil {
+			s.serverError(w, r, err)
+			return
+		}
+		s.st.AddActivity(r.Context(), u.ID, "rated", &g.ID, nil, nil, "", "public")
+		s.flash(w, r, "success", "Rating saved.")
+	} else {
+		s.flash(w, r, "success", "Rating cleared.")
+	}
+	s.redirect(w, r, "/games/"+g.Slug)
+}
+
 type logFormData struct {
 	Page
 	Game      *models.Game

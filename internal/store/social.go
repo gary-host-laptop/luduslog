@@ -42,17 +42,35 @@ func (s *Store) CommentsFor(ctx context.Context, subjectType string, subjectID i
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
-	var roots []*models.Comment
-	byParent := map[int64][]*models.Comment{}
+	var all []*models.Comment
 	for rows.Next() {
 		c, err := scanComment(rows)
 		if err != nil {
+			rows.Close()
 			return nil, err
 		}
-		if c.UserID != nil {
-			c.User, _ = s.UserByID(ctx, *c.UserID)
+		all = append(all, c)
+	}
+	err = rows.Err()
+	rows.Close()
+	if err != nil {
+		return nil, err
+	}
+	users := map[int64]*models.User{}
+	for _, c := range all {
+		if c.UserID == nil {
+			continue
 		}
+		u, ok := users[*c.UserID]
+		if !ok {
+			u, _ = s.UserByID(ctx, *c.UserID)
+			users[*c.UserID] = u
+		}
+		c.User = u
+	}
+	var roots []*models.Comment
+	byParent := map[int64][]*models.Comment{}
+	for _, c := range all {
 		if c.ParentID != nil {
 			byParent[*c.ParentID] = append(byParent[*c.ParentID], c)
 		} else {
@@ -71,7 +89,7 @@ func (s *Store) CommentsFor(ctx context.Context, subjectType string, subjectID i
 	for _, c := range roots {
 		attach(c)
 	}
-	return roots, rows.Err()
+	return roots, nil
 }
 
 func (s *Store) CreateComment(ctx context.Context, userID *int64, subjectType string, subjectID int64, parentID *int64, body, remoteActor, remoteName, remoteAvatar string) (int64, error) {
@@ -133,7 +151,6 @@ func (s *Store) Notifications(ctx context.Context, userID int64, limit, offset i
 	if err != nil {
 		return nil, unread
 	}
-	defer rows.Close()
 	var out []*models.Notification
 	for rows.Next() {
 		n := &models.Notification{}
@@ -143,11 +160,27 @@ func (s *Store) Notifications(ctx context.Context, userID int64, limit, offset i
 		rows.Scan(&n.ID, &n.UserID, &n.Type, &actorID, &n.RemoteActor, &n.ObjectType, &n.ObjectID, &n.Text, &n.URL, &readAt, &created)
 		if actorID.Valid {
 			n.ActorID = &actorID.Int64
-			n.Actor, _ = s.UserByID(ctx, actorID.Int64)
 		}
 		n.ReadAt = parseNullTime(readAt)
 		n.CreatedAt = parseTime(created)
 		out = append(out, n)
+	}
+	err = rows.Err()
+	rows.Close()
+	if err != nil {
+		return nil, unread
+	}
+	actors := map[int64]*models.User{}
+	for _, n := range out {
+		if n.ActorID == nil {
+			continue
+		}
+		u, ok := actors[*n.ActorID]
+		if !ok {
+			u, _ = s.UserByID(ctx, *n.ActorID)
+			actors[*n.ActorID] = u
+		}
+		n.Actor = u
 	}
 	return out, unread
 }
@@ -196,7 +229,6 @@ func (s *Store) ActivityFeed(ctx context.Context, viewerID int64, profileID int6
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
 	var out []models.Activity
 	for rows.Next() {
 		var a models.Activity
@@ -205,7 +237,6 @@ func (s *Store) ActivityFeed(ctx context.Context, viewerID int64, profileID int6
 		rows.Scan(&a.ID, &a.UserID, &a.Type, &game, &logID, &listID, &a.TargetName, &a.Visibility, &created)
 		if game.Valid {
 			a.GameID = &game.Int64
-			a.Game, _ = s.GameByID(ctx, game.Int64)
 		}
 		if logID.Valid {
 			a.LogID = &logID.Int64
@@ -213,11 +244,35 @@ func (s *Store) ActivityFeed(ctx context.Context, viewerID int64, profileID int6
 		if listID.Valid {
 			a.ListID = &listID.Int64
 		}
-		a.User, _ = s.UserByID(ctx, a.UserID)
 		a.CreatedAt = parseTime(created)
 		out = append(out, a)
 	}
-	return out, rows.Err()
+	err = rows.Err()
+	rows.Close()
+	if err != nil {
+		return nil, err
+	}
+	users := map[int64]*models.User{}
+	games := map[int64]*models.Game{}
+	for i := range out {
+		a := &out[i]
+		u, ok := users[a.UserID]
+		if !ok {
+			u, _ = s.UserByID(ctx, a.UserID)
+			users[a.UserID] = u
+		}
+		a.User = u
+		if a.GameID == nil {
+			continue
+		}
+		g, ok := games[*a.GameID]
+		if !ok {
+			g, _ = s.GameByID(ctx, *a.GameID)
+			games[*a.GameID] = g
+		}
+		a.Game = g
+	}
+	return out, nil
 }
 
 func int64Args(ids []int64) []any {
@@ -395,7 +450,6 @@ func (s *Store) Reports(ctx context.Context, status string) ([]*models.Report, e
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
 	var out []*models.Report
 	for rows.Next() {
 		r := &models.Report{}
@@ -404,14 +458,30 @@ func (s *Store) Reports(ctx context.Context, status string) ([]*models.Report, e
 		rows.Scan(&r.ID, &reporter, &r.TargetType, &r.TargetID, &r.TargetURL, &r.Reason, &r.Details, &r.Status, &created)
 		if reporter.Valid {
 			r.ReporterID = &reporter.Int64
-			if u, err := s.UserByID(ctx, reporter.Int64); err == nil {
-				r.Reporter = u.Username
-			}
 		}
 		r.CreatedAt = parseTime(created)
 		out = append(out, r)
 	}
-	return out, rows.Err()
+	err = rows.Err()
+	rows.Close()
+	if err != nil {
+		return nil, err
+	}
+	reporters := map[int64]string{}
+	for _, r := range out {
+		if r.ReporterID == nil {
+			continue
+		}
+		name, ok := reporters[*r.ReporterID]
+		if !ok {
+			if u, err := s.UserByID(ctx, *r.ReporterID); err == nil {
+				name = u.Username
+			}
+			reporters[*r.ReporterID] = name
+		}
+		r.Reporter = name
+	}
+	return out, nil
 }
 
 func (s *Store) ResolveReport(ctx context.Context, id int64, status string) error {
@@ -469,14 +539,20 @@ func (s *Store) YearRecap(ctx context.Context, userID int64, year int) (map[stri
 	if err != nil {
 		return out, nil, err
 	}
-	defer rows.Close()
 	var logs []*models.Log
 	for rows.Next() {
 		l, err := scanLog(rows)
 		if err == nil {
-			s.hydrateLog(ctx, l)
 			logs = append(logs, l)
 		}
+	}
+	err = rows.Err()
+	rows.Close()
+	if err != nil {
+		return out, nil, err
+	}
+	for _, l := range logs {
+		s.hydrateLog(ctx, l)
 	}
 	return out, logs, nil
 }

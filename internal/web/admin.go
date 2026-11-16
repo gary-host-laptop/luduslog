@@ -1,6 +1,7 @@
 package web
 
 import (
+	"errors"
 	"net/http"
 	"strconv"
 	"strings"
@@ -152,6 +153,40 @@ func (s *Server) adminSuspend(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.flash(w, r, "success", target.Username+" "+action+"ed.")
+	s.redirect(w, r, "/admin/users")
+}
+
+// adminDeleteUser permanently removes another account. Administrators cannot
+// delete themselves from this page; the store blocks removing the last admin.
+func (s *Server) adminDeleteUser(w http.ResponseWriter, r *http.Request) {
+	u := currentUser(r)
+	id, _ := strconv.ParseInt(r.PathValue("id"), 10, 64)
+	target, err := s.st.UserByID(r.Context(), id)
+	if err != nil {
+		s.notFound(w, r)
+		return
+	}
+	if target.ID == u.ID {
+		s.flash(w, r, "error", "You cannot delete your own account from the admin page.")
+		s.redirect(w, r, "/admin/users")
+		return
+	}
+	if err := s.st.DeleteUser(r.Context(), id); err != nil {
+		if errors.Is(err, store.ErrLastAdmin) {
+			s.flash(w, r, "error", "The instance needs at least one administrator.")
+			s.redirect(w, r, "/admin/users")
+			return
+		}
+		s.serverError(w, r, err)
+		return
+	}
+	s.deleteUserUploads(id)
+	if err := s.st.Audit(r.Context(), u.ID, "delete_user", target.Username); err != nil {
+		s.flash(w, r, "error", "The account was deleted but the audit entry failed: "+err.Error())
+		s.redirect(w, r, "/admin/users")
+		return
+	}
+	s.flash(w, r, "success", target.Username+"'s account was permanently deleted.")
 	s.redirect(w, r, "/admin/users")
 }
 

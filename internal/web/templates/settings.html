@@ -8,6 +8,7 @@
     <a href="/settings?tab=preferences" class="{{if eq .Tab "preferences"}}on{{end}}">Preferences</a>
     <a href="/settings?tab=federation" class="{{if eq .Tab "federation"}}on{{end}}">Federation</a>
     <a href="/settings?tab=blocks" class="{{if eq .Tab "blocks"}}on{{end}}">Blocks</a>
+    <a href="/settings?tab=favourites" class="{{if eq .Tab "favourites"}}on{{end}}">Favourites</a>
     <a href="/settings?tab=folders" class="{{if eq .Tab "folders"}}on{{end}}">Folders</a>
     <a href="/settings?tab=import" class="{{if eq .Tab "import"}}on{{end}}">Import &amp; export</a>
     <a href="/users/{{.User.Username}}">View profile →</a>
@@ -69,6 +70,17 @@
         <button class="btn btn-danger" type="submit">Deactivate</button>
       </form>
     </div>
+    <div class="card">
+      <h2>Permanently delete account</h2>
+      <p class="muted">This cannot be undone. It removes your logs, reviews, comments, lists, library entries, likes, follows and avatar/header uploads. You can <a href="/settings/export">export your data</a> first. Other servers in the fediverse may keep cached copies of content they received.</p>
+      {{if .SoleAdmin}}<div class="alert alert-warn">You are the last active administrator. Promote another account before deleting this one.</div>{{end}}
+      <form class="stack" method="post" action="/settings/delete" onsubmit="return confirm('Permanently delete your account? This cannot be undone.')">
+        <input type="hidden" name="_csrf" value="{{.CSRF}}">
+        <div><label for="delete-password">Current password</label><input id="delete-password" type="password" name="password" required autocomplete="current-password"></div>
+        <div><label for="delete-username">Type <strong>{{.User.Username}}</strong> to confirm</label><input id="delete-username" type="text" name="username" required autocomplete="off" placeholder="{{.User.Username}}"></div>
+        <div><button class="btn btn-danger" type="submit">Delete account permanently</button></div>
+      </form>
+    </div>
     {{else if eq .Tab "privacy"}}
     <form class="card stack" method="post" action="/settings/privacy">
       <input type="hidden" name="_csrf" value="{{.CSRF}}">
@@ -121,6 +133,49 @@
     <div class="card">
       <h2>Blocked accounts</h2>
       {{range .Blocks}}{{template "user_row" .}}{{else}}<p class="muted">You haven't blocked anyone.</p>{{end}}
+    </div>
+    {{else if eq .Tab "favourites"}}
+    <div class="card">
+      <h2>Favourite games</h2>
+      <p class="muted">Pick up to five games to show on your profile Overview. Favourites are separate from likes.</p>
+      {{if .Favorites}}
+      <form method="post" action="/settings/favourites/reorder" data-favorite-order>
+        <input type="hidden" name="_csrf" value="{{.CSRF}}">
+        <input type="hidden" name="order" value="" data-favorite-order-input>
+      </form>
+      <ul class="fav-manage" data-favorite-list>
+        {{range .Favorites}}
+        <li draggable="true" data-game-id="{{.ID}}">
+          <img class="fav-manage-cover" src="{{cover .}}" alt="">
+          <span class="fav-manage-title">{{.Title}}</span>
+          <span class="fav-manage-actions">
+            <form method="post" action="/settings/favourites/reorder"><input type="hidden" name="_csrf" value="{{$.CSRF}}"><input type="hidden" name="game_id" value="{{.ID}}"><input type="hidden" name="direction" value="up"><button class="linklike" type="submit" aria-label="Move {{.Title}} up"><i class="ph-light ph-arrow-up icon" aria-hidden="true"></i></button></form>
+            <form method="post" action="/settings/favourites/reorder"><input type="hidden" name="_csrf" value="{{$.CSRF}}"><input type="hidden" name="game_id" value="{{.ID}}"><input type="hidden" name="direction" value="down"><button class="linklike" type="submit" aria-label="Move {{.Title}} down"><i class="ph-light ph-arrow-down icon" aria-hidden="true"></i></button></form>
+            <form method="post" action="/settings/favourites/remove"><input type="hidden" name="_csrf" value="{{$.CSRF}}"><input type="hidden" name="game_id" value="{{.ID}}"><button class="linklike" type="submit" aria-label="Remove {{.Title}}">Remove</button></form>
+          </span>
+        </li>
+        {{end}}
+      </ul>
+      <p class="field-hint">Drag to reorder, or use the arrow buttons.</p>
+      {{else}}<p class="muted">No favourites picked yet.</p>{{end}}
+      {{if lt (len .Favorites) 5}}
+      <hr>
+      <form class="row" method="get" action="/settings">
+        <input type="hidden" name="tab" value="favourites">
+        <input type="search" name="q" value="{{.FavoriteQuery}}" placeholder="Search the catalog">
+        <button class="btn" type="submit">Search</button>
+      </form>
+      {{if .FavoriteQuery}}
+      <div class="fav-results mt1">
+        {{range .FavoriteSearch}}
+        <div class="row between fav-result">
+          <span class="row"><img class="fav-manage-cover" src="{{cover .}}" alt="">{{.Title}}</span>
+          <form method="post" action="/settings/favourites/add"><input type="hidden" name="_csrf" value="{{$.CSRF}}"><input type="hidden" name="game_id" value="{{.ID}}"><button class="btn btn-sm" type="submit">Add</button></form>
+        </div>
+        {{else}}<p class="muted">No games found.</p>{{end}}
+      </div>
+      {{end}}
+      {{else}}<p class="field-hint">You have five favourites. Remove one to add another.</p>{{end}}
     </div>
     {{else if eq .Tab "folders"}}
     <div class="card">

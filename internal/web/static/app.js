@@ -22,22 +22,33 @@
     document.querySelectorAll("[data-autofocus]").forEach(function (el) { el.focus(); });
   });
 
-  // Theme toggle: system → light → dark → system.
+  // Theme toggle: dark ↔ light. "Match system" stays in Settings.
   var key = "luduslog-theme";
-  function applyTheme(mode) {
-    var root = document.documentElement;
-    if (mode === "light" || mode === "dark") {
-      root.setAttribute("data-theme", mode);
-    } else {
-      root.removeAttribute("data-theme");
-    }
-    var btn = document.getElementById("theme-toggle");
-    if (btn) btn.setAttribute("aria-label", "Theme: " + (mode || "system"));
+  function storedTheme() {
+    try {
+      var value = localStorage.getItem(key);
+      return value === "light" || value === "dark" ? value : "";
+    } catch (e) { return ""; }
+  }
+  function serverTheme() {
+    var value = document.documentElement.getAttribute("data-theme");
+    return value === "light" || value === "dark" || value === "contrast" ? value : "";
   }
   function currentTheme() {
-    try { return localStorage.getItem(key) || "system"; } catch (e) { return "system"; }
+    return storedTheme() || serverTheme() || "dark";
   }
-  applyTheme(currentTheme());
+  function labelTheme(mode) {
+    var btn = document.getElementById("theme-toggle");
+    if (!btn) return;
+    btn.setAttribute("aria-label", "Theme: " + mode + ". Switch to " + (mode === "light" ? "dark" : "light") + " theme");
+    btn.title = mode === "light" ? "Switch to dark theme" : "Switch to light theme";
+  }
+  function applyTheme(mode) {
+    document.documentElement.setAttribute("data-theme", mode);
+    labelTheme(mode);
+  }
+  var saved = storedTheme();
+  if (saved) applyTheme(saved);
 
   var actions = document.querySelector(".header-actions");
   if (actions && !document.getElementById("theme-toggle")) {
@@ -46,14 +57,13 @@
     btn.type = "button";
     btn.className = "icon-btn";
     btn.textContent = "◐";
-    btn.title = "Change theme";
     btn.addEventListener("click", function () {
-      var order = ["system", "light", "dark"];
-      var next = order[(order.indexOf(currentTheme()) + 1) % order.length];
+      var next = currentTheme() === "light" ? "dark" : "light";
       try { localStorage.setItem(key, next); } catch (e) {}
       applyTheme(next);
     });
     actions.insertBefore(btn, actions.firstChild);
+    labelTheme(currentTheme());
   }
 
   // Copy buttons: elements with data-copy copy their value and confirm briefly.
@@ -68,6 +78,42 @@
       setTimeout(function () { el.textContent = old; }, 1500);
     });
   });
+
+  // Favourite games: native drag-and-drop writes the new order into a hidden
+  // field and submits the reorder form. Arrow buttons still work without JS.
+  var favList = document.querySelector("[data-favorite-list]");
+  if (favList) {
+    var orderForm = document.querySelector("[data-favorite-order]");
+    var orderInput = document.querySelector("[data-favorite-order-input]");
+    var dragged = null;
+    favList.addEventListener("dragstart", function (evt) {
+      dragged = evt.target.closest("li[data-game-id]");
+      if (!dragged) return;
+      dragged.classList.add("dragging");
+      if (evt.dataTransfer) evt.dataTransfer.effectAllowed = "move";
+    });
+    favList.addEventListener("dragend", function () {
+      if (dragged) dragged.classList.remove("dragging");
+      dragged = null;
+    });
+    favList.addEventListener("dragover", function (evt) {
+      evt.preventDefault();
+      var over = evt.target.closest("li[data-game-id]");
+      if (!dragged || !over || over === dragged) return;
+      var rect = over.getBoundingClientRect();
+      var after = (evt.clientY - rect.top) > rect.height / 2;
+      favList.insertBefore(dragged, after ? over.nextSibling : over);
+    });
+    favList.addEventListener("drop", function (evt) {
+      evt.preventDefault();
+      if (!orderForm || !orderInput) return;
+      var ids = Array.prototype.map.call(favList.querySelectorAll("li[data-game-id]"), function (li) {
+        return li.getAttribute("data-game-id");
+      });
+      orderInput.value = ids.join(",");
+      orderForm.submit();
+    });
+  }
 
   // Spoiler toggles.
   document.addEventListener("click", function (evt) {

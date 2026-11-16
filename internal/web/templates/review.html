@@ -2,9 +2,14 @@
 {{with .Log}}
 <article class="card">
   <div class="log-head">
-    <a href="/users/{{.User.Username}}"><img class="avatar avatar-md" src="{{avatar .User}}" alt=""> <strong>{{.User.Username}}</strong></a>
+    <a class="review-author" href="/users/{{.User.Username}}"><img class="avatar avatar-md" src="{{avatar .User}}" alt=""> <strong>{{.User.Username}}</strong></a>
     <span>{{timeago .CreatedAt}}</span>
     {{if .Spoiler}}<span class="pill">Spoilers</span>{{end}}
+    <span class="review-like">
+      {{if $.Liked}}<form method="post" action="/logs/{{.ID}}/like"><input type="hidden" name="_csrf" value="{{$.CSRF}}"><button class="linklike review-like-btn on" type="submit" aria-pressed="true" aria-label="Unlike this review"><span>Liked · {{$.Likes}}</span><i class="ph-fill ph-heart review-heart icon" aria-hidden="true"></i></button></form>
+      {{else if $.CanReply}}<form method="post" action="/logs/{{.ID}}/like"><input type="hidden" name="_csrf" value="{{$.CSRF}}"><button class="linklike review-like-btn" type="submit" aria-pressed="false" aria-label="Like this review"><span>Like · {{$.Likes}}</span><i class="ph-light ph-heart review-heart icon" aria-hidden="true"></i></button></form>
+      {{else}}<span class="like-count-only">{{$.Likes}}<i class="ph-light ph-heart review-heart icon" aria-hidden="true"></i></span>{{end}}
+    </span>
   </div>
   {{if .Game}}
   <div class="row mt2" style="align-items:flex-start;gap:1.2rem">
@@ -17,24 +22,23 @@
   </div>
   {{else}}<h1 class="mt2">{{.Name}}</h1>{{end}}
   <div class="prose mt2">{{if .Spoiler}}<details open><summary>Spoiler warning</summary>{{md .Review}}</details>{{else}}{{md .Review}}{{end}}</div>
+  {{if $.IsOwner}}
   <div class="log-actions">
-    {{if $.Liked}}<form method="post" action="/logs/{{.ID}}/like"><input type="hidden" name="_csrf" value="{{$.CSRF}}"><button class="linklike on" type="submit"><i class="ph-light ph-heart icon" aria-hidden="true"></i>Liked · {{$.Likes}}</button></form>
-    {{else if $.CanReply}}<form method="post" action="/logs/{{.ID}}/like"><input type="hidden" name="_csrf" value="{{$.CSRF}}"><button class="linklike" type="submit"><i class="ph-light ph-heart icon" aria-hidden="true"></i>Like · {{$.Likes}}</button></form>
-    {{else}}<span><i class="ph-light ph-heart icon" aria-hidden="true"></i> {{$.Likes}}</span>{{end}}
-    {{if $.IsOwner}}
-      <a href="/logs/{{.ID}}/edit">Edit</a>
-      <a href="/logs/{{.ID}}/sessions">Sessions</a>
-      <form method="post" action="/logs/{{.ID}}/delete" onsubmit="return confirm('Delete this log?')"><input type="hidden" name="_csrf" value="{{$.CSRF}}"><button class="linklike" type="submit">Delete</button></form>
-    {{end}}
+    <a href="/logs/{{.ID}}/edit">Edit</a>
+    <a href="/logs/{{.ID}}/sessions">Sessions</a>
+    <form method="post" action="/logs/{{.ID}}/delete" onsubmit="return confirm('Delete this log?')"><input type="hidden" name="_csrf" value="{{$.CSRF}}"><button class="linklike" type="submit">Delete</button></form>
   </div>
+  {{end}}
 </article>
 {{end}}
 
 <section class="section">
   <div class="section-head"><h2>Comments</h2><span class="muted">{{len .Comments}}</span></div>
+  {{if .Comments}}
   <div class="card">
-    {{range .Comments}}{{template "comment" .}}{{else}}<div class="muted">No comments yet.</div>{{end}}
+    {{range .Comments}}{{template "comment" .}}{{end}}
   </div>
+  {{end}}
   {{if .CanReply}}
   <form class="card mt1 stack" method="post" action="/comments">
     <input type="hidden" name="_csrf" value="{{.CSRF}}">

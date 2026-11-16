@@ -81,3 +81,26 @@ pretending to be API records.
 WAL mode, a busy timeout, and a small connection pool keep reads fast. Jobs are
 rows with `run_at`, `attempts`, and `last_error`; workers claim due rows and
 retry with exponential backoff. This keeps the deployment to one process.
+
+## Deactivation stays soft; deletion is permanent
+
+Deactivation remains the reversible option and retains data for an administrator
+to restore. Account deletion is a hard delete in a single transaction so usernames
+and emails are freed and no orphaned comments or notifications remain. Uploads are
+removed after the commit as best-effort cleanup. The last active administrator is
+protected, and remote federation cleanup is out of scope because other servers may
+retain cached copies.
+
+## Favourites are explicit picks
+
+Profile favourites are stored in `favorite_games` with a position, capped at five,
+rather than derived from game likes. Likes and favourites answer different
+questions, and an ordered list lets users curate what appears first. Existing likes
+are deliberately not migrated.
+
+## Quick ratings are ratings, not reviews
+
+The game-page star control writes the same 1–10 rating the log form uses. It reuses
+the latest non-draft log when one exists so review text and status are untouched,
+and creates a minimal played log only when needed. Clearing a rating never lowers
+the play counter.

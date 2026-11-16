@@ -155,6 +155,54 @@ func (s *Store) UpdateLog(ctx context.Context, id int64, in LogInput) (*models.L
 	return s.LogByID(ctx, id)
 }
 
+// RateGame records a 0–10 rating without creating a review or replay log.
+// When no log exists a minimal played log is created. A zero rating clears the
+// latest log's rating. Existing reviews, statuses and play counts are kept.
+func (s *Store) RateGame(ctx context.Context, userID, gameID int64, rating float64) error {
+	if rating < 0 {
+		rating = 0
+	}
+	if rating > 10 {
+		rating = 10
+	}
+	latest, err := scanLog(s.DB.QueryRowContext(ctx, `SELECT `+logCols+` FROM logs l
+		WHERE l.user_id=? AND l.game_id=? AND l.deleted_at IS NULL AND l.draft=0
+		ORDER BY l.updated_at DESC LIMIT 1`, userID, gameID))
+	if err == sql.ErrNoRows {
+		if rating == 0 {
+			return nil
+		}
+		_, err = s.CreateLog(ctx, LogInput{UserID: userID, GameID: gameID, Rating: rating, Status: "played"})
+		return err
+	}
+	if err != nil {
+		return err
+	}
+	in := logInputFromLog(latest)
+	in.Rating = rating
+	if _, err := s.UpdateLog(ctx, latest.ID, in); err != nil {
+		return err
+	}
+	if rating == 0 {
+		_, err = s.DB.ExecContext(ctx, `UPDATE logs SET rating=0,primary_rating=0 WHERE id=?`, latest.ID)
+	}
+	return err
+}
+
+// logInputFromLog copies a stored log back into the editable input shape so a
+// rating-only update leaves every other field untouched.
+func logInputFromLog(l *models.Log) LogInput {
+	return LogInput{
+		UserID: l.UserID, GameID: l.GameID, Name: l.Name, Rating: l.Rating, Review: l.Review,
+		Spoiler: l.Spoiler, Status: l.Status, Replay: l.Replay, Mastered: l.Mastered,
+		Difficulty: l.Difficulty, PlatformID: l.PlatformID, PlayedOnID: l.PlayedOnID,
+		Ownership: l.Ownership, Storefront: l.Storefront, EditionGameID: l.EditionGameID,
+		StartedAt: l.StartedAt, FinishedAt: l.FinishedAt, TimeToFinish: l.TimeToFinish,
+		TimeToMaster: l.TimeToMaster, Playtime: l.Playtime, SyncSessions: l.SyncSessions,
+		Language: l.Language, Draft: l.Draft,
+	}
+}
+
 // SetPrimaryRating makes one log the rating that counts for the game. Other
 // logs by the user are demoted but their rating is remembered.
 func (s *Store) SetPrimaryRating(ctx context.Context, logID, userID, gameID int64) error {
@@ -971,23 +1019,4 @@ func (s *Store) GameLikes(ctx context.Context, gameID int64, limit int) (int, []
 		out = append(out, u)
 	}
 	return total, out
-}
-
-// FavoriteGames returns the games a user has marked as liked, most recent first.
-func (s *Store) FavoriteGames(ctx context.Context, userID int64, limit int) []models.Game {
-	rows, err := s.DB.QueryContext(ctx, `SELECT `+gameCols+` FROM game_likes gl JOIN games g ON g.id=gl.game_id
-		WHERE gl.user_id=? AND g.deleted_at IS NULL ORDER BY gl.created_at DESC LIMIT ?`, userID, limit)
-	if err != nil {
-		return nil
-	}
-	defer rows.Close()
-	var out []models.Game
-	for rows.Next() {
-		g, err := scanGame(rows)
-		if err != nil {
-			return out
-		}
-		out = append(out, *g)
-	}
-	return out
 }

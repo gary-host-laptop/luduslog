@@ -774,9 +774,20 @@ func nullInt(n int) any {
 	return n
 }
 
+// execQueryer is satisfied by *sql.DB and *sql.Tx so stats can be refreshed
+// inside a deletion transaction as well as on their own.
+type execQueryer interface {
+	ExecContext(ctx context.Context, query string, args ...any) (sql.Result, error)
+	QueryRowContext(ctx context.Context, query string, args ...any) *sql.Row
+}
+
 // RefreshGameStats recomputes cached counters for one game.
 func (s *Store) RefreshGameStats(ctx context.Context, id int64) error {
-	_, err := s.DB.ExecContext(ctx, `UPDATE games SET
+	return refreshGameStats(ctx, s.DB, id)
+}
+
+func refreshGameStats(ctx context.Context, q execQueryer, id int64) error {
+	_, err := q.ExecContext(ctx, `UPDATE games SET
 		avg_rating=COALESCE((SELECT AVG(l.rating) FROM logs l WHERE l.game_id=games.id AND l.rating>0 AND l.primary_rating=1 AND l.deleted_at IS NULL),0),
 		rating_count=(SELECT COUNT(*) FROM logs l WHERE l.game_id=games.id AND l.rating>0 AND l.primary_rating=1 AND l.deleted_at IS NULL),
 		reviews=(SELECT COUNT(*) FROM logs l WHERE l.game_id=games.id AND l.review<>'' AND l.deleted_at IS NULL),
@@ -796,8 +807,8 @@ func (s *Store) RefreshGameStats(ctx context.Context, id int64) error {
 	}
 	var avg float64
 	var count int
-	s.DB.QueryRowContext(ctx, `SELECT avg_rating,rating_count FROM games WHERE id=?`, id).Scan(&avg, &count)
-	_, err = s.DB.ExecContext(ctx, `UPDATE games SET weighted=? WHERE id=?`, WeightedRating(avg, count), id)
+	q.QueryRowContext(ctx, `SELECT avg_rating,rating_count FROM games WHERE id=?`, id).Scan(&avg, &count)
+	_, err = q.ExecContext(ctx, `UPDATE games SET weighted=? WHERE id=?`, WeightedRating(avg, count), id)
 	return err
 }
 

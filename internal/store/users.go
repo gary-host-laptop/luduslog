@@ -193,9 +193,97 @@ func (s *Store) SetDeactivated(ctx context.Context, id int64, at *string) error 
 	return err
 }
 
+// DeleteUser permanently removes an account and everything it owns in one
+// transaction. Rows with proper foreign keys cascade; comments and
+// notifications use generic subject/object ids and are cleaned up explicitly.
+// Cached game counters are refreshed for every affected game. The last active
+// administrator cannot be deleted.
 func (s *Store) DeleteUser(ctx context.Context, id int64) error {
-	_, err := s.DB.ExecContext(ctx, `DELETE FROM users WHERE id=?`, id)
-	return err
+	tx, err := s.DB.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	var role string
+	var deactivated sql.NullString
+	if err := tx.QueryRowContext(ctx, `SELECT role,deactivated_at FROM users WHERE id=?`, id).Scan(&role, &deactivated); err != nil {
+		if err == sql.ErrNoRows {
+			return ErrNotFound
+		}
+		return err
+	}
+	if role == "admin" && !deactivated.Valid {
+		var admins int
+		if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM users WHERE role='admin' AND deactivated_at IS NULL`).Scan(&admins); err != nil {
+			return err
+		}
+		if admins <= 1 {
+			return ErrLastAdmin
+		}
+	}
+
+	games := map[int64]bool{}
+	addGames := func(query string) error {
+		rows, err := tx.QueryContext(ctx, query, id)
+		if err != nil {
+			return err
+		}
+		defer rows.Close()
+		for rows.Next() {
+			var gameID int64
+			if err := rows.Scan(&gameID); err != nil {
+				return err
+			}
+			games[gameID] = true
+		}
+		return rows.Err()
+	}
+	for _, q := range []string{
+		`SELECT game_id FROM logs WHERE user_id=?`,
+		`SELECT game_id FROM statuses WHERE user_id=?`,
+		`SELECT game_id FROM game_likes WHERE user_id=?`,
+		`SELECT le.game_id FROM list_entries le JOIN lists li ON li.id=le.list_id WHERE li.user_id=?`,
+	} {
+		if err := addGames(q); err != nil {
+			return err
+		}
+	}
+
+	// Notifications may point at logs, lists and comments that are about to
+	// disappear, or at comments the user wrote elsewhere.
+	_, err = tx.ExecContext(ctx, `DELETE FROM notifications WHERE
+		(object_type='log' AND object_id IN (SELECT id FROM logs WHERE user_id=?)) OR
+		(object_type='list' AND object_id IN (SELECT id FROM lists WHERE user_id=?)) OR
+		(object_type='comment' AND object_id IN (SELECT id FROM comments WHERE user_id=? OR
+			(subject_type='profile' AND subject_id=?) OR
+			(subject_type='log' AND subject_id IN (SELECT id FROM logs WHERE user_id=?)) OR
+			(subject_type='list' AND subject_id IN (SELECT id FROM lists WHERE user_id=?))))`,
+		id, id, id, id, id, id)
+	if err != nil {
+		return err
+	}
+
+	// comments.subject_id has no foreign key, so profile/review/list comments
+	// would otherwise be orphaned. Child replies cascade from their parent.
+	_, err = tx.ExecContext(ctx, `DELETE FROM comments WHERE
+		(subject_type='profile' AND subject_id=?) OR
+		(subject_type='log' AND subject_id IN (SELECT id FROM logs WHERE user_id=?)) OR
+		(subject_type='list' AND subject_id IN (SELECT id FROM lists WHERE user_id=?))`,
+		id, id, id)
+	if err != nil {
+		return err
+	}
+
+	if _, err := tx.ExecContext(ctx, `DELETE FROM users WHERE id=?`, id); err != nil {
+		return err
+	}
+	for gameID := range games {
+		if err := refreshGameStats(ctx, tx, gameID); err != nil {
+			return err
+		}
+	}
+	return tx.Commit()
 }
 
 // SearchUsers powers @mention completion and user search.

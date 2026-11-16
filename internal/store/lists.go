@@ -103,15 +103,21 @@ func (s *Store) ListsForUser(ctx context.Context, userID int64, includePrivate b
 	if err != nil {
 		return nil, total
 	}
-	defer rows.Close()
 	var out []*models.List
 	for rows.Next() {
 		l, err := scanList(rows)
 		if err != nil {
 			continue
 		}
-		s.hydrateList(ctx, l, false)
 		out = append(out, l)
+	}
+	err = rows.Err()
+	rows.Close()
+	if err != nil {
+		return nil, total
+	}
+	for _, l := range out {
+		s.hydrateList(ctx, l, false)
 	}
 	return out, total
 }
@@ -282,17 +288,23 @@ func (s *Store) PopularLists(ctx context.Context, limit int) ([]*models.List, er
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
 	var out []*models.List
 	for rows.Next() {
 		l, err := scanList(rows)
 		if err != nil {
 			continue
 		}
-		s.hydrateList(ctx, l, false)
 		out = append(out, l)
 	}
-	return out, rows.Err()
+	err = rows.Err()
+	rows.Close()
+	if err != nil {
+		return nil, err
+	}
+	for _, l := range out {
+		s.hydrateList(ctx, l, false)
+	}
+	return out, nil
 }
 
 func (s *Store) ListsContainingGame(ctx context.Context, gameID int64, limit int) ([]*models.List, error) {
@@ -301,17 +313,23 @@ func (s *Store) ListsContainingGame(ctx context.Context, gameID int64, limit int
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
 	var out []*models.List
 	for rows.Next() {
 		l, err := scanList(rows)
 		if err != nil {
 			continue
 		}
-		s.hydrateList(ctx, l, false)
 		out = append(out, l)
 	}
-	return out, rows.Err()
+	err = rows.Err()
+	rows.Close()
+	if err != nil {
+		return nil, err
+	}
+	for _, l := range out {
+		s.hydrateList(ctx, l, false)
+	}
+	return out, nil
 }
 
 // Folders
@@ -356,17 +374,23 @@ func (s *Store) FolderLists(ctx context.Context, folderID int64) ([]*models.List
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
 	var out []*models.List
 	for rows.Next() {
 		l, err := scanList(rows)
 		if err != nil {
 			continue
 		}
-		s.hydrateList(ctx, l, false)
 		out = append(out, l)
 	}
-	return out, rows.Err()
+	err = rows.Err()
+	rows.Close()
+	if err != nil {
+		return nil, err
+	}
+	for _, l := range out {
+		s.hydrateList(ctx, l, false)
+	}
+	return out, nil
 }
 
 func (s *Store) AddListToFolder(ctx context.Context, folderID, listID int64) error {

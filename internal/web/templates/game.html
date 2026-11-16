@@ -21,7 +21,25 @@
         <a class="btn btn-primary btn-block" href="/games/{{.Game.Slug}}/log"><i class="ph-light ph-notebook icon" aria-hidden="true"></i>{{if .UserLog}}Edit your log{{else}}Log this game{{end}}</a>
         {{if .UserLog}}<a class="btn btn-sm btn-block" href="/logs/{{.UserLog.ID}}/sessions"><i class="ph-light ph-clock-counter-clockwise icon" aria-hidden="true"></i>Play sessions</a>{{end}}
       </div>
-      {{if .UserRating}}<div class="game-user-rating"><i class="ph-light ph-star icon" aria-hidden="true"></i>Your rating: {{stars .UserRating 5}} <span class="muted">{{rating .UserRating 10}}/10</span></div>{{end}}
+      <div class="game-user-rating">
+        <form class="quick-rate-form" method="post" action="/games/{{.Game.Slug}}/rate">
+          <input type="hidden" name="_csrf" value="{{.CSRF}}">
+          <fieldset class="quick-rate" aria-label="Rate this game out of 5 stars">
+            <legend class="sr-only">Rate this game</legend>
+            {{range $star := seq 5 1}}{{$full := add $star $star}}{{$half := sub $full 1}}
+            <input type="radio" id="qr-{{$full}}" name="rating" value="{{$full}}" {{if eq $.UserRating (float64 $full)}}checked{{end}}>
+            <label class="quick-half right" for="qr-{{$full}}" title="{{rating (float64 $full) 10}}/10"><i class="ph-light ph-star" aria-hidden="true"></i><span class="sr-only">{{rating (float64 $full) 10}} out of 10</span></label>
+            <input type="radio" id="qr-{{$half}}" name="rating" value="{{$half}}" {{if eq $.UserRating (float64 $half)}}checked{{end}}>
+            <label class="quick-half" for="qr-{{$half}}" title="{{rating (float64 $half) 10}}/10"><i class="ph-light ph-star" aria-hidden="true"></i><span class="sr-only">{{rating (float64 $half) 10}} out of 10</span></label>
+            {{end}}
+          </fieldset>
+          <div class="quick-rate-row">
+            <span class="muted quick-rate-label">{{if .UserRating}}{{rating .UserRating 10}}/10{{else}}Rate{{end}}</span>
+            <button class="linklike quick-rate-save" type="submit">Save</button>
+            {{if .UserRating}}<button class="linklike quick-rate-clear" type="submit" name="clear" value="1">Clear</button>{{end}}
+          </div>
+        </form>
+      </div>
     </div>
     {{else}}
     <div class="card mt1"><a class="btn btn-primary btn-block" href="/login">Log in to track this game</a></div>

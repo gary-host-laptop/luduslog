@@ -151,6 +151,18 @@ func nullableInt(p *int64) any {
 
 var ErrNotFound = errors.New("not found")
 
+// ErrFavoriteLimit reports that a profile already has the maximum of five
+// favourite games.
+var ErrFavoriteLimit = errors.New("favourite limit reached")
+
+// ErrLastAdmin reports that an operation would leave the instance without an
+// active administrator.
+var ErrLastAdmin = errors.New("cannot remove the last active administrator")
+
+// ErrInvalidOrder reports a favourite reorder that does not match the current
+// set of picks.
+var ErrInvalidOrder = errors.New("invalid favourite order")
+
 // IsUnique reports whether err is a uniqueness violation.
 func IsUnique(err error) bool {
 	return err != nil && strings.Contains(err.Error(), "UNIQUE constraint failed")

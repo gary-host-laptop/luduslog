@@ -2,6 +2,7 @@ package web
 
 import (
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"strconv"
@@ -16,12 +17,16 @@ import (
 
 type settingsData struct {
 	Page
-	Tab      string
-	Error    string
-	Links    []models.SocialLink
-	Blocks   []*models.User
-	Folders  []models.Folder
-	Sessions []models.Session
+	Tab            string
+	Error          string
+	Links          []models.SocialLink
+	Blocks         []*models.User
+	Folders        []models.Folder
+	Sessions       []models.Session
+	Favorites      []models.Game
+	FavoriteSearch []models.Game
+	FavoriteQuery  string
+	SoleAdmin      bool
 }
 
 func (s *Server) settingsPage(w http.ResponseWriter, r *http.Request) {
@@ -33,6 +38,25 @@ func (s *Server) settingsPage(w http.ResponseWriter, r *http.Request) {
 	}
 	if tab == "folders" {
 		data.Folders, _ = s.st.Folders(r.Context(), u.ID)
+	}
+	if tab == "account" {
+		data.SoleAdmin = u.IsAdmin() && s.st.AdminCount(r.Context()) <= 1
+	}
+	if tab == "favourites" {
+		data.Favorites = s.st.FavoriteGames(r.Context(), u.ID, 5)
+		data.FavoriteQuery = strings.TrimSpace(r.URL.Query().Get("q"))
+		if data.FavoriteQuery != "" {
+			results, _, _ := s.st.SearchGames(r.Context(), data.FavoriteQuery, 8, 0, u.AdultOptIn)
+			picked := make(map[int64]bool, len(data.Favorites))
+			for _, g := range data.Favorites {
+				picked[g.ID] = true
+			}
+			for _, g := range results {
+				if !picked[g.ID] {
+					data.FavoriteSearch = append(data.FavoriteSearch, g)
+				}
+			}
+		}
 	}
 	s.render(w, r, "settings", data)
 }
@@ -292,6 +316,130 @@ func (s *Server) settingsAccount(w http.ResponseWriter, r *http.Request) {
 		s.flash(w, r, "success", "Password changed. Other sessions were signed out.")
 	}
 	s.redirect(w, r, "/settings?tab=account")
+}
+
+func (s *Server) settingsFavoritesAdd(w http.ResponseWriter, r *http.Request) {
+	u := currentUser(r)
+	id, _ := strconv.ParseInt(r.FormValue("game_id"), 10, 64)
+	if id <= 0 {
+		s.flash(w, r, "error", "Choose a game first.")
+		s.redirect(w, r, "/settings?tab=favourites")
+		return
+	}
+	if err := s.st.AddFavoriteGame(r.Context(), u.ID, id); err != nil {
+		switch {
+		case errors.Is(err, store.ErrFavoriteLimit):
+			s.flash(w, r, "error", "You can choose up to five favourite games.")
+		case errors.Is(err, store.ErrNotFound):
+			s.flash(w, r, "error", "That game is not in the catalog.")
+		default:
+			s.serverError(w, r, err)
+			return
+		}
+		s.redirect(w, r, "/settings?tab=favourites")
+		return
+	}
+	s.flash(w, r, "success", "Favourite added.")
+	s.redirect(w, r, "/settings?tab=favourites")
+}
+
+func (s *Server) settingsFavoritesRemove(w http.ResponseWriter, r *http.Request) {
+	u := currentUser(r)
+	id, _ := strconv.ParseInt(r.FormValue("game_id"), 10, 64)
+	if id > 0 {
+		if err := s.st.RemoveFavoriteGame(r.Context(), u.ID, id); err != nil {
+			s.serverError(w, r, err)
+			return
+		}
+	}
+	s.flash(w, r, "success", "Favourite removed.")
+	s.redirect(w, r, "/settings?tab=favourites")
+}
+
+func (s *Server) settingsFavoritesReorder(w http.ResponseWriter, r *http.Request) {
+	u := currentUser(r)
+	current := s.st.FavoriteGames(r.Context(), u.ID, 5)
+	ids := make([]int64, 0, len(current))
+	for _, g := range current {
+		ids = append(ids, g.ID)
+	}
+	var next []int64
+	if raw := strings.TrimSpace(r.FormValue("order")); raw != "" {
+		for _, part := range strings.Split(raw, ",") {
+			id, err := strconv.ParseInt(strings.TrimSpace(part), 10, 64)
+			if err != nil {
+				s.flash(w, r, "error", "That order could not be read.")
+				s.redirect(w, r, "/settings?tab=favourites")
+				return
+			}
+			next = append(next, id)
+		}
+	} else {
+		id, _ := strconv.ParseInt(r.FormValue("game_id"), 10, 64)
+		dir := r.FormValue("direction")
+		if dir != "up" && dir != "down" {
+			s.notFound(w, r)
+			return
+		}
+		at := -1
+		for i, cur := range ids {
+			if cur == id {
+				at = i
+				break
+			}
+		}
+		swap := at - 1
+		if dir == "down" {
+			swap = at + 1
+		}
+		if at < 0 || swap < 0 || swap >= len(ids) {
+			s.redirect(w, r, "/settings?tab=favourites")
+			return
+		}
+		next = append([]int64(nil), ids...)
+		next[at], next[swap] = next[swap], next[at]
+	}
+	if err := s.st.ReorderFavoriteGames(r.Context(), u.ID, next); err != nil {
+		if errors.Is(err, store.ErrInvalidOrder) {
+			s.flash(w, r, "error", "The favourite order changed. Try again.")
+			s.redirect(w, r, "/settings?tab=favourites")
+			return
+		}
+		s.serverError(w, r, err)
+		return
+	}
+	s.flash(w, r, "success", "Favourite order saved.")
+	s.redirect(w, r, "/settings?tab=favourites")
+}
+
+// settingsDelete permanently deletes the signed-in account after password and
+// typed-username confirmation. Deactivation stays available separately.
+func (s *Server) settingsDelete(w http.ResponseWriter, r *http.Request) {
+	u := currentUser(r)
+	if !auth.VerifyPassword(u.PasswordHash, r.FormValue("password")) {
+		s.flash(w, r, "error", "Password is incorrect.")
+		s.redirect(w, r, "/settings?tab=account")
+		return
+	}
+	if !strings.EqualFold(strings.TrimSpace(r.FormValue("username")), u.Username) {
+		s.flash(w, r, "error", "Type your username exactly to confirm.")
+		s.redirect(w, r, "/settings?tab=account")
+		return
+	}
+	if err := s.st.DeleteUser(r.Context(), u.ID); err != nil {
+		if errors.Is(err, store.ErrLastAdmin) {
+			s.flash(w, r, "error", "The instance needs at least one administrator. Promote another account first.")
+			s.redirect(w, r, "/settings?tab=account")
+			return
+		}
+		s.serverError(w, r, err)
+		return
+	}
+	s.deleteUserUploads(u.ID)
+	s.auth.DestroyUserSessions(r.Context(), u.ID, "")
+	http.SetCookie(w, &http.Cookie{Name: sessionCookie, Value: "", Path: "/", MaxAge: -1})
+	s.flash(w, r, "success", "Account permanently deleted.")
+	s.redirect(w, r, "/")
 }
 
 func (s *Server) settingsDeactivate(w http.ResponseWriter, r *http.Request) {

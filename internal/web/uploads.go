@@ -165,6 +165,29 @@ func isLocalUpload(rel, kind string, userID int64) bool {
 	return name != "" && !strings.Contains(name, "/") && !strings.Contains(name, "\\") && name != "." && name != ".."
 }
 
+// deleteUserUploads removes a deleted account's avatar and header directories.
+// It runs after the database commit and is best-effort: the account is already
+// gone, so a failed cleanup is logged but not surfaced as a failed deletion.
+func (s *Server) deleteUserUploads(userID int64) {
+	if userID <= 0 {
+		return
+	}
+	root, err := filepath.Abs(filepath.Join(s.cfg.DataDir, "uploads"))
+	if err != nil {
+		s.log.Warn("delete user uploads", "user", userID, "err", err)
+		return
+	}
+	for _, kind := range []string{"avatar", "header"} {
+		dir := filepath.Join(root, kind+"s", strconv.FormatInt(userID, 10))
+		if dir != root && !strings.HasPrefix(dir, root+string(filepath.Separator)) {
+			continue
+		}
+		if err := os.RemoveAll(dir); err != nil {
+			s.log.Warn("delete user uploads", "user", userID, "kind", kind, "err", err)
+		}
+	}
+}
+
 func (s *Server) deleteUpload(rel, kind string, userID int64) {
 	if !isLocalUpload(rel, kind, userID) {
 		return

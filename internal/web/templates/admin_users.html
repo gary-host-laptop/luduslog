@@ -13,6 +13,9 @@
   <td class="muted">{{date .CreatedAt}}</td>
   <td>
     <form class="inline-form" method="post" action="/admin/users/{{.ID}}/suspend"><input type="hidden" name="_csrf" value="{{$.CSRF}}"><input type="hidden" name="reason" value="moderation action"><button class="linklike" type="submit">{{if .DeactivatedAt}}Restore{{else}}Suspend{{end}}</button></form>
+    {{if and $.IsAdmin (ne .ID $.User.ID)}}
+    <form class="inline-form" method="post" action="/admin/users/{{.ID}}/delete" onsubmit="return confirm('Permanently delete {{.Username}} and all their data? This cannot be undone.')"><input type="hidden" name="_csrf" value="{{$.CSRF}}"><button class="linklike" type="submit">Delete</button></form>
+    {{end}}
   </td>
 </tr>
 {{else}}<tr><td colspan="6" class="muted">No users found.</td></tr>{{end}}

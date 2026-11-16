@@ -7,7 +7,8 @@
 <title>{{if .Title}}{{.Title}} · {{.Instance.Name}}{{else}}{{.Instance.Name}} — your game diary, federated{{end}}</title>
 <meta name="description" content="{{if .Desc}}{{.Desc}}{{else}}Track the games you play, rate and review them, build lists, and share your backlog across the fediverse.{{end}}">
 <link rel="stylesheet" href="/static/phosphor/light.css">
-<link rel="stylesheet" href="/static/style.css?v=7">
+<link rel="stylesheet" href="/static/phosphor/fill.css">
+<link rel="stylesheet" href="/static/style.css?v=10">
 <link rel="icon" href="/static/avatar.svg" type="image/svg+xml">
 {{block "head" .}}{{end}}
 </head>
@@ -18,13 +19,15 @@
     <a class="brand" href="/"><span class="brand-mark" aria-hidden="true">L</span>{{.Instance.Name}}</a>
     <nav class="nav" aria-label="Main">
       <a href="/games" {{if hasPrefix .Path "/games"}}class="active"{{end}}><i class="ph-light ph-game-controller icon" aria-hidden="true"></i>Games</a>
-      <a href="/reviews" {{if hasPrefix .Path "/reviews"}}class="active"{{end}}><i class="ph-light ph-star icon" aria-hidden="true"></i>Reviews</a>
+      <a href="/reviews" {{if hasPrefix .Path "/reviews"}}class="active"{{end}}><i class="ph-light ph-scroll icon" aria-hidden="true"></i>Reviews</a>
       <a href="/lists" {{if eq .Path "/lists"}}class="active"{{end}}><i class="ph-light ph-list icon" aria-hidden="true"></i>Lists</a>
     </nav>
     <form class="nav-search" action="/search" method="get" role="search">
-      <i class="ph-light ph-magnifying-glass search-icon" aria-hidden="true"></i>
-      <label class="sr-only" for="nav-q">Search games, reviews, people and lists</label>
-      <input id="nav-q" type="search" name="q" placeholder="Search…" value="{{.SearchQuery}}">
+      <span class="search-field">
+        <i class="ph-light ph-magnifying-glass search-icon" aria-hidden="true"></i>
+        <label class="sr-only" for="nav-q">Search games, reviews, people and lists</label>
+        <input id="nav-q" type="search" name="q" placeholder="Search…" value="{{.SearchQuery}}">
+      </span>
       {{if .SearchTab}}<input type="hidden" name="tab" value="{{.SearchTab}}">{{end}}
     </form>
     <div class="header-actions">
@@ -44,7 +47,6 @@
             <form method="post" action="/logout"><input type="hidden" name="_csrf" value="{{.CSRF}}"><button class="menu-logout" type="submit"><i class="ph-light ph-sign-out icon" aria-hidden="true"></i>Log out</button></form>
           </div>
         </details>
-        <a class="btn btn-sm" href="/games"><i class="ph-light ph-plus icon" aria-hidden="true"></i>Log</a>
       {{else}}
         <a class="btn btn-sm" href="/login">Log in</a>
         <a class="btn btn-sm btn-primary" href="/register">Join</a>
@@ -63,9 +65,8 @@
       {{if .Instance.HasIGDB}}<br><small>Game metadata by IGDB. Covers served from the IGDB image CDN.</small>{{end}}
     </div>
     <div>
-      <a href="/about">About</a> · <a href="/games">Browse</a> · <a href="/lists">Lists</a>
+      <a href="/about">About</a> · <a href="/games">Browse</a> · <a href="/lists">Lists</a> · <a href="https://github.com/gary-host-laptop/luduslog">Source</a>
       {{if .User}}{{if .CanModerate}} · <a href="/admin">{{if .IsAdmin}}Admin{{else}}Moderation{{end}}</a>{{end}}{{end}}
-      <br><a href="/.well-known/nodeinfo">NodeInfo</a> · <a href="/nodeinfo/2.1">2.1</a>
     </div>
   </div>
 </footer>

@@ -62,7 +62,7 @@
   <div class="section-head"><h2>Popular lists</h2><a class="more" href="/lists">All lists →</a></div>
   <div class="grid grid-2">
   {{range .Lists}}
-    <a class="list-card" href="/users/{{.User.Username}}/lists/{{.Slug}}">
+    <a class="list-card" href="{{if .User}}/users/{{.User.Username}}/lists/{{.Slug}}{{else}}/lists{{end}}">
       <div class="list-thumbs">{{range .Entries}}<img src="{{cover .Game}}" alt="">{{end}}</div>
       <div><h3>{{.Title}}</h3><div class="muted">{{if .User}}{{.User.Username}}{{end}} · {{.Likes}} likes</div></div>
     </a>
@@ -78,7 +78,7 @@
   {{range .Feed}}
     <div class="feed-item">
       <img class="avatar avatar-sm" src="/static/avatar.svg" alt="">
-      <div class="grow"><a href="/users/{{.User.Username}}">{{.User.Username}}</a>
+      <div class="grow">{{if .User}}<a href="/users/{{.User.Username}}">{{.User.Username}}</a>{{else}}<span class="muted">Someone</span>{{end}}
         {{if eq .Type "log"}}logged{{else if eq .Type "liked"}}liked{{else if eq .Type "status"}}updated a status for{{else if eq .Type "list_add"}}added a game to a list{{else}}shared{{end}}
         {{if .Game}}<a href="/games/{{.Game.Slug}}">{{.Game.Title}}</a>{{end}}
       </div>
