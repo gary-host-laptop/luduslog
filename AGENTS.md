@@ -14,6 +14,8 @@
   `Fix review byline alignment (#24)`.
 - Keep commits focused on the issue or task they describe.
 - Do not force-push or rewrite published history.
+- Do not add AI attribution, tool footers, or `Co-Authored-By` co-author
+  trailers to commits. The maintainer handles AI disclosure separately.
 
 ### Closing issues
 
