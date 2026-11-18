@@ -22,6 +22,29 @@
     document.querySelectorAll("[data-autofocus]").forEach(function (el) { el.focus(); });
   });
 
+  // Quick rating: choosing a half star saves through the existing form. The
+  // noscript Save button remains the fallback, and the guard stops a second
+  // change from submitting while the first navigation is underway.
+  var quickRateForm = document.querySelector(".quick-rate-form");
+  if (quickRateForm) {
+    var quickRateBusy = false;
+    quickRateForm.addEventListener("submit", function (evt) {
+      if (quickRateBusy) {
+        evt.preventDefault();
+        return;
+      }
+      quickRateBusy = true;
+    });
+    quickRateForm.querySelectorAll('input[name="rating"]').forEach(function (input) {
+      input.addEventListener("change", function () {
+        if (quickRateBusy) return;
+        if (quickRateForm.requestSubmit) quickRateForm.requestSubmit();
+        else quickRateForm.submit();
+      });
+    });
+    window.addEventListener("pageshow", function () { quickRateBusy = false; });
+  }
+
   // Theme toggle: dark ↔ light. "Match system" stays in Settings.
   var key = "luduslog-theme";
   function storedTheme() {

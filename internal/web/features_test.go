@@ -68,6 +68,12 @@ func TestQuickRatingWeb(t *testing.T) {
 	if code != 200 || !strings.Contains(body, `action="/games/quick-rate/rate"`) || !strings.Contains(body, `class="quick-rate"`) || !strings.Contains(body, "ph-light ph-star") {
 		t.Fatalf("quick rating control missing (%d)", code)
 	}
+	if !strings.Contains(body, "<noscript>") || !strings.Contains(body, "Save rating") {
+		t.Fatal("quick rating no-JS fallback missing")
+	}
+	if strings.Contains(body, "quick-rate-row") || strings.Contains(body, "quick-rate-label") || strings.Contains(body, `title="10.0/10"`) || strings.Contains(body, `title="0.5/10"`) {
+		t.Fatal("quick rating still renders the old numeric row or star tooltips")
+	}
 	if got := postStatus(t, plain, ts.URL+"/games/quick-rate/rate", url.Values{"_csrf": {sess.CSRF}, "rating": {"11"}}); got != http.StatusSeeOther {
 		t.Fatalf("invalid rating = %d", got)
 	}
@@ -87,8 +93,11 @@ func TestQuickRatingWeb(t *testing.T) {
 		t.Fatalf("rating did not mark played: %+v", status)
 	}
 	_, body = getBody(t, client, ts.URL+"/games/quick-rate")
-	if !strings.Contains(body, `value="6" checked`) || !strings.Contains(body, "6.0/10") || !strings.Contains(body, "quick-rate-clear") {
+	if !strings.Contains(body, `value="6" checked`) || !strings.Contains(body, "6.0 out of 10") || !strings.Contains(body, `aria-label="Clear rating"`) || !strings.Contains(body, "quick-rate-clear") {
 		t.Fatal("game page did not reflect the saved rating")
+	}
+	if strings.Contains(body, "6.0/10") || strings.Contains(body, "quick-rate-row") {
+		t.Fatal("saved rating still renders the old numeric row")
 	}
 
 	if got := postStatus(t, plain, ts.URL+"/games/quick-rate/rate", url.Values{"_csrf": {sess.CSRF}, "clear": {"1"}}); got != http.StatusSeeOther {
@@ -102,6 +111,139 @@ func TestQuickRatingWeb(t *testing.T) {
 	_, body = getBody(t, client, ts.URL+"/games/quick-rate")
 	if strings.Contains(body, "quick-rate-clear") {
 		t.Fatal("clear action still offered without a rating")
+	}
+}
+
+func TestGameCoverPanelWeb(t *testing.T) {
+	ts, st := testServer(t)
+	ctx := context.Background()
+	alice, _ := st.CreateUser(ctx, "alice", "alice@example.test", "hash", false)
+	game, _ := st.SaveGame(ctx, &models.Game{IGDBID: -402, Slug: "cover-panel", Title: "Cover Panel", Summary: "Summary below the hero.", ReleaseStatus: "released"})
+	userLog, err := st.CreateLog(ctx, store.LogInput{UserID: alice.ID, GameID: game.ID, Rating: 8, Review: "Solid", Status: "played"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	client, _ := authedClient(t, ts, st, alice)
+
+	code, body := getBody(t, client, ts.URL+"/games/cover-panel")
+	if code != http.StatusOK {
+		t.Fatalf("game page = %d", code)
+	}
+	for _, want := range []string{
+		`class="game-cover-panel"`,
+		`class="game-cover-pane"`,
+		`class="game-library-card"`,
+		`name="flag" value="playing"`,
+		`name="flag" value="backlog"`,
+		`name="flag" value="wishlist"`,
+		`href="/games/cover-panel/log"`,
+		`href="/logs/` + strconv.FormatInt(userLog.ID, 10) + `/sessions"`,
+		`action="/games/cover-panel/rate"`,
+		`value="8" checked`,
+		`8.0 out of 10`,
+		`aria-label="Clear rating"`,
+		`quick-rate-clear`,
+		`<noscript>`,
+		`Save rating`,
+		`class="rating-chart"`,
+		`class="card game-ratings"`,
+	} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("game page missing %q", want)
+		}
+	}
+	if strings.Contains(body, `class="card mt1 game-library-card"`) {
+		t.Fatal("library panel still uses the old card wrapper")
+	}
+
+	summaryStart := strings.Index(body, "Summary below the hero.")
+	infoStart := strings.Index(body, `class="game-info"`)
+	ratingsStart := strings.Index(body, "<h2>Ratings</h2>")
+	detailsStart := strings.Index(body, "<h2>Details</h2>")
+	if !strings.Contains(body, `class="prose game-summary mt2"`) || summaryStart < 0 || infoStart < 0 || ratingsStart < 0 || detailsStart < 0 || ratingsStart < infoStart || summaryStart < ratingsStart || detailsStart < summaryStart {
+		t.Fatal("ratings, summary, and details are not in the expected order")
+	}
+	if strings.Contains(body, `<div class="grid grid-2 mt3">`) {
+		t.Fatal("ratings and details still share the old lower grid")
+	}
+	for _, label := range []string{"1★", "2★", "3★", "4★", "5★"} {
+		if !strings.Contains(body, `class="rating-label">`+label) {
+			t.Fatalf("vertical rating chart missing %s label", label)
+		}
+	}
+
+	statusStart := strings.Index(body, `class="status-bar"`)
+	if statusStart < 0 {
+		t.Fatal("status bar missing")
+	}
+	statusEnd := strings.Index(body[statusStart:], "</div>")
+	if statusEnd < 0 {
+		t.Fatal("status bar closing tag missing")
+	}
+	statusHTML := body[statusStart : statusStart+statusEnd]
+	for _, want := range []string{`class="played-pill"`, `value="playing"`, `value="backlog"`, `value="wishlist"`} {
+		if !strings.Contains(statusHTML, want) {
+			t.Fatalf("status bar missing %q", want)
+		}
+	}
+	if played := strings.Index(body, `class="played-pill"`); played < statusStart {
+		t.Fatal("played pill is outside the status bar")
+	}
+
+	code, guestBody := getBody(t, http.DefaultClient, ts.URL+"/games/cover-panel")
+	if code != http.StatusOK || !strings.Contains(guestBody, `class="game-cover-panel"`) || !strings.Contains(guestBody, "Log in to track this game") {
+		t.Fatalf("signed-out game page missing merged login panel (%d)", code)
+	}
+}
+
+func TestGameCreditsWeb(t *testing.T) {
+	ts, st := testServer(t)
+	ctx := context.Background()
+	_, err := st.SaveGame(ctx, &models.Game{
+		IGDBID: -403, Slug: "credits", Title: "Credits", ReleaseStatus: "released",
+		ReleaseDate: "2024-05-02",
+		Companies: []models.CompanyRole{
+			{Name: "North Studio", Role: "developer"},
+			{Name: "South Publishing", Role: "publisher"},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	code, body := getBody(t, http.DefaultClient, ts.URL+"/games/credits")
+	if code != http.StatusOK {
+		t.Fatalf("game page = %d", code)
+	}
+	devStart := strings.Index(body, "North Studio")
+	pubStart := strings.Index(body, "South Publishing")
+	releaseStart := strings.Index(body, `class="release"`)
+	if devStart < 0 || pubStart < 0 || releaseStart < 0 || devStart > releaseStart || pubStart > releaseStart {
+		t.Fatal("company credits are not above the release date")
+	}
+	if !strings.Contains(body, `class="game-credits"`) {
+		t.Fatal("company credits block missing")
+	}
+	detailsStart := strings.Index(body, "<h2>Details</h2>")
+	if detailsStart < 0 {
+		t.Fatal("details section missing")
+	}
+	detailsEnd := strings.Index(body[detailsStart:], "</dl>")
+	if detailsEnd < 0 {
+		t.Fatal("details list missing")
+	}
+	detailsHTML := body[detailsStart : detailsStart+detailsEnd]
+	if strings.Contains(detailsHTML, "North Studio") || strings.Contains(detailsHTML, "South Publishing") {
+		t.Fatal("company credits are still duplicated inside Details")
+	}
+
+	_, err = st.SaveGame(ctx, &models.Game{IGDBID: -404, Slug: "no-credits", Title: "No Credits", ReleaseStatus: "released"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, body = getBody(t, http.DefaultClient, ts.URL+"/games/no-credits")
+	if strings.Contains(body, `class="game-credits"`) {
+		t.Fatal("game without companies rendered an empty credits block")
 	}
 }
 

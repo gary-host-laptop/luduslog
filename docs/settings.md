@@ -63,8 +63,11 @@ move up/down buttons when JavaScript is unavailable. The sixth pick is rejected.
 
 ## Quick ratings
 
-The game page's library card has a compact five-star, half-step rating control
-that stores the existing 1–10 value. Rating a game marks it as played and raises
-the play counter to at least one; clearing the rating leaves the counter alone.
-A rating without a log creates a minimal played log, while an existing log keeps
-its review, status and replay flag.
+The game page's library card has a full-width five-star, half-step rating
+control that stores the existing 1–10 value. Hovering previews a rating and
+clicking a star saves it immediately; the compact clear icon removes an
+existing rating. Without JavaScript, a Save button is shown after selecting a
+rating, and the clear icon still works. Rating a game marks it as played and
+raises the play counter to at least one; clearing the rating leaves the counter
+alone. A rating without a log creates a minimal played log, while an existing
+log keeps its review, status and replay flag.
