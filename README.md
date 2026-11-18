@@ -1,5 +1,7 @@
 # LudusLog
 
+![](./screenshot.png)
+
 LudusLog is a self-hostable, federated video game diary: log what you play, rate
 games on a five-star or ten-point scale, write reviews, keep journals and
 sessions, build lists, and follow other players across the fediverse.
