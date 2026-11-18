@@ -236,6 +236,23 @@ func TestRateGameCreatesAndPreservesLogs(t *testing.T) {
 	}
 }
 
+func TestRatingDistributionSplitsHalfStars(t *testing.T) {
+	ctx := context.Background()
+	st := testStore(t)
+	game, _ := st.SaveGame(ctx, &models.Game{IGDBID: -202, Slug: "half-stars", Title: "Half Stars", ReleaseStatus: "released"})
+	for i, name := range []string{"alice", "bob", "carol"} {
+		u, _ := st.CreateUser(ctx, name, name+"@example.test", "hash", false)
+		rating := float64([]int{8, 9, 8}[i])
+		if err := st.RateGame(ctx, u.ID, game.ID, rating); err != nil {
+			t.Fatal(err)
+		}
+	}
+	dist := st.RatingDistribution(ctx, game.ID)
+	if dist[8] != 2 || dist[9] != 1 || len(dist) != 2 {
+		t.Fatalf("rating distribution = %v, want two 4-star and one 4.5-star rating", dist)
+	}
+}
+
 func TestDeleteUserRemovesOwnedContentAndGuardsLastAdmin(t *testing.T) {
 	ctx := context.Background()
 	st := testStore(t)

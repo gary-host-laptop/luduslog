@@ -17,7 +17,7 @@ import (
 const gameCols = `g.id,COALESCE(g.igdb_id,0),g.slug,g.title,g.summary,g.cover_url,g.banner_url,COALESCE(g.release_date,''),
 COALESCE(g.release_year,0),g.release_status,g.category,g.parent_id,g.edition_name,g.franchise,g.adult,g.restricted,
 g.avg_rating,g.rating_count,g.weighted,g.popularity,g.plays,g.completions,g.backlogs,g.wishlists,g.playing,
-g.likes,g.lists_count,g.reviews,g.updated_at,g.synced_at`
+g.likes,g.lists_count,g.reviews,g.time_hastily,g.time_normally,g.time_completely,g.updated_at,g.synced_at`
 
 func scanGame(row scanner) (*models.Game, error) {
 	var g models.Game
@@ -25,15 +25,19 @@ func scanGame(row scanner) (*models.Game, error) {
 	var updated string
 	var synced sql.NullString
 	var adult, restricted int
+	var hastily, normally, completely int
 	err := row.Scan(&g.ID, &g.IGDBID, &g.Slug, &g.Title, &g.Summary, &g.CoverURL, &g.BannerURL, &g.ReleaseDate,
 		&g.ReleaseYear, &g.ReleaseStatus, &g.Category, &parent, &g.EditionName, &g.Franchise, &adult, &restricted,
 		&g.AvgRating, &g.RatingCount, &g.Weighted, &g.Popularity, &g.Plays, &g.Completions, &g.Backlogs,
-		&g.Wishlists, &g.Playing, &g.Likes, &g.ListsCount, &g.Reviews, &updated, &synced)
+		&g.Wishlists, &g.Playing, &g.Likes, &g.ListsCount, &g.Reviews, &hastily, &normally, &completely, &updated, &synced)
 	if err != nil {
 		return nil, err
 	}
 	if parent.Valid {
 		g.ParentID = &parent.Int64
+	}
+	if hastily > 0 || normally > 0 || completely > 0 {
+		g.TimeToBeat = &models.TimeToBeat{Hastily: hastily, Normally: normally, Completely: completely}
 	}
 	g.Adult = adult == 1
 	g.Restricted = restricted == 1
@@ -551,18 +555,25 @@ func (s *Store) SaveGame(ctx context.Context, g *models.Game) (*models.Game, err
 	search := buildSearchText(g)
 	media, _ := json.Marshal(map[string]any{"screenshots": g.Screenshots, "videos": g.Videos})
 	parent := nullableInt(g.ParentID)
+	hastily, normally, completely := 0, 0, 0
+	if g.TimeToBeat != nil {
+		hastily, normally, completely = g.TimeToBeat.Hastily, g.TimeToBeat.Normally, g.TimeToBeat.Completely
+	}
 	res, err := tx.ExecContext(ctx, `INSERT INTO games(igdb_id,slug,title,sort_title,summary,cover_url,banner_url,release_date,
-		release_year,release_status,category,parent_id,edition_name,franchise,adult,restricted,search_text,media,created_at,updated_at,synced_at)
-		VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+		release_year,release_status,category,parent_id,edition_name,franchise,adult,restricted,search_text,media,
+		time_hastily,time_normally,time_completely,created_at,updated_at,synced_at)
+		VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
 		ON CONFLICT(igdb_id) DO UPDATE SET slug=excluded.slug,title=excluded.title,sort_title=excluded.sort_title,
 		summary=excluded.summary,cover_url=CASE WHEN excluded.cover_url<>'' THEN excluded.cover_url ELSE games.cover_url END,
 		banner_url=excluded.banner_url,release_date=excluded.release_date,release_year=excluded.release_year,
 		release_status=excluded.release_status,category=excluded.category,parent_id=excluded.parent_id,
 		edition_name=excluded.edition_name,franchise=excluded.franchise,adult=excluded.adult,restricted=excluded.restricted,
-		search_text=excluded.search_text,media=excluded.media,updated_at=excluded.updated_at,synced_at=excluded.synced_at`,
+		search_text=excluded.search_text,media=excluded.media,time_hastily=excluded.time_hastily,
+		time_normally=excluded.time_normally,time_completely=excluded.time_completely,
+		updated_at=excluded.updated_at,synced_at=excluded.synced_at`,
 		g.IGDBID, g.Slug, g.Title, sortTitle(g.Title), g.Summary, g.CoverURL, g.BannerURL, nullStr(g.ReleaseDate),
 		nullInt(g.ReleaseYear), g.ReleaseStatus, g.Category, parent, g.EditionName, g.Franchise, b2i(g.Adult),
-		b2i(g.Restricted), search, string(media), now, now, now)
+		b2i(g.Restricted), search, string(media), hastily, normally, completely, now, now, now)
 	if err != nil {
 		return nil, err
 	}

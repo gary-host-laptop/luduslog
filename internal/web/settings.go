@@ -32,6 +32,10 @@ type settingsData struct {
 func (s *Server) settingsPage(w http.ResponseWriter, r *http.Request) {
 	u := currentUser(r)
 	tab := r.URL.Query().Get("tab")
+	if tab == "favourites" {
+		http.Redirect(w, r, "/settings#favourites", http.StatusSeeOther)
+		return
+	}
 	data := settingsData{Page: s.page(r, "Settings"), Tab: tab, Links: s.st.SocialLinksFor(r.Context(), u.ID)}
 	if tab == "blocks" {
 		data.Blocks, _ = s.st.BlockedUsers(r.Context(), u.ID)
@@ -42,7 +46,7 @@ func (s *Server) settingsPage(w http.ResponseWriter, r *http.Request) {
 	if tab == "account" {
 		data.SoleAdmin = u.IsAdmin() && s.st.AdminCount(r.Context()) <= 1
 	}
-	if tab == "favourites" {
+	if tab == "" || tab == "profile" {
 		data.Favorites = s.st.FavoriteGames(r.Context(), u.ID, 5)
 		data.FavoriteQuery = strings.TrimSpace(r.URL.Query().Get("q"))
 		if data.FavoriteQuery != "" {
@@ -323,7 +327,7 @@ func (s *Server) settingsFavoritesAdd(w http.ResponseWriter, r *http.Request) {
 	id, _ := strconv.ParseInt(r.FormValue("game_id"), 10, 64)
 	if id <= 0 {
 		s.flash(w, r, "error", "Choose a game first.")
-		s.redirect(w, r, "/settings?tab=favourites")
+		s.redirect(w, r, "/settings#favourites")
 		return
 	}
 	if err := s.st.AddFavoriteGame(r.Context(), u.ID, id); err != nil {
@@ -336,11 +340,11 @@ func (s *Server) settingsFavoritesAdd(w http.ResponseWriter, r *http.Request) {
 			s.serverError(w, r, err)
 			return
 		}
-		s.redirect(w, r, "/settings?tab=favourites")
+		s.redirect(w, r, "/settings#favourites")
 		return
 	}
 	s.flash(w, r, "success", "Favourite added.")
-	s.redirect(w, r, "/settings?tab=favourites")
+	s.redirect(w, r, "/settings#favourites")
 }
 
 func (s *Server) settingsFavoritesRemove(w http.ResponseWriter, r *http.Request) {
@@ -353,7 +357,7 @@ func (s *Server) settingsFavoritesRemove(w http.ResponseWriter, r *http.Request)
 		}
 	}
 	s.flash(w, r, "success", "Favourite removed.")
-	s.redirect(w, r, "/settings?tab=favourites")
+	s.redirect(w, r, "/settings#favourites")
 }
 
 func (s *Server) settingsFavoritesReorder(w http.ResponseWriter, r *http.Request) {
@@ -369,7 +373,7 @@ func (s *Server) settingsFavoritesReorder(w http.ResponseWriter, r *http.Request
 			id, err := strconv.ParseInt(strings.TrimSpace(part), 10, 64)
 			if err != nil {
 				s.flash(w, r, "error", "That order could not be read.")
-				s.redirect(w, r, "/settings?tab=favourites")
+				s.redirect(w, r, "/settings#favourites")
 				return
 			}
 			next = append(next, id)
@@ -393,7 +397,7 @@ func (s *Server) settingsFavoritesReorder(w http.ResponseWriter, r *http.Request
 			swap = at + 1
 		}
 		if at < 0 || swap < 0 || swap >= len(ids) {
-			s.redirect(w, r, "/settings?tab=favourites")
+			s.redirect(w, r, "/settings#favourites")
 			return
 		}
 		next = append([]int64(nil), ids...)
@@ -402,14 +406,14 @@ func (s *Server) settingsFavoritesReorder(w http.ResponseWriter, r *http.Request
 	if err := s.st.ReorderFavoriteGames(r.Context(), u.ID, next); err != nil {
 		if errors.Is(err, store.ErrInvalidOrder) {
 			s.flash(w, r, "error", "The favourite order changed. Try again.")
-			s.redirect(w, r, "/settings?tab=favourites")
+			s.redirect(w, r, "/settings#favourites")
 			return
 		}
 		s.serverError(w, r, err)
 		return
 	}
 	s.flash(w, r, "success", "Favourite order saved.")
-	s.redirect(w, r, "/settings?tab=favourites")
+	s.redirect(w, r, "/settings#favourites")
 }
 
 // settingsDelete permanently deletes the signed-in account after password and

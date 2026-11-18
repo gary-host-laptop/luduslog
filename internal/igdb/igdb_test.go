@@ -54,11 +54,21 @@ func TestMapGameCompleteMetadata(t *testing.T) {
 	if len(g.Screenshots) != 1 || g.Screenshots[0] != "https://images.igdb.com/t_screenshot_big/shot.jpg" {
 		t.Fatalf("screenshot URL: %+v", g.Screenshots)
 	}
-	if len(g.Videos) != 1 || g.Videos[0] != "abc123" || g.CoverURL != "https://images.igdb.com/t_cover_big/cover.jpg" {
+	if len(g.Videos) != 1 || g.Videos[0] != "abc123" || g.CoverURL != "https://images.igdb.com/t_cover_big_2x/cover.jpg" {
 		t.Fatalf("media mapping failed: %+v", g)
 	}
 	if len(g.AltNames) != 1 || g.AltNames[0] != "Celeste Classic" {
 		t.Fatalf("alternative names: %+v", g.AltNames)
+	}
+}
+
+func TestTimeToBeatModel(t *testing.T) {
+	got := timeToBeatModel(apiTimeToBeat{Hastily: 19800, Normally: 36000, Completely: 54000})
+	if got == nil || got.Hastily != 19800 || got.Normally != 36000 || got.Completely != 54000 {
+		t.Fatalf("time to beat not mapped: %+v", got)
+	}
+	if timeToBeatModel(apiTimeToBeat{}) != nil {
+		t.Fatal("empty time to beat should not create a record")
 	}
 }
 

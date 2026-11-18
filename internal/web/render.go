@@ -22,11 +22,15 @@ func templateFuncs(s *Server) template.FuncMap {
 		"avatar":          avatarURL,
 		"header":          headerURL,
 		"cover":           coverURL,
+		"cover2x":         cover2xURL,
+		"coverSrcset":     coverSrcset,
 		"userCover":       userCoverURL,
 		"screenshotThumb": screenshotThumb,
 		"screenshotFull":  screenshotFull,
 		"stars":           starsHTML,
 		"rating":          ratingText,
+		"halfStarLabel":   halfStarLabel,
+		"beatTime":        beatTime,
 		"timeago":         timeAgo,
 		"date":            dateFmt,
 		"dateLong":        dateLong,
@@ -50,10 +54,11 @@ func templateFuncs(s *Server) template.FuncMap {
 			}
 			return int(math.Round(float64(n) * 100 / float64(total)))
 		},
-		"plural":   plural,
-		"truncate": truncate,
-		"initials": initials,
-		"dict":     dict,
+		"plural":      plural,
+		"truncate":    truncate,
+		"creditNames": creditNames,
+		"initials":    initials,
+		"dict":        dict,
 		"derefInt": func(p *int64) int64 {
 			if p == nil {
 				return 0
@@ -141,10 +146,26 @@ func screenshotFull(raw string) string {
 }
 
 func coverURL(g *models.Game) string {
-	if g != nil && g.CoverURL != "" {
-		return g.CoverURL
+	if g == nil || g.CoverURL == "" {
+		return "/static/cover-placeholder.svg"
 	}
-	return "/static/cover-placeholder.svg"
+	return strings.ReplaceAll(g.CoverURL, "t_cover_big_2x", "t_cover_big")
+}
+
+func cover2xURL(g *models.Game) string {
+	if g == nil || g.CoverURL == "" {
+		return "/static/cover-placeholder.svg"
+	}
+	return strings.ReplaceAll(g.CoverURL, "/t_cover_big/", "/t_cover_big_2x/")
+}
+
+func coverSrcset(g *models.Game) string {
+	one := coverURL(g)
+	two := cover2xURL(g)
+	if one == two {
+		return ""
+	}
+	return one + " 1x, " + two + " 2x"
 }
 
 func userCoverURL(u *models.User, g *models.Game) string {
@@ -152,6 +173,21 @@ func userCoverURL(u *models.User, g *models.Game) string {
 		return "/static/cover-placeholder.svg"
 	}
 	return coverURL(g)
+}
+
+func creditNames(companies []models.CompanyRole) string {
+	seen := make(map[string]bool, len(companies))
+	var names []string
+	for _, role := range []string{"developer", "publisher"} {
+		for _, company := range companies {
+			if company.Role != role || company.Name == "" || seen[company.Name] {
+				continue
+			}
+			seen[company.Name] = true
+			names = append(names, company.Name)
+		}
+	}
+	return strings.Join(names, ", ")
 }
 
 func starsHTML(rating float64, scale int) template.HTML {
@@ -187,6 +223,39 @@ func ratingText(r float64, scale int) string {
 		return strconv.FormatFloat(r, 'f', 1, 64)
 	}
 	return strconv.FormatFloat(r/2, 'f', 1, 64)
+}
+
+// beatTime formats an IGDB time-to-beat value in seconds as hours and minutes.
+func beatTime(seconds int) string {
+	if seconds <= 0 {
+		return "—"
+	}
+	minutes := int(math.Round(float64(seconds) / 60))
+	if minutes < 1 {
+		minutes = 1
+	}
+	hours := minutes / 60
+	remainder := minutes % 60
+	switch {
+	case hours == 0:
+		return fmt.Sprintf("%dm", remainder)
+	case remainder == 0:
+		return fmt.Sprintf("%dh", hours)
+	default:
+		return fmt.Sprintf("%dh %dm", hours, remainder)
+	}
+}
+
+// halfStarLabel formats a 1-10 score as a compact half-star label.
+func halfStarLabel(n int) string {
+	whole := n / 2
+	if n%2 == 0 {
+		return strconv.Itoa(whole)
+	}
+	if whole == 0 {
+		return "½"
+	}
+	return strconv.Itoa(whole) + "½"
 }
 
 func timeAgo(t time.Time) string {

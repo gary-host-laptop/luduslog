@@ -179,7 +179,6 @@ type gameData struct {
 	Status       models.Status
 	UserLog      *models.Log
 	UserRating   float64
-	Counts       map[string]int
 	Histogram    map[int]int
 	HistogramMax int
 	Reviews      []*models.Log
@@ -229,8 +228,7 @@ func (s *Server) gamePage(w http.ResponseWriter, r *http.Request) {
 	data := gameData{
 		Page:      s.page(r, g.Title),
 		Game:      g,
-		Counts:    s.st.GameStatusCounts(r.Context(), g.ID),
-		Histogram: s.st.RatingDistribution(r.Context(), g.ID, 5),
+		Histogram: s.st.RatingDistribution(r.Context(), g.ID),
 		Covers:    s.st.PlayerCovers(r.Context(), g.ID),
 		Platforms: s.st.Platforms(r.Context()),
 	}

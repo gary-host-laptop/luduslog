@@ -118,9 +118,13 @@ func TestGameCoverPanelWeb(t *testing.T) {
 	ts, st := testServer(t)
 	ctx := context.Background()
 	alice, _ := st.CreateUser(ctx, "alice", "alice@example.test", "hash", false)
-	game, _ := st.SaveGame(ctx, &models.Game{IGDBID: -402, Slug: "cover-panel", Title: "Cover Panel", Summary: "Summary below the hero.", ReleaseStatus: "released"})
+	game, _ := st.SaveGame(ctx, &models.Game{IGDBID: -402, Slug: "cover-panel", Title: "Cover Panel", Summary: "Summary below the hero.", ReleaseStatus: "released",
+		CoverURL: "https://images.igdb.com/igdb/image/upload/t_cover_big_2x/cover-panel.jpg"})
 	userLog, err := st.CreateLog(ctx, store.LogInput{UserID: alice.ID, GameID: game.ID, Rating: 8, Review: "Solid", Status: "played"})
 	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.DB.ExecContext(ctx, `UPDATE games SET avg_rating=8,weighted=3.8,rating_count=1,plays=7,playing=3,backlogs=5,wishlists=2 WHERE id=?`, game.ID); err != nil {
 		t.Fatal(err)
 	}
 	client, _ := authedClient(t, ts, st, alice)
@@ -147,6 +151,12 @@ func TestGameCoverPanelWeb(t *testing.T) {
 		`Save rating`,
 		`class="rating-chart"`,
 		`class="card game-ratings"`,
+		`src="https://images.igdb.com/igdb/image/upload/t_cover_big_2x/cover-panel.jpg"`,
+		`class="cover"`,
+		`>avg. rating<`,
+		`>playing<`,
+		`>backlog<`,
+		`>wishlist<`,
 	} {
 		if !strings.Contains(body, want) {
 			t.Fatalf("game page missing %q", want)
@@ -155,23 +165,56 @@ func TestGameCoverPanelWeb(t *testing.T) {
 	if strings.Contains(body, `class="card mt1 game-library-card"`) {
 		t.Fatal("library panel still uses the old card wrapper")
 	}
+	libStart := strings.Index(body, `class="game-library-card"`)
+	likeStart := strings.Index(body, `class="game-like"`)
+	headStart := strings.Index(body, `class="library-card-head"`)
+	if libStart < 0 || likeStart < libStart || headStart < likeStart {
+		t.Fatal("interactive like control is not at the top of the library card")
+	}
+	statStart := strings.Index(body, `class="stat-strip"`)
+	metaStart := strings.Index(body, `class="game-meta-cards"`)
+	if statStart < 0 || metaStart < statStart {
+		t.Fatal("stat strip is missing or out of order")
+	}
+	statHTML := body[statStart:metaStart]
+	for _, want := range []string{`<strong>8.0</strong>`, `<strong>7</strong>`, `<strong>3</strong>`, `<strong>5</strong>`, `<strong>2</strong>`} {
+		if !strings.Contains(statHTML, want) {
+			t.Fatalf("stat strip missing %q", want)
+		}
+	}
+	for _, old := range []string{"weighted rating", ">ratings<", ">reviews<", ">backlogged<", ">lists<", "class=\"game-like"} {
+		if strings.Contains(statHTML, old) {
+			t.Fatalf("stat strip still contains %q", old)
+		}
+	}
 
 	summaryStart := strings.Index(body, "Summary below the hero.")
 	infoStart := strings.Index(body, `class="game-info"`)
-	ratingsStart := strings.Index(body, "<h2>Ratings</h2>")
+	ratingsStart := strings.Index(body, `class="card game-ratings"`)
 	detailsStart := strings.Index(body, "<h2>Details</h2>")
 	if !strings.Contains(body, `class="prose game-summary mt2"`) || summaryStart < 0 || infoStart < 0 || ratingsStart < 0 || detailsStart < 0 || ratingsStart < infoStart || summaryStart < ratingsStart || detailsStart < summaryStart {
 		t.Fatal("ratings, summary, and details are not in the expected order")
 	}
+	ratingsEnd := strings.Index(body[ratingsStart:], "</section>")
+	if ratingsEnd < 0 {
+		t.Fatal("ratings card is not closed")
+	}
+	ratingsCard := body[ratingsStart : ratingsStart+ratingsEnd]
+	if strings.Contains(ratingsCard, `class="pill"`) || strings.Contains(ratingsCard, "Played ") {
+		t.Fatal("ratings card still shows shelf counts")
+	}
+	if got := strings.Count(ratingsCard, `class="rating-col"`); got != 10 {
+		t.Fatalf("rating chart has %d bars, want 10 half-star bars", got)
+	}
+	if strings.Contains(ratingsCard, "rating-label") || strings.Contains(ratingsCard, "rating-count") || !strings.Contains(ratingsCard, `data-tip="4★ · 1 rating"`) || !strings.Contains(ratingsCard, `data-tip="4½★ · 0 ratings"`) {
+		t.Fatal("rating chart should put labels and counts in hover tooltips only")
+	}
 	if strings.Contains(body, `<div class="grid grid-2 mt3">`) {
 		t.Fatal("ratings and details still share the old lower grid")
 	}
-	for _, label := range []string{"1★", "2★", "3★", "4★", "5★"} {
-		if !strings.Contains(body, `class="rating-label">`+label) {
-			t.Fatalf("vertical rating chart missing %s label", label)
-		}
+	if strings.Contains(body, `class="card game-times"`) {
+		t.Fatal("game without time-to-beat data rendered a time card")
 	}
-
 	statusStart := strings.Index(body, `class="status-bar"`)
 	if statusStart < 0 {
 		t.Fatal("status bar missing")
@@ -194,6 +237,75 @@ func TestGameCoverPanelWeb(t *testing.T) {
 	if code != http.StatusOK || !strings.Contains(guestBody, `class="game-cover-panel"`) || !strings.Contains(guestBody, "Log in to track this game") {
 		t.Fatalf("signed-out game page missing merged login panel (%d)", code)
 	}
+	guestLib := strings.Index(guestBody, `class="game-library-card"`)
+	guestLikes := strings.Index(guestBody, `class="game-like like-count-only"`)
+	if guestLib < 0 || guestLikes < guestLib {
+		t.Fatal("signed-out like count is not in the library card")
+	}
+}
+
+func TestCoverHelpers(t *testing.T) {
+	one := &models.Game{CoverURL: "https://images.igdb.com/igdb/image/upload/t_cover_big/abc.jpg"}
+	if got := coverURL(one); got != "https://images.igdb.com/igdb/image/upload/t_cover_big/abc.jpg" {
+		t.Fatalf("1x cover = %q", got)
+	}
+	if got := cover2xURL(one); got != "https://images.igdb.com/igdb/image/upload/t_cover_big_2x/abc.jpg" {
+		t.Fatalf("1x to 2x cover = %q", got)
+	}
+	two := &models.Game{CoverURL: "https://images.igdb.com/igdb/image/upload/t_cover_big_2x/abc.jpg"}
+	if got := coverURL(two); got != "https://images.igdb.com/igdb/image/upload/t_cover_big/abc.jpg" {
+		t.Fatalf("2x to 1x cover = %q", got)
+	}
+	if got := cover2xURL(two); got != two.CoverURL {
+		t.Fatalf("2x cover changed = %q", got)
+	}
+	if got := coverSrcset(two); got != "https://images.igdb.com/igdb/image/upload/t_cover_big/abc.jpg 1x, https://images.igdb.com/igdb/image/upload/t_cover_big_2x/abc.jpg 2x" {
+		t.Fatalf("srcset = %q", got)
+	}
+	placeholder := &models.Game{}
+	if got := coverURL(placeholder); got != "/static/cover-placeholder.svg" {
+		t.Fatalf("placeholder cover = %q", got)
+	}
+	if got := coverSrcset(placeholder); got != "" {
+		t.Fatalf("placeholder srcset = %q", got)
+	}
+	if got := coverURL(nil); got != "/static/cover-placeholder.svg" {
+		t.Fatalf("nil cover = %q", got)
+	}
+}
+
+func TestGameTimeToBeatWeb(t *testing.T) {
+	ts, st := testServer(t)
+	ctx := context.Background()
+	_, err := st.SaveGame(ctx, &models.Game{
+		IGDBID: -405, Slug: "time-to-beat", Title: "Time To Beat", ReleaseStatus: "released",
+		TimeToBeat: &models.TimeToBeat{Hastily: 19800, Normally: 28800, Completely: 54000},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	code, body := getBody(t, http.DefaultClient, ts.URL+"/games/time-to-beat")
+	if code != http.StatusOK {
+		t.Fatalf("game page = %d", code)
+	}
+	for _, want := range []string{
+		`class="game-meta-cards"`,
+		`class="card game-times"`,
+		`Main story`, `>5h 30m<`,
+		`Main + extras`, `>8h<`,
+		`Completionist`, `>15h<`,
+	} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("game page missing %q", want)
+		}
+	}
+	metaStart := strings.Index(body, `class="game-meta-cards"`)
+	ratingsStart := strings.Index(body, `class="card game-ratings"`)
+	timesStart := strings.Index(body, `class="card game-times"`)
+	if ratingsStart < metaStart || timesStart < ratingsStart {
+		t.Fatal("ratings and time cards are not in the expected order")
+	}
 }
 
 func TestGameCreditsWeb(t *testing.T) {
@@ -204,7 +316,9 @@ func TestGameCreditsWeb(t *testing.T) {
 		ReleaseDate: "2024-05-02",
 		Companies: []models.CompanyRole{
 			{Name: "North Studio", Role: "developer"},
+			{Name: "East Studio", Role: "developer"},
 			{Name: "South Publishing", Role: "publisher"},
+			{Name: "East Studio", Role: "publisher"},
 		},
 	})
 	if err != nil {
@@ -215,14 +329,24 @@ func TestGameCreditsWeb(t *testing.T) {
 	if code != http.StatusOK {
 		t.Fatalf("game page = %d", code)
 	}
+	titleStart := strings.Index(body, "<h1>Credits</h1>")
+	heroStart := strings.Index(body, `class="game-hero"`)
 	devStart := strings.Index(body, "North Studio")
 	pubStart := strings.Index(body, "South Publishing")
-	releaseStart := strings.Index(body, `class="release"`)
-	if devStart < 0 || pubStart < 0 || releaseStart < 0 || devStart > releaseStart || pubStart > releaseStart {
-		t.Fatal("company credits are not above the release date")
+	if devStart < 0 || pubStart < 0 || titleStart < 0 || heroStart < 0 || devStart < titleStart || pubStart < titleStart || devStart > heroStart || pubStart > heroStart {
+		t.Fatal("company credits are not below the title and above the hero")
 	}
 	if !strings.Contains(body, `class="game-credits"`) {
 		t.Fatal("company credits block missing")
+	}
+	if strings.Count(body, `class="role">By<`) != 1 {
+		t.Fatal("credits should render a single By label")
+	}
+	if !strings.Contains(body, "East Studio, North Studio, South Publishing") || strings.Count(body, "East Studio") != 1 {
+		t.Fatal("credits are not in developer-then-publisher order with duplicates removed")
+	}
+	if strings.Contains(body, `class="role">developer<`) || strings.Contains(body, `class="role">publisher<`) {
+		t.Fatal("credits still render developer/publisher role labels")
 	}
 	detailsStart := strings.Index(body, "<h2>Details</h2>")
 	if detailsStart < 0 {
@@ -256,6 +380,9 @@ func TestFavouriteGamesWeb(t *testing.T) {
 		g, _ := st.SaveGame(ctx, &models.Game{IGDBID: int64(-500 - i), Slug: "fave-" + strconv.Itoa(i), Title: "Fave " + strconv.Itoa(i), ReleaseStatus: "released"})
 		games = append(games, g)
 	}
+	if _, err := st.CreateLog(ctx, store.LogInput{UserID: alice.ID, GameID: games[0].ID, Rating: 9, Review: "A favourite review", Status: "played"}); err != nil {
+		t.Fatal(err)
+	}
 	client, sess := authedClient(t, ts, st, alice)
 	plain := noRedirectClient(client)
 
@@ -263,9 +390,23 @@ func TestFavouriteGamesWeb(t *testing.T) {
 	if code, _ := getBody(t, signedOut, ts.URL+"/settings?tab=favourites"); code != http.StatusSeeOther {
 		t.Fatalf("signed-out favourites settings = %d", code)
 	}
-	code, body := getBody(t, client, ts.URL+"/settings?tab=favourites")
-	if code != 200 || !strings.Contains(body, "Favourite games") || !strings.Contains(body, `action="/settings"`) {
-		t.Fatalf("favourites tab missing (%d)", code)
+	resp, err := plain.Get(ts.URL + "/settings?tab=favourites")
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusSeeOther || resp.Header.Get("Location") != "/settings#favourites" {
+		t.Fatalf("legacy favourites redirect = %d %q", resp.StatusCode, resp.Header.Get("Location"))
+	}
+	code, body := getBody(t, client, ts.URL+"/settings")
+	if code != 200 || !strings.Contains(body, `id="favourites"`) || !strings.Contains(body, "Favourite games") || !strings.Contains(body, `action="/settings#favourites"`) {
+		t.Fatalf("favourites card missing from profile settings (%d)", code)
+	}
+	if strings.Contains(body, `href="/settings?tab=favourites"`) {
+		t.Fatal("favourites settings nav link still present")
+	}
+	if _, accountBody := getBody(t, client, ts.URL+"/settings?tab=account"); strings.Contains(accountBody, `id="favourites"`) {
+		t.Fatal("favourites card leaked onto another settings tab")
 	}
 	for i := 0; i < 5; i++ {
 		if got := postStatus(t, plain, ts.URL+"/settings/favourites/add", url.Values{"_csrf": {sess.CSRF}, "game_id": {strconv.FormatInt(games[i].ID, 10)}}); got != http.StatusSeeOther {
@@ -282,6 +423,12 @@ func TestFavouriteGamesWeb(t *testing.T) {
 	_, profile := getBody(t, client, ts.URL+"/users/alice")
 	if !strings.Contains(profile, "Favourite games") || !strings.Contains(profile, "Fave 1") {
 		t.Fatal("profile overview did not show favourites")
+	}
+	favPos := strings.Index(profile, "<h2>Favourite games</h2>")
+	reviewPos := strings.Index(profile, "<h2>Recent reviews</h2>")
+	journalPos := strings.Index(profile, "<h2>Journal</h2>")
+	if favPos < 0 || reviewPos < 0 || journalPos < 0 || favPos > reviewPos || favPos > journalPos {
+		t.Fatal("favourite games are not the first profile overview section")
 	}
 	_, reviews := getBody(t, client, ts.URL+"/users/alice?tab=reviews")
 	if strings.Contains(reviews, "Favourite games") {

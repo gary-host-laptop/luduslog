@@ -49,6 +49,11 @@
 </div>
 
 {{if eq .Tab "overview"}}
+  {{if .Favorites}}
+  <section class="section" style="margin-top:0">
+    <div class="section-head"><h2>Favourite games</h2></div>
+    <div class="fav-grid">{{range .Favorites}}<a href="/games/{{.Slug}}"><img class="game-cover" src="{{cover .}}" alt="{{.Title}}" title="{{.Title}}"></a>{{end}}</div>
+  </section>{{end}}
   {{if .Reviews}}
   <section class="section">
     <div class="section-head"><h2>Recent reviews</h2><a class="more" href="?tab=reviews">All reviews →</a></div>
@@ -58,11 +63,6 @@
   <section class="section">
     <div class="section-head"><h2>Journal</h2><a class="more" href="?tab=logs">Everything →</a></div>
     {{range .Logs}}{{template "log_row" .}}{{end}}
-  </section>{{end}}
-  {{if .Favorites}}
-  <section class="section">
-    <div class="section-head"><h2>Favourite games</h2></div>
-    <div class="fav-grid">{{range .Favorites}}<a href="/games/{{.Slug}}"><img class="game-cover" src="{{cover .}}" alt="{{.Title}}" title="{{.Title}}"></a>{{end}}</div>
   </section>{{end}}
   {{if .Lists}}
   <section class="section">

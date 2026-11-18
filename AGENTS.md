@@ -1,5 +1,11 @@
 # Agent Guidelines
 
+## Local preview server
+
+- The local preview runs on `:8099`. After every code, template, or static asset
+  change, rebuild `./luduslog` and restart `./luduslog serve` so the preview
+  always reflects the latest changes. Verify the server responds with HTTP 200.
+
 ## Git etiquette
 
 ### Issues

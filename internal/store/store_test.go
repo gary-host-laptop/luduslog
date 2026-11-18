@@ -6,6 +6,7 @@ import (
 	"errors"
 	"math"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -133,6 +134,54 @@ func TestPlatformDedupeMigration(t *testing.T) {
 	}
 	if _, err := db.Exec(`INSERT INTO platforms(name) VALUES('PC')`); err == nil {
 		t.Fatal("unique platform name index was not created")
+	}
+}
+
+func TestCover2xMigration(t *testing.T) {
+	db, err := sql.Open("sqlite", "file:"+filepath.Join(t.TempDir(), "covers.db")+"?_pragma=foreign_keys(1)")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	init, err := migrationFS.ReadFile("migrations/001_init.sql")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(string(init)); err != nil {
+		t.Fatal(err)
+	}
+	for i, cover := range []string{
+		"https://images.igdb.com/igdb/image/upload/t_cover_big/one.jpg",
+		"https://images.igdb.com/igdb/image/upload/t_cover_big_2x/two.jpg",
+		"https://example.test/cover.jpg",
+		"",
+	} {
+		if _, err := db.Exec(`INSERT INTO games(id,igdb_id,slug,title,sort_title,cover_url,created_at,updated_at) VALUES(?,?,?,?,?,?,'now','now')`,
+			i+1, i+1, "cover-"+strconv.Itoa(i), "Cover", "Cover", cover); err != nil {
+			t.Fatal(err)
+		}
+	}
+	migration, err := migrationFS.ReadFile("migrations/008_cover_2x.sql")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(string(migration)); err != nil {
+		t.Fatal(err)
+	}
+	want := []string{
+		"https://images.igdb.com/igdb/image/upload/t_cover_big_2x/one.jpg",
+		"https://images.igdb.com/igdb/image/upload/t_cover_big_2x/two.jpg",
+		"https://example.test/cover.jpg",
+		"",
+	}
+	for i, expected := range want {
+		var got string
+		if err := db.QueryRow(`SELECT cover_url FROM games WHERE id=?`, i+1).Scan(&got); err != nil {
+			t.Fatal(err)
+		}
+		if got != expected {
+			t.Errorf("cover %d = %q, want %q", i, got, expected)
+		}
 	}
 }
 

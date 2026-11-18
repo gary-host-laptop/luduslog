@@ -85,6 +85,13 @@ type apiReleaseDate struct {
 	Status   int       `json:"status"`
 }
 
+type apiTimeToBeat struct {
+	GameID     int64 `json:"game_id"`
+	Hastily    int   `json:"hastily"`
+	Normally   int   `json:"normally"`
+	Completely int   `json:"completely"`
+}
+
 type apiGame struct {
 	ID               int64  `json:"id"`
 	Name             string `json:"name"`
@@ -246,12 +253,67 @@ where id = (%s); limit 100;`, gameFields, strings.Join(parts, ","))
 }
 
 func (c *Client) query(ctx context.Context, body string) ([]models.Game, error) {
-	if err := c.authenticate(ctx); err != nil {
+	var raw []apiGame
+	if err := c.post(ctx, "games", body, &raw); err != nil {
 		return nil, err
 	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, "https://api.igdb.com/v4/games", bytes.NewBufferString(body))
+	times, err := c.timeToBeat(ctx, raw)
 	if err != nil {
 		return nil, err
+	}
+	out := make([]models.Game, 0, len(raw))
+	for _, r := range raw {
+		g := mapGame(r)
+		if t, ok := times[r.ID]; ok {
+			g.TimeToBeat = timeToBeatModel(t)
+		}
+		out = append(out, g)
+	}
+	return out, nil
+}
+
+func (c *Client) timeToBeat(ctx context.Context, games []apiGame) (map[int64]apiTimeToBeat, error) {
+	ids := make([]int64, len(games))
+	for i, g := range games {
+		ids[i] = g.ID
+	}
+	return c.timeToBeatByIDs(ctx, ids)
+}
+
+func (c *Client) timeToBeatByIDs(ctx context.Context, ids []int64) (map[int64]apiTimeToBeat, error) {
+	if len(ids) == 0 {
+		return nil, nil
+	}
+	parts := make([]string, len(ids))
+	for i, id := range ids {
+		parts[i] = strconv.FormatInt(id, 10)
+	}
+	body := fmt.Sprintf(`fields game_id,hastily,normally,completely; where game_id = (%s); limit %d;`, strings.Join(parts, ","), len(ids))
+	var raw []apiTimeToBeat
+	if err := c.post(ctx, "game_time_to_beats", body, &raw); err != nil {
+		return nil, err
+	}
+	out := make(map[int64]apiTimeToBeat, len(raw))
+	for _, t := range raw {
+		out[t.GameID] = t
+	}
+	return out, nil
+}
+
+func timeToBeatModel(t apiTimeToBeat) *models.TimeToBeat {
+	if t.Hastily <= 0 && t.Normally <= 0 && t.Completely <= 0 {
+		return nil
+	}
+	return &models.TimeToBeat{Hastily: t.Hastily, Normally: t.Normally, Completely: t.Completely}
+}
+
+func (c *Client) post(ctx context.Context, endpoint, body string, out any) error {
+	if err := c.authenticate(ctx); err != nil {
+		return err
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, "https://api.igdb.com/v4/"+endpoint, bytes.NewBufferString(body))
+	if err != nil {
+		return err
 	}
 	req.Header.Set("Client-ID", c.ClientID)
 	req.Header.Set("Authorization", "Bearer "+c.token)
@@ -259,7 +321,7 @@ func (c *Client) query(ctx context.Context, body string) ([]models.Game, error) 
 	for attempt := 0; ; attempt++ {
 		resp, err := c.HTTP.Do(req)
 		if err != nil {
-			return nil, err
+			return err
 		}
 		if resp.StatusCode == http.StatusTooManyRequests && attempt < 3 {
 			io.Copy(io.Discard, io.LimitReader(resp.Body, 1024))
@@ -271,7 +333,7 @@ func (c *Client) query(ctx context.Context, body string) ([]models.Game, error) 
 				}
 			}
 			if err := sleepContext(ctx, wait); err != nil {
-				return nil, err
+				return err
 			}
 			req = req.Clone(ctx)
 			if req.GetBody != nil {
@@ -282,17 +344,9 @@ func (c *Client) query(ctx context.Context, body string) ([]models.Game, error) 
 		defer resp.Body.Close()
 		if resp.StatusCode != 200 {
 			b, _ := io.ReadAll(io.LimitReader(resp.Body, 512))
-			return nil, fmt.Errorf("igdb games: %s: %s", resp.Status, b)
+			return fmt.Errorf("igdb %s: %s: %s", endpoint, resp.Status, b)
 		}
-		var raw []apiGame
-		if err := json.NewDecoder(resp.Body).Decode(&raw); err != nil {
-			return nil, err
-		}
-		out := make([]models.Game, 0, len(raw))
-		for _, r := range raw {
-			out = append(out, mapGame(r))
-		}
-		return out, nil
+		return json.NewDecoder(resp.Body).Decode(out)
 	}
 }
 
@@ -313,7 +367,7 @@ func mapGame(r apiGame) models.Game {
 		}
 	}
 	if r.Cover != nil && r.Cover.URL != "" {
-		g.CoverURL = imageURL(r.Cover.URL, "t_cover_big")
+		g.CoverURL = imageURL(r.Cover.URL, "t_cover_big_2x")
 	}
 	for _, gen := range r.Genres {
 		g.Genres = appendUnique(g.Genres, gen.Name)

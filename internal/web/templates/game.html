@@ -2,14 +2,20 @@
 <article>
 <header class="game-title-row">
   <h1>{{.Game.Title}}</h1>
+  {{if .Game.Companies}}
+  <div class="game-credits">
+    <span><span class="role">By</span> {{creditNames .Game.Companies}}</span>
+  </div>
+  {{end}}
 </header>
 <div class="game-hero">
   <div class="game-cover-panel">
     <div class="game-cover-pane">
-      <img class="cover" src="{{cover .Game}}" alt="Cover of {{.Game.Title}}">
+      <img class="cover" src="{{cover2x .Game}}" alt="Cover of {{.Game.Title}}">
     </div>
     {{if .LoggedIn}}
     <div class="game-library-card">
+      <div class="library-card-top">{{template "game_like" dict "Slug" .Game.Slug "Liked" .Status.Liked "Likes" .Game.Likes "CSRF" .CSRF}}</div>
       <div class="library-card-head">
         <span class="muted">In your library</span>
       </div>
@@ -44,16 +50,12 @@
     </div>
     {{else}}
     <div class="game-library-card">
+      <div class="library-card-top"><span class="game-like like-count-only" aria-label="{{.Game.Likes}} likes"><i class="ph-light ph-heart icon" aria-hidden="true"></i>{{.Game.Likes}}</span></div>
       <a class="btn btn-primary btn-block" href="/login">Log in to track this game</a>
     </div>
     {{end}}
   </div>
   <div class="game-info">
-    {{if .Game.Companies}}
-    <div class="game-credits">
-      {{range .Game.Companies}}<span><span class="role">{{.Role}}</span> {{.Name}}</span>{{end}}
-    </div>
-    {{end}}
     <div class="release">
       {{if .Game.ReleaseDate}}{{.Game.ReleaseDate}}{{else if .Game.ReleaseYear}}{{.Game.ReleaseYear}}{{end}}
       {{if .Game.Franchise}} · <a href="/games?franchise={{.Game.Franchise}}">{{.Game.Franchise}}</a>{{end}}
@@ -62,13 +64,11 @@
     </div>
 
     <div class="stat-strip">
-      <div><strong>{{if .Game.RatingCount}}{{rating .Game.Weighted 10}}{{else}}—{{end}}</strong><span class="stat-label"><i class="ph-light ph-star icon" aria-hidden="true"></i>weighted rating</span></div>
-      <div><strong>{{.Game.RatingCount}}</strong><span class="stat-label"><i class="ph-light ph-users icon" aria-hidden="true"></i>ratings</span></div>
-      <div><strong>{{.Game.Reviews}}</strong><span class="stat-label"><i class="ph-light ph-chat-circle icon" aria-hidden="true"></i>reviews</span></div>
-      <div><strong>{{.Game.Plays}}</strong><span class="stat-label"><i class="ph-light ph-game-controller icon" aria-hidden="true"></i>played</span></div>
-      <div><strong>{{.Game.Backlogs}}</strong><span class="stat-label"><i class="ph-light ph-stack icon" aria-hidden="true"></i>backlogged</span></div>
-      <div><strong>{{.Game.ListsCount}}</strong><span class="stat-label"><i class="ph-light ph-list icon" aria-hidden="true"></i>lists</span></div>
-      {{if .LoggedIn}}{{template "game_like" dict "Slug" .Game.Slug "Liked" .Status.Liked "Likes" .Game.Likes "CSRF" .CSRF}}{{else}}<span class="game-like like-count-only" aria-label="{{.Game.Likes}} likes">{{.Game.Likes}}</span>{{end}}
+      <div><strong>{{if .Game.RatingCount}}{{rating .Game.AvgRating 10}}{{else}}—{{end}}</strong><span class="stat-label"><i class="ph-light ph-star icon" aria-hidden="true"></i>avg. rating</span></div>
+      <div><strong>{{.Game.Plays}}</strong><span class="stat-label"><i class="ph-light ph-check-circle icon" aria-hidden="true"></i>played</span></div>
+      <div><strong>{{.Game.Playing}}</strong><span class="stat-label"><i class="ph-light ph-play icon" aria-hidden="true"></i>playing</span></div>
+      <div><strong>{{.Game.Backlogs}}</strong><span class="stat-label"><i class="ph-light ph-stack icon" aria-hidden="true"></i>backlog</span></div>
+      <div><strong>{{.Game.Wishlists}}</strong><span class="stat-label"><i class="ph-light ph-heart icon" aria-hidden="true"></i>wishlist</span></div>
     </div>
 
     {{if .Game.Genres}}<div class="pill-row">{{range .Game.Genres}}<a class="pill" href="/games?genre={{.}}">{{.}}</a>{{end}}</div>{{end}}
@@ -87,26 +87,42 @@
     <div class="muted mt1">In your library: {{.Owned.Ownership}}{{if .Owned.Platform}} · {{.Owned.Platform}}{{end}}</div>
     {{end}}
 
-    <section class="card game-ratings">
-      <div class="card-head"><h2>Ratings</h2><span class="muted">{{.Game.RatingCount}} total</span></div>
-      {{if .HistogramMax}}
-      <div class="rating-chart">
-        {{range $k := seq 1 5}}
-        <div class="rating-col">
-          <span class="rating-count">{{index $.Histogram $k}}</span>
-          <div class="rating-bar"><i style="height:{{pct (index $.Histogram $k) $.HistogramMax}}%"></i></div>
-          <span class="rating-label">{{$k}}★</span>
+    <div class="game-meta-cards">
+      <section class="card game-ratings">
+        <div class="card-head"><h2>Ratings</h2><span class="muted">{{.Game.RatingCount}} total</span></div>
+        {{if .HistogramMax}}
+        <div class="rating-chart">
+          {{range $k := seq 1 10}}{{$n := index $.Histogram $k}}
+          <div class="rating-col" tabindex="0" aria-label="{{halfStarLabel $k}} stars, {{$n}} {{plural $n "rating" "ratings"}}" data-tip="{{halfStarLabel $k}}★ · {{$n}} {{plural $n "rating" "ratings"}}">
+            <div class="rating-bar"><i style="height:{{pct $n $.HistogramMax}}%"></i></div>
+          </div>
+          {{end}}
         </div>
-        {{end}}
-      </div>
-      {{else}}<div class="muted">No ratings yet. Be the first.</div>{{end}}
-      <div class="mt2 row">
-        <span class="pill">Played {{index .Counts "played"}}</span>
-        <span class="pill">Playing {{index .Counts "playing"}}</span>
-        <span class="pill">Backlog {{index .Counts "backlog"}}</span>
-        <span class="pill">Wishlist {{index .Counts "wishlist"}}</span>
-      </div>
-    </section>
+        {{else}}<div class="muted">No ratings yet. Be the first.</div>{{end}}
+      </section>
+      {{if .Game.TimeToBeat.HasData}}
+      <section class="card game-times">
+        <div class="card-head"><h2>Time to beat</h2></div>
+        <div class="time-blocks">
+          <div class="time-block">
+            <i class="ph-light ph-flag-checkered icon" aria-hidden="true"></i>
+            <strong>{{beatTime .Game.TimeToBeat.Hastily}}</strong>
+            <span>Main story</span>
+          </div>
+          <div class="time-block">
+            <i class="ph-light ph-compass icon" aria-hidden="true"></i>
+            <strong>{{beatTime .Game.TimeToBeat.Normally}}</strong>
+            <span>Main + extras</span>
+          </div>
+          <div class="time-block">
+            <i class="ph-light ph-trophy icon" aria-hidden="true"></i>
+            <strong>{{beatTime .Game.TimeToBeat.Completely}}</strong>
+            <span>Completionist</span>
+          </div>
+        </div>
+      </section>
+      {{end}}
+    </div>
   </div>
 </div>
 

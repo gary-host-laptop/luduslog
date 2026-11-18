@@ -695,8 +695,9 @@ func (s *Store) GameStatusCounts(ctx context.Context, gameID int64) map[string]i
 	return out
 }
 
-// RatingDistribution powers the histogram on game pages.
-func (s *Store) RatingDistribution(ctx context.Context, gameID int64, scale int) map[int]int {
+// RatingDistribution returns counts keyed by 1-10 scores, which map to half
+// stars on the five-star scale used by game pages.
+func (s *Store) RatingDistribution(ctx context.Context, gameID int64) map[int]int {
 	out := map[int]int{}
 	rows, err := s.DB.QueryContext(ctx, `SELECT rating,COUNT(*) FROM logs WHERE game_id=? AND rating>0 AND primary_rating=1 AND deleted_at IS NULL GROUP BY rating`, gameID)
 	if err != nil {
@@ -707,12 +708,11 @@ func (s *Store) RatingDistribution(ctx context.Context, gameID int64, scale int)
 		var r float64
 		var n int
 		rows.Scan(&r, &n)
-		bucket := int(r)
-		if scale == 5 {
-			bucket = int(r / 2)
-			if bucket < 1 {
-				bucket = 1
-			}
+		bucket := int(r + 0.5)
+		if bucket < 1 {
+			bucket = 1
+		} else if bucket > 10 {
+			bucket = 10
 		}
 		out[bucket] += n
 	}

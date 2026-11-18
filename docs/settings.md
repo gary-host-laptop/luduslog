@@ -56,7 +56,7 @@ activities for deleted accounts.
 ## Favourite games
 
 Profiles show up to five explicit favourite games on the Overview tab. Favourites
-are managed in Settings → Favourites and are separate from game likes: liking a
+are managed in Settings → Profile and are separate from game likes: liking a
 game no longer changes the profile favourites section. Users can search the
 catalog, add and remove picks, and reorder them by drag-and-drop or with the
 move up/down buttons when JavaScript is unavailable. The sixth pick is rejected.

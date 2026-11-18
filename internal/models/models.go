@@ -93,6 +93,7 @@ type Game struct {
 	Likes         int
 	ListsCount    int
 	Reviews       int
+	TimeToBeat    *TimeToBeat
 	UpdatedAt     time.Time
 	SyncedAt      *time.Time
 	Platforms     []Platform
@@ -107,6 +108,17 @@ type Game struct {
 	Contents      []Game // bundle contents
 	Bundles       []Game
 	Editions      []Game
+}
+
+// TimeToBeat holds IGDB's average completion times in seconds.
+type TimeToBeat struct {
+	Hastily    int
+	Normally   int
+	Completely int
+}
+
+func (t *TimeToBeat) HasData() bool {
+	return t != nil && (t.Hastily > 0 || t.Normally > 0 || t.Completely > 0)
 }
 
 type CompanyRole struct {
