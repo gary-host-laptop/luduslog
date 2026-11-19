@@ -34,6 +34,8 @@ func templateFuncs(s *Server) template.FuncMap {
 		"timeago":         timeAgo,
 		"date":            dateFmt,
 		"dateLong":        dateLong,
+		"releaseDate":     releaseDate,
+		"sameTitle":       sameTitle,
 		"year":            func(t time.Time) int { return t.Year() },
 		"add":             func(a, b int) int { return a + b },
 		"sub":             func(a, b int) int { return a - b },
@@ -288,6 +290,17 @@ func dateLong(t time.Time) string {
 		return ""
 	}
 	return t.Format("January 2, 2006")
+}
+
+func releaseDate(s string) string {
+	if t, err := time.Parse("2006-01-02", s); err == nil {
+		return t.Format("2006/01/02")
+	}
+	return s
+}
+
+func sameTitle(a, b string) bool {
+	return strings.EqualFold(strings.TrimSpace(a), strings.TrimSpace(b))
 }
 
 func seq(from, to int) []int {

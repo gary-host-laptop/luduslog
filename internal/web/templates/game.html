@@ -57,9 +57,8 @@
   </div>
   <div class="game-info">
     <div class="release">
-      {{if .Game.ReleaseDate}}{{.Game.ReleaseDate}}{{else if .Game.ReleaseYear}}{{.Game.ReleaseYear}}{{end}}
-      {{if .Game.Franchise}} · <a href="/games?franchise={{.Game.Franchise}}">{{.Game.Franchise}}</a>{{end}}
-      {{if .Game.Category}} · <span class="pill">{{.Game.Category}}</span>{{end}}
+      {{if .Game.ReleaseDate}}Released on {{releaseDate .Game.ReleaseDate}}{{else if .Game.ReleaseYear}}Released on {{.Game.ReleaseYear}}{{end}}
+      {{if and .Game.Franchise (not (sameTitle .Game.Franchise .Game.Title))}} · <a href="/games?franchise={{.Game.Franchise}}">{{.Game.Franchise}}</a>{{end}}
       {{if .Game.Adult}}<span class="pill">18+</span>{{end}}
     </div>
 
@@ -101,26 +100,23 @@
         {{else}}<div class="muted">No ratings yet. Be the first.</div>{{end}}
       </section>
       {{if .Game.TimeToBeat.HasData}}
-      <section class="card game-times">
-        <div class="card-head"><h2>Time to beat</h2></div>
-        <div class="time-blocks">
-          <div class="time-block">
-            <i class="ph-light ph-flag-checkered icon" aria-hidden="true"></i>
-            <strong>{{beatTime .Game.TimeToBeat.Hastily}}</strong>
-            <span>Main story</span>
-          </div>
-          <div class="time-block">
-            <i class="ph-light ph-compass icon" aria-hidden="true"></i>
-            <strong>{{beatTime .Game.TimeToBeat.Normally}}</strong>
-            <span>Main + extras</span>
-          </div>
-          <div class="time-block">
-            <i class="ph-light ph-trophy icon" aria-hidden="true"></i>
-            <strong>{{beatTime .Game.TimeToBeat.Completely}}</strong>
-            <span>Completionist</span>
-          </div>
+      <div class="time-blocks">
+        <div class="time-block">
+          <i class="ph-light ph-flag-checkered icon" aria-hidden="true"></i>
+          <strong>{{beatTime .Game.TimeToBeat.Hastily}}</strong>
+          <span>Main story</span>
         </div>
-      </section>
+        <div class="time-block">
+          <i class="ph-light ph-compass icon" aria-hidden="true"></i>
+          <strong>{{beatTime .Game.TimeToBeat.Normally}}</strong>
+          <span>Main + extras</span>
+        </div>
+        <div class="time-block">
+          <i class="ph-light ph-trophy icon" aria-hidden="true"></i>
+          <strong>{{beatTime .Game.TimeToBeat.Completely}}</strong>
+          <span>Completionist</span>
+        </div>
+      </div>
       {{end}}
     </div>
   </div>
@@ -133,7 +129,7 @@
   <dl style="display:grid;grid-template-columns:auto 1fr;gap:.4rem 1rem;font-size:.9rem;margin:0">
     {{if .Game.Modes}}<dt class="muted">Modes</dt><dd style="margin:0">{{range .Game.Modes}}{{.}} {{end}}</dd>{{end}}
     {{if .Game.Themes}}<dt class="muted">Themes</dt><dd style="margin:0">{{range .Game.Themes}}{{.}} {{end}}</dd>{{end}}
-    {{if .Game.ReleaseDates}}<dt class="muted">Releases</dt><dd style="margin:0">{{range .Game.ReleaseDates}}{{.Platform}} {{.Date}}<br>{{end}}</dd>{{end}}
+    {{if .Game.ReleaseDates}}<dt class="muted">Releases</dt><dd style="margin:0">{{range .Game.ReleaseDates}}{{.Platform}} {{releaseDate .Date}}<br>{{end}}</dd>{{end}}
   </dl>
   <div class="mt1"><a class="btn btn-sm" href="/report?target_type=game&target_id={{.Game.ID}}">Report an issue</a>
     {{if .IsAdmin}}<form class="inline-form" method="post" action="/admin/games/{{.Game.Slug}}/refresh"><input type="hidden" name="_csrf" value="{{.CSRF}}"><button class="btn btn-sm" type="submit">Refresh from IGDB</button></form>{{end}}</div>

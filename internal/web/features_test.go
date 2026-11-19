@@ -212,8 +212,8 @@ func TestGameCoverPanelWeb(t *testing.T) {
 	if strings.Contains(body, `<div class="grid grid-2 mt3">`) {
 		t.Fatal("ratings and details still share the old lower grid")
 	}
-	if strings.Contains(body, `class="card game-times"`) {
-		t.Fatal("game without time-to-beat data rendered a time card")
+	if strings.Contains(body, `class="time-blocks"`) {
+		t.Fatal("game without time-to-beat data rendered time cards")
 	}
 	statusStart := strings.Index(body, `class="status-bar"`)
 	if statusStart < 0 {
@@ -291,7 +291,7 @@ func TestGameTimeToBeatWeb(t *testing.T) {
 	}
 	for _, want := range []string{
 		`class="game-meta-cards"`,
-		`class="card game-times"`,
+		`class="time-blocks"`,
 		`Main story`, `>5h 30m<`,
 		`Main + extras`, `>8h<`,
 		`Completionist`, `>15h<`,
@@ -300,11 +300,50 @@ func TestGameTimeToBeatWeb(t *testing.T) {
 			t.Fatalf("game page missing %q", want)
 		}
 	}
+	if strings.Contains(body, `class="card game-times"`) || strings.Contains(body, `<h2>Time to beat</h2>`) {
+		t.Fatal("time blocks still render inside a wrapper card")
+	}
+	if got := strings.Count(body, `class="time-block"`); got != 3 {
+		t.Fatalf("game page has %d time blocks, want 3", got)
+	}
 	metaStart := strings.Index(body, `class="game-meta-cards"`)
 	ratingsStart := strings.Index(body, `class="card game-ratings"`)
-	timesStart := strings.Index(body, `class="card game-times"`)
+	timesStart := strings.Index(body, `class="time-blocks"`)
 	if ratingsStart < metaStart || timesStart < ratingsStart {
-		t.Fatal("ratings and time cards are not in the expected order")
+		t.Fatal("ratings and time blocks are not in the expected order")
+	}
+}
+
+func TestGameReleaseDisplayWeb(t *testing.T) {
+	ts, st := testServer(t)
+	ctx := context.Background()
+	_, err := st.SaveGame(ctx, &models.Game{
+		IGDBID: -406, Slug: "release-display", Title: "Release Display", ReleaseStatus: "released",
+		ReleaseDate: "2024-05-02", Franchise: "release display", Category: "main_game",
+		ReleaseDates: []models.ReleaseDate{{Platform: "PC", Date: "2024-05-02"}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	code, body := getBody(t, http.DefaultClient, ts.URL+"/games/release-display")
+	if code != http.StatusOK {
+		t.Fatalf("game page = %d", code)
+	}
+	if !strings.Contains(body, "Released on 2024/05/02") {
+		t.Fatal("release line does not lead with Released on")
+	}
+	if strings.Contains(body, "main_game") {
+		t.Fatal("release line still renders the game category")
+	}
+	if strings.Contains(body, "2024-05-02") {
+		t.Fatal("release dates still use dashes")
+	}
+	if strings.Contains(body, "franchise=") {
+		t.Fatal("release line repeats the game title as a franchise")
+	}
+	if !strings.Contains(body, "PC 2024/05/02") {
+		t.Fatal("details release date is not formatted with slashes")
 	}
 }
 
