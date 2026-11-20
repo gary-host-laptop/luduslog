@@ -189,6 +189,8 @@ func logInputFrom(r *http.Request, u *models.User, gameID int64) store.LogInput 
 		StartedAt:    r.FormValue("started_at"),
 		FinishedAt:   r.FormValue("finished_at"),
 		Playtime:     atof(r.FormValue("playtime")),
+		TimeToFinish: atof(r.FormValue("time_to_finish")),
+		TimeToMaster: atof(r.FormValue("time_to_master")),
 		SyncSessions: r.FormValue("sync_sessions") == "1",
 		Language:     r.FormValue("language"),
 		Draft:        r.FormValue("draft") == "1",
@@ -293,6 +295,14 @@ func (s *Server) logEdit(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	in := logInputFrom(r, u, l.GameID)
+	// Older forms and API clients do not send the manual timing fields; an
+	// absent field must not wipe stored values.
+	if _, ok := r.Form["time_to_finish"]; !ok {
+		in.TimeToFinish = l.TimeToFinish
+	}
+	if _, ok := r.Form["time_to_master"]; !ok {
+		in.TimeToMaster = l.TimeToMaster
+	}
 	if _, err := s.st.UpdateLog(r.Context(), id, in); err != nil {
 		s.serverError(w, r, err)
 		return
@@ -388,8 +398,54 @@ func (s *Server) sessionList(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	g, _ := s.st.GameByID(r.Context(), l.GameID)
-	sessions, _ := s.st.SessionsFor(r.Context(), id)
+	sessions, _ := s.st.SessionsForViewer(r.Context(), id, u.ID)
 	s.render(w, r, "sessions", sessionsData{Page: s.page(r, "Play sessions"), Log: l, Game: g, Sessions: sessions})
+}
+
+func sessionDays(r *http.Request) []string {
+	days := []string{}
+	for _, d := range r.Form["days"] {
+		if _, err := time.Parse("2006-01-02", d); err == nil {
+			days = append(days, d)
+		}
+	}
+	return days
+}
+
+func sessionTags(r *http.Request) []string {
+	var tags []string
+	for _, raw := range r.Form["tags"] {
+		for _, t := range strings.Split(raw, ",") {
+			if t = strings.TrimSpace(t); t != "" {
+				tags = append(tags, t)
+			}
+		}
+	}
+	return tags
+}
+
+// sessionUpdate edits a session after confirming the log belongs to the user.
+func (s *Server) sessionUpdate(w http.ResponseWriter, r *http.Request) {
+	id, _ := strconv.ParseInt(r.PathValue("id"), 10, 64)
+	u := currentUser(r)
+	sess, err := s.st.SessionByID(r.Context(), id)
+	if err != nil {
+		s.notFound(w, r)
+		return
+	}
+	err = s.st.UpdateSessionFor(r.Context(), id, u.ID, store.SessionInput{
+		Note:        strings.TrimSpace(r.FormValue("note")),
+		NotePrivacy: store.NormalizeNotePrivacy(r.FormValue("privacy")),
+		Playtime:    atof(r.FormValue("playtime")),
+		Days:        sessionDays(r),
+		Tags:        sessionTags(r),
+	})
+	if err != nil {
+		s.notFound(w, r)
+		return
+	}
+	s.flash(w, r, "success", "Session updated.")
+	s.redirect(w, r, "/logs/"+itoa(sess.LogID)+"/sessions")
 }
 
 func (s *Server) sessionCreate(w http.ResponseWriter, r *http.Request) {
@@ -400,19 +456,13 @@ func (s *Server) sessionCreate(w http.ResponseWriter, r *http.Request) {
 		s.notFound(w, r)
 		return
 	}
-	days := []string{}
-	for _, d := range r.Form["days"] {
-		if _, err := time.Parse("2006-01-02", d); err == nil {
-			days = append(days, d)
-		}
-	}
 	_, err = s.st.CreateSession(r.Context(), store.SessionInput{
 		LogID:       id,
 		Note:        strings.TrimSpace(r.FormValue("note")),
-		NotePrivacy: r.FormValue("privacy"),
+		NotePrivacy: store.NormalizeNotePrivacy(r.FormValue("privacy")),
 		Playtime:    atof(r.FormValue("playtime")),
-		Days:        days,
-		Tags:        nonEmpty(r.Form["tags"]),
+		Days:        sessionDays(r),
+		Tags:        sessionTags(r),
 	})
 	if err != nil {
 		s.serverError(w, r, err)

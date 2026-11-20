@@ -54,6 +54,7 @@ func (s *Server) routes() {
 	m.HandleFunc("POST /logs/{id}/like", s.requireUser(s.likeLog))
 	m.HandleFunc("GET /logs/{id}/sessions", s.requireUser(s.sessionList))
 	m.HandleFunc("POST /logs/{id}/sessions", s.requireUser(s.sessionCreate))
+	m.HandleFunc("POST /sessions/{id}/edit", s.requireUser(s.sessionUpdate))
 	m.HandleFunc("POST /sessions/{id}/delete", s.requireUser(s.sessionDelete))
 
 	// Lists

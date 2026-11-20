@@ -78,7 +78,8 @@ func templateFuncs(s *Server) template.FuncMap {
 			}
 			return "/users/" + l.User.Username + "/reviews/" + strconv.FormatInt(l.ID, 10)
 		},
-		"privacyLabel": privacyLabel,
+		"privacyLabel":     privacyLabel,
+		"notePrivacyLabel": notePrivacyLabel,
 		"ratingScaleMax": func(scale int) int {
 			if scale == 10 {
 				return 10

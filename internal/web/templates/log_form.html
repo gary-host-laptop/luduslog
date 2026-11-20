@@ -17,6 +17,7 @@
     <div><label for="status">Status</label><select id="status" name="status">
       {{$status := "played"}}{{if .Log}}{{$status = .Log.Status}}{{end}}
       <option value="played" {{if eq $status "played"}}selected{{end}}>Played</option>
+      <option value="completed" {{if eq $status "completed"}}selected{{end}}>Completed</option>
       <option value="playing" {{if eq $status "playing"}}selected{{end}}>Playing</option>
       <option value="backlog" {{if eq $status "backlog"}}selected{{end}}>Backlog</option>
       <option value="wishlist" {{if eq $status "wishlist"}}selected{{end}}>Wishlist</option>
@@ -25,6 +26,15 @@
     </select></div>
     <div><label for="platform_id">Platform</label><select id="platform_id" name="platform_id"><option value="">—</option>{{range .Platforms}}<option value="{{.ID}}" {{if and $.Log $.Log.PlatformID (eq (derefInt $.Log.PlatformID) .ID)}}selected{{end}}>{{.Name}}</option>{{end}}</select></div>
   </div>
+  <div class="form-row">
+    <div><label for="played_on_id">Played on</label><select id="played_on_id" name="played_on_id"><option value="">—</option>{{range .Platforms}}<option value="{{.ID}}" {{if and $.Log $.Log.PlayedOnID (eq (derefInt $.Log.PlayedOnID) .ID)}}selected{{end}}>{{.Name}}</option>{{end}}</select><div class="field-hint">The system you actually played it on, when it differs from the release platform.</div></div>
+    <div><label for="edition_game_id">Edition</label><select id="edition_game_id" name="edition_game_id"><option value="">—</option>{{if .Game}}{{range .Game.Editions}}<option value="{{.ID}}" {{if and $.Log $.Log.EditionGameID (eq (derefInt $.Log.EditionGameID) .ID)}}selected{{end}}>{{if .EditionName}}{{.EditionName}}{{else}}{{.Title}}{{end}}</option>{{end}}{{end}}</select></div>
+  </div>
+  <div class="form-row">
+    <div><label for="language">Language</label><input id="language" type="text" name="language" list="language-options" value="{{if .Log}}{{.Log.Language}}{{end}}" placeholder="English"><datalist id="language-options"><option value="English"><option value="Japanese"><option value="French"><option value="German"><option value="Spanish"><option value="Portuguese"><option value="Italian"><option value="Korean"><option value="Chinese"></datalist></div>
+    <div><label for="time_to_finish">Time to finish (hours)</label><input id="time_to_finish" type="number" step="0.1" min="0" name="time_to_finish" value="{{if .Log}}{{.Log.TimeToFinish}}{{end}}"><div class="field-hint">Optional manual timing. Not imported from Backloggd.</div></div>
+  </div>
+  <div><label for="time_to_master">Time to master (hours)</label><input id="time_to_master" type="number" step="0.1" min="0" name="time_to_master" value="{{if .Log}}{{.Log.TimeToMaster}}{{end}}"></div>
   <div class="form-row">
     <div><label for="started_at">Started</label><input id="started_at" type="date" name="started_at" value="{{if .Log}}{{.Log.StartedAt}}{{end}}"></div>
     <div><label for="finished_at">Finished</label><input id="finished_at" type="date" name="finished_at" value="{{if .Log}}{{.Log.FinishedAt}}{{end}}"></div>
@@ -47,7 +57,7 @@
   <div>
     <label for="review">Review or journal <span class="muted">(Markdown)</span></label>
     <textarea id="review" name="review" rows="10" placeholder="What did you think?">{{if .Log}}{{.Log.Review}}{{end}}</textarea>
-    <div class="field-hint">Leave empty to keep this as a private log entry. Markdown: **bold**, *italic*, lists, quotes, links.</div>
+    <div class="field-hint">Leave empty to keep this as a private log entry. Markdown: **bold**, *italic*, lists, quotes, links.Choosing an ownership here also adds or updates your library entry for this game.</div>
   </div>
   <div class="row">
     <label class="check"><input type="checkbox" name="spoiler" value="1" {{if and .Log .Log.Spoiler}}checked{{end}}> Contains spoilers</label>

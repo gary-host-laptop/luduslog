@@ -33,9 +33,54 @@ type profileData struct {
 	CountFollowers int
 	CountFollowing int
 	Activity       []models.Activity
+	JournalView    string
+	Calendar       *journalCalendar
 	PageNum        int
 	Pages          int
 	Total          int
+}
+
+type calendarDay struct {
+	Day     int
+	InMonth bool
+	Played  bool
+}
+
+type journalCalendar struct {
+	Month string
+	Prev  string
+	Next  string
+	Weeks [][]calendarDay
+}
+
+// buildJournalCalendar lays out one month (Monday first) and marks the days a
+// session was logged on.
+func buildJournalCalendar(days []store.PlayDay, at time.Time) *journalCalendar {
+	played := make(map[string]bool, len(days))
+	for _, d := range days {
+		played[d.Day] = true
+	}
+	first := time.Date(at.Year(), at.Month(), 1, 0, 0, 0, 0, time.UTC)
+	offset := (int(first.Weekday()) + 6) % 7 // Monday-first grid
+	start := first.AddDate(0, 0, -offset)
+	cal := &journalCalendar{
+		Month: first.Format("January 2006"),
+		Prev:  first.AddDate(0, -1, 0).Format("2006-01"),
+		Next:  first.AddDate(0, 1, 0).Format("2006-01"),
+	}
+	for w := 0; w < 6; w++ {
+		row := make([]calendarDay, 0, 7)
+		for d := 0; d < 7; d++ {
+			day := start.AddDate(0, 0, w*7+d)
+			row = append(row, calendarDay{
+				Day:     day.Day(),
+				InMonth: day.Month() == first.Month(),
+				Played:  played[day.Format("2006-01-02")],
+			})
+		}
+		cal.Weeks = append(cal.Weeks, row)
+	}
+	return cal
 }
 
 func (s *Server) profile(w http.ResponseWriter, r *http.Request) {
@@ -54,6 +99,10 @@ func (s *Server) profile(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	viewer := currentUser(r)
+	var viewerID int64
+	if viewer != nil {
+		viewerID = viewer.ID
+	}
 	if strings.EqualFold(p.Username, name) == false {
 		// usernames are case-insensitive for lookup but canonical in URLs
 	}
@@ -100,18 +149,38 @@ func (s *Server) profile(w http.ResponseWriter, r *http.Request) {
 		data.Stats, _ = s.st.StatsFor(r.Context(), p.ID)
 		data.Favorites = s.st.FavoriteGames(r.Context(), p.ID, 5)
 		data.Friends, _ = s.st.MutualUsers(r.Context(), p.ID, 12)
+		data.JournalView = p.JournalView
+		if data.JournalView == "" {
+			data.JournalView = "calendar"
+		}
 		switch tab {
 		case "reviews":
 			data.Reviews, data.Total, _ = s.st.UserLogs(r.Context(), p.ID, true, 15, (page-1)*15)
 		case "logs":
 			data.Logs, data.Total, _ = s.st.UserLogs(r.Context(), p.ID, false, 15, (page-1)*15)
+			switch data.JournalView {
+			case "calendar":
+				at := time.Now()
+				if m, err := time.Parse("2006-01", r.URL.Query().Get("month")); err == nil {
+					at = m
+				}
+				days, _ := s.st.PlayCalendar(r.Context(), p.ID, 1000)
+				data.Calendar = buildJournalCalendar(days, at)
+			case "activity":
+				data.Activity, _ = s.st.UserActivities(r.Context(), p.ID, 50, 0)
+			}
 		case "lists":
-			data.Lists, data.Total = s.st.ListsForUser(r.Context(), p.ID, isMe, 30, (page-1)*30)
+			data.Lists, _ = s.st.VisibleListsFor(r.Context(), p.ID, viewerID)
+			data.Total = len(data.Lists)
 		case "activity":
 			data.Activity, _ = s.st.UserActivities(r.Context(), p.ID, 30, 0)
 		default:
 			data.Logs, _, _ = s.st.UserLogs(r.Context(), p.ID, false, 6, 0)
-			data.Lists, _ = s.st.ListsForUser(r.Context(), p.ID, isMe, 4, 0)
+			lists, _ := s.st.VisibleListsFor(r.Context(), p.ID, viewerID)
+			if len(lists) > 4 {
+				lists = lists[:4]
+			}
+			data.Lists = lists
 			data.Reviews, _, _ = s.st.UserLogs(r.Context(), p.ID, true, 2, 0)
 			data.Activity, _ = s.st.UserActivities(r.Context(), p.ID, 8, 0)
 		}
@@ -124,10 +193,6 @@ func (s *Server) profile(w http.ResponseWriter, r *http.Request) {
 }
 
 func badgesOrEmpty(b []models.Badge, err error) []models.Badge { return b }
-
-func (s *Server) atProfile(w http.ResponseWriter, r *http.Request) {
-	s.redirect(w, r, "/users/"+r.PathValue("name"))
-}
 
 type reviewData struct {
 	Page

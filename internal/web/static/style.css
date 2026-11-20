@@ -474,6 +474,12 @@ th { color: var(--muted); font-size: .76rem; text-transform: uppercase; letter-s
 @media (prefers-reduced-motion: reduce) { *, *::before, *::after { transition: none !important; animation: none !important; scroll-behavior: auto !important; } }
 @media print { .site-header, .site-footer, .no-print { display: none; } body { background: #fff; color: #000; } }
 
+/* Journal calendar and related game groups */
+.calendar-grid { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: .3rem; }
+.calendar-head { font-size: .7rem; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); text-align: center; }
+.calendar-day { min-height: 2rem; display: flex; align-items: center; justify-content: center; border-radius: var(--radius-sm); font-size: .85rem; color: var(--text); }
+.calendar-day.played { background: var(--accent-soft); color: var(--text-bright); font-weight: 600; }
+.calendar-day.out { opacity: .35; }
 .related-tabs { display: none; flex-wrap: wrap; gap: .35rem; margin: 0 0 .75rem; }
 .related-games[data-enhanced] .related-tabs { display: flex; }
 .related-tab { font: inherit; font-size: .82rem; padding: .35rem .8rem; border: 0; border-radius: var(--radius-sm); background: var(--bg-elev); color: var(--muted); cursor: pointer; }

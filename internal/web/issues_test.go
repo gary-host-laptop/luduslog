@@ -546,3 +546,146 @@ func TestCSVExport(t *testing.T) {
 		t.Fatalf("review escaping round-trip = %q", rows[1][12])
 	}
 }
+func TestLogFormNewFieldsAndTimePreservation(t *testing.T) {
+	ts, st := testServer(t)
+	ctx := context.Background()
+	alice, _ := st.CreateUser(ctx, "alice", "alice@example.test", "hash", false)
+	game := mustSaveGame(t, st, &models.Game{IGDBID: -921, Slug: "form-game", Title: "Form Game", Category: "main_game", ReleaseStatus: "released"})
+	edition := mustSaveGame(t, st, &models.Game{IGDBID: -922, Slug: "form-game-deluxe", Title: "Form Game - Deluxe", ParentIGDBID: -921, EditionName: "Deluxe", Category: "main_game", ReleaseStatus: "released"})
+	platform := mustSaveGamePlatform(t, st, "Switch")
+	client, sess := authedClient(t, ts, st, alice)
+
+	code, form := getBody(t, client, ts.URL+"/games/form-game/log")
+	if code != 200 {
+		t.Fatalf("log form = %d", code)
+	}
+	for _, want := range []string{`name="language"`, `name="played_on_id"`, `name="edition_game_id"`, `value="completed"`, `name="time_to_finish"`, `name="time_to_master"`, "Deluxe"} {
+		if !strings.Contains(form, want) {
+			t.Errorf("log form missing %q", want)
+		}
+	}
+	noRedirect := &http.Client{Jar: client.Jar, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
+	resp, err := noRedirect.PostForm(ts.URL+"/games/form-game/log", url.Values{
+		"_csrf": {sess.CSRF}, "status": {"completed"}, "language": {"Japanese"},
+		"platform_id": {itoa(platform)}, "played_on_id": {itoa(platform)}, "edition_game_id": {itoa(edition.ID)},
+		"time_to_finish": {"12.5"}, "time_to_master": {"30"}, "ownership": {"owned"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusSeeOther {
+		t.Fatalf("log submit = %d", resp.StatusCode)
+	}
+	log, err := st.LatestLogFor(ctx, alice.ID, game.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if log.Status != "completed" || log.Language != "Japanese" || log.TimeToFinish != 12.5 || log.TimeToMaster != 30 {
+		t.Fatalf("log fields = %+v", log)
+	}
+	if log.PlayedOnID == nil || *log.PlayedOnID != platform || log.EditionGameID == nil || *log.EditionGameID != edition.ID {
+		t.Fatalf("played-on/edition not saved: %+v", log)
+	}
+	// The ownership on the log also created the library entry.
+	if entry, err := st.LibraryEntry(ctx, alice.ID, game.ID); err != nil || entry.Ownership != "owned" || entry.Edition != "Deluxe" {
+		t.Fatalf("log ownership did not sync the library: %+v, %v", entry, err)
+	}
+	// Editing without the timing fields must preserve them.
+	resp, err = noRedirect.PostForm(ts.URL+"/logs/"+itoa(log.ID)+"/edit", url.Values{
+		"_csrf": {sess.CSRF}, "status": {"completed"}, "review": {"still good"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+	edited, _ := st.LogByID(ctx, log.ID)
+	if edited.TimeToFinish != 12.5 || edited.TimeToMaster != 30 {
+		t.Fatalf("editing cleared timing values: %+v", edited)
+	}
+}
+
+func TestSessionEditingDaysAndPrivacy(t *testing.T) {
+	ts, st := testServer(t)
+	ctx := context.Background()
+	alice, _ := st.CreateUser(ctx, "alice", "alice@example.test", "hash", false)
+	bob, _ := st.CreateUser(ctx, "bob", "bob@example.test", "hash", false)
+	game := mustSaveGame(t, st, &models.Game{IGDBID: -931, Slug: "session-game", Title: "Session Game", Category: "main_game", ReleaseStatus: "released"})
+	log, err := st.CreateLog(ctx, store.LogInput{UserID: alice.ID, GameID: game.ID, Status: "playing"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	client, sess := authedClient(t, ts, st, alice)
+	noRedirect := &http.Client{Jar: client.Jar, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
+
+	resp, err := noRedirect.PostForm(ts.URL+"/logs/"+itoa(log.ID)+"/sessions", url.Values{
+		"_csrf": {sess.CSRF}, "note": {"first day"}, "playtime": {"2"},
+		"privacy": {"public"}, "days": {"2026-01-02", "2026-01-03"}, "tags": {"boss, co-op"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusSeeOther {
+		t.Fatalf("session create = %d", resp.StatusCode)
+	}
+	sessions, _ := st.SessionsFor(ctx, log.ID)
+	if len(sessions) != 1 {
+		t.Fatalf("sessions = %+v", sessions)
+	}
+	if sessions[0].NotePrivacy != "everyone" {
+		t.Fatalf("privacy was not normalized: %q", sessions[0].NotePrivacy)
+	}
+	if len(sessions[0].Days) != 2 || len(sessions[0].Tags) != 2 {
+		t.Fatalf("multi-day/tags not saved: %+v", sessions[0])
+	}
+
+	resp, err = noRedirect.PostForm(ts.URL+"/sessions/"+itoa(sessions[0].ID)+"/edit", url.Values{
+		"_csrf": {sess.CSRF}, "note": {"edited"}, "privacy": {"private"}, "playtime": {"3"},
+		"days": {"2026-02-01"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusSeeOther {
+		t.Fatalf("session edit = %d", resp.StatusCode)
+	}
+	edited, _ := st.SessionByID(ctx, sessions[0].ID)
+	if edited.Note != "edited" || edited.NotePrivacy != "none" || len(edited.Days) != 1 || edited.Days[0] != "2026-02-01" {
+		t.Fatalf("session edit = %+v", edited)
+	}
+
+	// Private notes are hidden from other viewers.
+	if got, _ := st.SessionsForViewer(ctx, log.ID, bob.ID); len(got) != 1 || got[0].Note != "" {
+		t.Fatalf("private note leaked: %+v", got)
+	}
+	// Friends notes require an approved mutual follow.
+	st.Follow(ctx, alice.ID, bob.ID)
+	st.Follow(ctx, bob.ID, alice.ID)
+	edited.NotePrivacy = "friends"
+	if err := st.UpdateSession(ctx, edited.ID, store.SessionInput{LogID: log.ID, Note: "friend note", NotePrivacy: "friends", Days: []string{"2026-02-01"}}); err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := st.SessionsForViewer(ctx, log.ID, bob.ID); len(got) != 1 || got[0].Note != "friend note" {
+		t.Fatalf("friends note hidden: %+v", got)
+	}
+
+	// The profile journal honours the calendar view and play days.
+	if err := st.UpdateProfile(ctx, alice.ID, store.ProfileUpdate{JournalView: "calendar"}); err != nil {
+		t.Fatal(err)
+	}
+	_, page := getBody(t, http.DefaultClient, ts.URL+"/users/alice?tab=logs&month=2026-02")
+	if !strings.Contains(page, "calendar-day played") || !strings.Contains(page, "calendar-grid") {
+		t.Error("calendar journal mode did not mark play days")
+	}
+	if err := st.UpdateProfile(ctx, alice.ID, store.ProfileUpdate{JournalView: "activity"}); err != nil {
+		t.Fatal(err)
+	}
+	st.AddActivity(ctx, alice.ID, "log", &game.ID, &log.ID, nil, "", "public")
+	_, activityPage := getBody(t, http.DefaultClient, ts.URL+"/users/alice?tab=logs")
+	if !strings.Contains(activityPage, "Session Game") || strings.Contains(activityPage, "calendar-grid") {
+		t.Error("activity journal mode did not render the activity feed")
+	}
+}
+

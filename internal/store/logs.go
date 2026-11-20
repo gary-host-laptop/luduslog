@@ -734,7 +734,6 @@ func (s *Store) SessionsFor(ctx context.Context, logID int64) ([]models.Session,
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
 	var out []models.Session
 	for rows.Next() {
 		var x models.Session
@@ -742,11 +741,19 @@ func (s *Store) SessionsFor(ctx context.Context, logID int64) ([]models.Session,
 		x.LogID = logID
 		rows.Scan(&x.ID, &x.Note, &x.NotePrivacy, &x.Playtime, &x.StartedOn, &x.EndedOn, &created)
 		x.CreatedAt = parseTime(created)
-		x.Days, _ = s.sessionStrings(ctx, "play_session_days", "day", x.ID)
-		x.Tags, _ = s.sessionStrings(ctx, "play_session_tags", "tag", x.ID)
 		out = append(out, x)
 	}
-	return out, rows.Err()
+	err = rows.Err()
+	// Days and tags need their own queries, so release the cursor first.
+	rows.Close()
+	if err != nil {
+		return nil, err
+	}
+	for i := range out {
+		out[i].Days, _ = s.sessionStrings(ctx, "play_session_days", "day", out[i].ID)
+		out[i].Tags, _ = s.sessionStrings(ctx, "play_session_tags", "tag", out[i].ID)
+	}
+	return out, nil
 }
 
 func (s *Store) sessionStrings(ctx context.Context, table, col string, id int64) ([]string, error) {
@@ -760,6 +767,115 @@ func (s *Store) sessionStrings(ctx context.Context, table, col string, id int64)
 		var v string
 		rows.Scan(&v)
 		out = append(out, v)
+	}
+	return out, rows.Err()
+}
+
+// SessionByID loads one session row without its days or tags.
+func (s *Store) SessionByID(ctx context.Context, id int64) (*models.Session, error) {
+	var x models.Session
+	var created string
+	err := s.DB.QueryRowContext(ctx, `SELECT id,log_id,note,note_privacy,playtime,COALESCE(started_on,''),COALESCE(ended_on,''),created_at
+		FROM play_sessions WHERE id=?`, id).
+		Scan(&x.ID, &x.LogID, &x.Note, &x.NotePrivacy, &x.Playtime, &x.StartedOn, &x.EndedOn, &created)
+	if err == sql.ErrNoRows {
+		return nil, ErrNotFound
+	}
+	if err != nil {
+		return nil, err
+	}
+	x.CreatedAt = parseTime(created)
+	x.Days, _ = s.sessionStrings(ctx, "play_session_days", "day", id)
+	x.Tags, _ = s.sessionStrings(ctx, "play_session_tags", "tag", id)
+	return &x, nil
+}
+
+// SessionsForViewer returns sessions with notes hidden from viewers who are
+// not allowed to read them.
+func (s *Store) SessionsForViewer(ctx context.Context, logID, viewerID int64) ([]models.Session, error) {
+	var owner int64
+	if err := s.DB.QueryRowContext(ctx, `SELECT user_id FROM logs WHERE id=? AND deleted_at IS NULL`, logID).Scan(&owner); err != nil {
+		return nil, ErrNotFound
+	}
+	sessions, err := s.SessionsFor(ctx, logID)
+	if err != nil {
+		return nil, err
+	}
+	friend := viewerID != 0 && viewerID != owner && s.Mutual(ctx, viewerID, owner)
+	for i := range sessions {
+		if viewerID == owner || noteVisibleTo(sessions[i].NotePrivacy, friend) {
+			continue
+		}
+		sessions[i].Note = ""
+		sessions[i].NoteHTML = ""
+	}
+	return sessions, nil
+}
+
+// noteVisibleTo implements the documented note privacy set: everyone, friends
+// and none (private). An empty value follows the old default of friends.
+func noteVisibleTo(privacy string, friend bool) bool {
+	switch privacy {
+	case "everyone", "public":
+		return true
+	case "none", "private":
+		return false
+	default:
+		return friend
+	}
+}
+
+// NormalizeNotePrivacy maps legacy values onto everyone/friends/none.
+func NormalizeNotePrivacy(v string) string {
+	switch strings.ToLower(strings.TrimSpace(v)) {
+	case "everyone", "public":
+		return "everyone"
+	case "none", "private":
+		return "none"
+	case "friends", "":
+		return "friends"
+	}
+	return "friends"
+}
+
+// UpdateSessionFor updates a session only when the log belongs to userID.
+func (s *Store) UpdateSessionFor(ctx context.Context, id, userID int64, in SessionInput) error {
+	var logID int64
+	if err := s.DB.QueryRowContext(ctx, `SELECT ps.log_id FROM play_sessions ps JOIN logs l ON l.id=ps.log_id
+		WHERE ps.id=? AND l.user_id=?`, id, userID).Scan(&logID); err != nil {
+		return ErrNotFound
+	}
+	in.LogID = logID
+	return s.UpdateSession(ctx, id, in)
+}
+
+// PlayDay is one day that has a play session.
+type PlayDay struct {
+	Day      string
+	Sessions int
+	Hours    float64
+}
+
+// PlayCalendar returns the days a user logged sessions on, newest first.
+func (s *Store) PlayCalendar(ctx context.Context, userID int64, limit int) ([]PlayDay, error) {
+	if limit <= 0 {
+		limit = 400
+	}
+	rows, err := s.DB.QueryContext(ctx, `SELECT psd.day,COUNT(DISTINCT ps.id),COALESCE(SUM(ps.playtime),0)
+		FROM play_session_days psd JOIN play_sessions ps ON ps.id=psd.session_id
+		JOIN logs l ON l.id=ps.log_id AND l.deleted_at IS NULL
+		WHERE l.user_id=? GROUP BY psd.day ORDER BY psd.day DESC LIMIT ?`, userID, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []PlayDay
+	for rows.Next() {
+		var d PlayDay
+		if err := rows.Scan(&d.Day, &d.Sessions, &d.Hours); err != nil {
+			continue
+		}
+		out = append(out, d)
 	}
 	return out, rows.Err()
 }
@@ -779,9 +895,7 @@ func (s *Store) CreateSession(ctx context.Context, in SessionInput) (int64, erro
 		return 0, err
 	}
 	defer tx.Rollback()
-	if in.NotePrivacy == "" {
-		in.NotePrivacy = "friends"
-	}
+	in.NotePrivacy = NormalizeNotePrivacy(in.NotePrivacy)
 	res, err := tx.ExecContext(ctx, `INSERT INTO play_sessions(log_id,note,note_privacy,playtime,created_at) VALUES(?,?,?,?,?)`,
 		in.LogID, in.Note, in.NotePrivacy, in.Playtime, Now())
 	if err != nil {
@@ -811,9 +925,7 @@ func (s *Store) UpdateSession(ctx context.Context, id int64, in SessionInput) er
 		return err
 	}
 	defer tx.Rollback()
-	if in.NotePrivacy == "" {
-		in.NotePrivacy = "friends"
-	}
+	in.NotePrivacy = NormalizeNotePrivacy(in.NotePrivacy)
 	if _, err := tx.ExecContext(ctx, `UPDATE play_sessions SET note=?,note_privacy=?,playtime=? WHERE id=?`, in.Note, in.NotePrivacy, in.Playtime, id); err != nil {
 		return err
 	}
