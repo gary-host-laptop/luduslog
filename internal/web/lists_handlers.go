@@ -252,10 +252,115 @@ func (s *Server) listFolderAdd(w http.ResponseWriter, r *http.Request) {
 	s.redirect(w, r, "/users/"+u.Username+"/lists/"+l.Slug)
 }
 
-// listPicker is used by the game page to add a game to a list via htmx.
-func (s *Server) listPicker(w http.ResponseWriter, r *http.Request) {
+// gameListAdd adds the current game to one of the user's own lists chosen
+// from the game-page picker.
+func (s *Server) gameListAdd(w http.ResponseWriter, r *http.Request) {
+	g, err := s.st.GameBySlug(r.Context(), r.PathValue("slug"))
+	if err != nil {
+		s.notFound(w, r)
+		return
+	}
 	u := currentUser(r)
-	lists, _ := s.st.ListsForUser(r.Context(), u.ID, true, 100, 0)
-	g, _ := s.st.GameBySlug(r.Context(), r.PathValue("slug"))
-	s.renderFragment(w, "game", "list_picker", map[string]any{"Lists": lists, "Game": g, "User": u})
+	listID, _ := strconv.ParseInt(r.FormValue("list_id"), 10, 64)
+	l, err := s.st.ListByID(r.Context(), listID, false)
+	if err != nil || l.UserID != u.ID {
+		s.notFound(w, r)
+		return
+	}
+	if err := s.st.AddListEntry(r.Context(), l.ID, g.ID, strings.TrimSpace(r.FormValue("note"))); err != nil && !store.IsUnique(err) {
+		s.serverError(w, r, err)
+		return
+	}
+	s.st.AddActivity(r.Context(), u.ID, "list_add", &g.ID, nil, &l.ID, "", "public")
+	s.flash(w, r, "success", "Game added to "+l.Title+".")
+	s.redirect(w, r, "/games/"+g.Slug)
+}
+
+func (s *Server) folderCreate(w http.ResponseWriter, r *http.Request) {
+	u := currentUser(r)
+	name := strings.TrimSpace(r.FormValue("name"))
+	if name == "" {
+		s.flash(w, r, "error", "Give the folder a name.")
+		s.redirect(w, r, "/settings?tab=folders")
+		return
+	}
+	if _, err := s.st.CreateFolder(r.Context(), u.ID, name, "user"); err != nil {
+		s.serverError(w, r, err)
+		return
+	}
+	s.flash(w, r, "success", "Folder created.")
+	s.redirect(w, r, "/settings?tab=folders")
+}
+
+func (s *Server) folderRename(w http.ResponseWriter, r *http.Request) {
+	u := currentUser(r)
+	id, _ := strconv.ParseInt(r.PathValue("id"), 10, 64)
+	name := strings.TrimSpace(r.FormValue("name"))
+	if !s.st.OwnsFolder(r.Context(), id, u.ID) {
+		s.notFound(w, r)
+		return
+	}
+	if name == "" {
+		s.flash(w, r, "error", "Give the folder a name.")
+		s.redirect(w, r, "/settings?tab=folders")
+		return
+	}
+	if err := s.st.RenameFolder(r.Context(), id, u.ID, name); err != nil {
+		s.serverError(w, r, err)
+		return
+	}
+	s.flash(w, r, "success", "Folder renamed.")
+	s.redirect(w, r, "/settings?tab=folders")
+}
+
+func (s *Server) folderDelete(w http.ResponseWriter, r *http.Request) {
+	u := currentUser(r)
+	id, _ := strconv.ParseInt(r.PathValue("id"), 10, 64)
+	if !s.st.OwnsFolder(r.Context(), id, u.ID) {
+		s.notFound(w, r)
+		return
+	}
+	if err := s.st.DeleteFolder(r.Context(), id, u.ID); err != nil {
+		s.serverError(w, r, err)
+		return
+	}
+	s.flash(w, r, "success", "Folder deleted. Its lists are untouched.")
+	s.redirect(w, r, "/settings?tab=folders")
+}
+
+func (s *Server) folderAddList(w http.ResponseWriter, r *http.Request) {
+	u := currentUser(r)
+	id, _ := strconv.ParseInt(r.PathValue("id"), 10, 64)
+	if !s.st.OwnsFolder(r.Context(), id, u.ID) {
+		s.notFound(w, r)
+		return
+	}
+	listID, _ := strconv.ParseInt(r.FormValue("list_id"), 10, 64)
+	l, err := s.st.ListByID(r.Context(), listID, false)
+	if err != nil || l.UserID != u.ID {
+		s.notFound(w, r)
+		return
+	}
+	if err := s.st.AddListToFolder(r.Context(), id, listID); err != nil {
+		s.serverError(w, r, err)
+		return
+	}
+	s.flash(w, r, "success", "List added to folder.")
+	s.redirect(w, r, "/settings?tab=folders")
+}
+
+func (s *Server) folderRemoveList(w http.ResponseWriter, r *http.Request) {
+	u := currentUser(r)
+	id, _ := strconv.ParseInt(r.PathValue("id"), 10, 64)
+	if !s.st.OwnsFolder(r.Context(), id, u.ID) {
+		s.notFound(w, r)
+		return
+	}
+	listID, _ := strconv.ParseInt(r.FormValue("list_id"), 10, 64)
+	if err := s.st.RemoveListFromFolder(r.Context(), id, listID); err != nil {
+		s.serverError(w, r, err)
+		return
+	}
+	s.flash(w, r, "success", "List removed from folder.")
+	s.redirect(w, r, "/settings?tab=folders")
 }

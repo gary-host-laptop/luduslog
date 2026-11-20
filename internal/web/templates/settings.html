@@ -176,17 +176,57 @@
       {{range .Blocks}}{{template "user_row" .}}{{else}}<p class="muted">You haven't blocked anyone.</p>{{end}}
     </div>
     {{else if eq .Tab "folders"}}
-    <div class="card">
+    <div class="card stack">
       <h2>List folders</h2>
-      <p class="muted">Group your lists on your profile.</p>
-      {{range .Folders}}<div class="row between"><span>{{.Name}}</span></div>{{else}}<p class="muted">No folders yet.</p>{{end}}
-      <p class="field-hint mt2">Folder management UI is coming next; folders can already hold lists from any list page.</p>
+      <p class="muted">Group your lists on your profile. Deleting a folder leaves its lists alone.</p>
+      <form class="row" method="post" action="/folders/new">
+        <input type="hidden" name="_csrf" value="{{.CSRF}}">
+        <input type="text" name="name" placeholder="New folder name" required maxlength="60">
+        <button class="btn btn-primary btn-sm" type="submit">Create folder</button>
+      </form>
+      {{range .Folders}}
+      {{$folder := .}}
+      <div class="card">
+        <div class="row between">
+          <form class="row" method="post" action="/folders/{{.ID}}/rename">
+            <input type="hidden" name="_csrf" value="{{$.CSRF}}">
+            <input type="text" name="name" value="{{.Name}}" aria-label="Folder name" required maxlength="60">
+            <button class="btn btn-sm" type="submit">Rename</button>
+          </form>
+          <form method="post" action="/folders/{{.ID}}/delete" onsubmit="return confirm('Delete this folder? Its lists stay.')">
+            <input type="hidden" name="_csrf" value="{{$.CSRF}}">
+            <button class="linklike" type="submit">Delete folder</button>
+          </form>
+        </div>
+        {{$lists := index $.FolderLists .ID}}
+        {{if $lists}}
+        <ul class="fav-manage mt1">
+          {{range $lists}}
+          <li>
+            <a href="/users/{{$.User.Username}}/lists/{{.Slug}}">{{.Title}}</a>
+            <form method="post" action="/folders/{{$folder.ID}}/lists/remove">
+              <input type="hidden" name="_csrf" value="{{$.CSRF}}"><input type="hidden" name="list_id" value="{{.ID}}">
+              <button class="linklike" type="submit">Remove</button>
+            </form>
+          </li>
+          {{end}}
+        </ul>
+        {{else}}<p class="muted mt1">No lists in this folder.</p>{{end}}
+        {{if $.MyLists}}
+        <form class="row mt1" method="post" action="/folders/{{.ID}}/lists">
+          <input type="hidden" name="_csrf" value="{{$.CSRF}}">
+          <select name="list_id" aria-label="List to add">{{range $.MyLists}}<option value="{{.ID}}">{{.Title}}</option>{{end}}</select>
+          <button class="btn btn-sm" type="submit">Add list</button>
+        </form>
+        {{end}}
+      </div>
+      {{else}}<p class="muted">No folders yet.</p>{{end}}
     </div>
     {{else if eq .Tab "import"}}
     <div class="card">
       <h2>Export</h2>
-      <p class="muted">Download every log, review, list and library entry as JSON.</p>
-      <a class="btn" href="/settings/export">Download my data</a>
+      <p class="muted">Download every log, review, list and library entry. JSON keeps the full structure; CSV is one flat table with a <code>kind</code> column for logs, lists and library rows.</p>
+      <div class="row"><a class="btn" href="/settings/export">Download JSON</a><a class="btn" href="/settings/export?format=csv">Download CSV</a></div>
     </div>
     <div class="card">
       <h2>Import</h2>

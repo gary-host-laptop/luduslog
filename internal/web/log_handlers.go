@@ -214,6 +214,24 @@ func logInputFrom(r *http.Request, u *models.User, gameID int64) store.LogInput 
 	return in
 }
 
+// syncLogLibrary keeps the ownership library in step with a saved log: an
+// ownership value on the log means the game is in the user's library.
+func (s *Server) syncLogLibrary(ctx context.Context, userID, gameID int64, in store.LogInput) {
+	if in.Ownership == "" {
+		return
+	}
+	edition := ""
+	if in.EditionGameID != nil {
+		if eg, err := s.st.GameByID(ctx, *in.EditionGameID); err == nil {
+			edition = eg.EditionName
+			if edition == "" {
+				edition = eg.Title
+			}
+		}
+	}
+	s.st.SaveLibraryEntry(ctx, userID, gameID, in.PlatformID, in.Ownership, in.Storefront, edition)
+}
+
 func (s *Server) logSubmit(w http.ResponseWriter, r *http.Request) {
 	g, err := s.st.GameBySlug(r.Context(), r.PathValue("slug"))
 	if err != nil {
@@ -251,6 +269,7 @@ func (s *Server) logSubmit(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	if !in.Draft {
+		s.syncLogLibrary(r.Context(), u.ID, g.ID, in)
 		s.st.AddActivity(r.Context(), u.ID, "log", &g.ID, &l.ID, nil, "", "public")
 		s.st.CheckBadges(r.Context(), u.ID)
 		if in.Review != "" {
@@ -292,6 +311,9 @@ func (s *Server) logEdit(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 		}
+	}
+	if !in.Draft {
+		s.syncLogLibrary(r.Context(), u.ID, l.GameID, in)
 	}
 	s.flash(w, r, "success", "Log updated.")
 	s.redirect(w, r, "/users/"+u.Username+"/reviews/"+itoa(id))

@@ -6,15 +6,34 @@
 {{if .Entries}}
 <div class="table-wrap card">
 <table>
-  <thead><tr><th>Game</th><th>Platform</th><th>Ownership</th><th>Storefront</th><th></th></tr></thead>
+  <thead><tr><th>Game</th><th>Platform</th><th>Ownership</th><th>Storefront</th><th>Edition</th><th></th></tr></thead>
   <tbody>
   {{range .Entries}}
+    {{$entry := .}}
     <tr>
       <td>{{if .Game}}<a href="/games/{{.Game.Slug}}">{{.Game.Title}}</a>{{else}}#{{.GameID}}{{end}}</td>
-      <td>{{.Platform}}</td>
-      <td>{{.Ownership}}</td>
-      <td>{{.Storefront}}</td>
-      <td class="text-right"><form method="post" action="/library/remove"><input type="hidden" name="_csrf" value="{{$.CSRF}}"><input type="hidden" name="game_id" value="{{.GameID}}"><button class="linklike" type="submit">Remove</button></form></td>
+      <td colspan="4">
+        <form class="row" method="post" action="/library">
+          <input type="hidden" name="_csrf" value="{{$.CSRF}}">
+          <input type="hidden" name="game_id" value="{{.GameID}}">
+          <input type="hidden" name="return_to" value="/library">
+          <select name="platform_id" aria-label="Platform"><option value="">Platform —</option>{{range $.Platforms}}<option value="{{.ID}}" {{if and $entry.PlatformID (eq (derefInt $entry.PlatformID) .ID)}}selected{{end}}>{{.Name}}</option>{{end}}</select>
+          <select name="ownership" aria-label="Ownership">
+            <option value="">Ownership —</option>
+            <option value="owned" {{if eq .Ownership "owned"}}selected{{end}}>Owned</option>
+            <option value="digital" {{if eq .Ownership "digital"}}selected{{end}}>Digital</option>
+            <option value="physical" {{if eq .Ownership "physical"}}selected{{end}}>Physical</option>
+            <option value="rented" {{if eq .Ownership "rented"}}selected{{end}}>Rented</option>
+            <option value="borrowed" {{if eq .Ownership "borrowed"}}selected{{end}}>Borrowed</option>
+            <option value="subscription" {{if eq .Ownership "subscription"}}selected{{end}}>Subscription</option>
+            <option value="emulated" {{if eq .Ownership "emulated"}}selected{{end}}>Emulated</option>
+          </select>
+          <input type="text" name="storefront" value="{{.Storefront}}" placeholder="Storefront" aria-label="Storefront">
+          <input type="text" name="edition" value="{{.Edition}}" placeholder="Edition" aria-label="Edition">
+          <button class="btn btn-sm" type="submit">Save</button>
+        </form>
+      </td>
+      <td class="text-right"><form method="post" action="/library/remove"><input type="hidden" name="_csrf" value="{{$.CSRF}}"><input type="hidden" name="game_id" value="{{.GameID}}"><input type="hidden" name="return_to" value="/library"><button class="linklike" type="submit">Remove</button></form></td>
     </tr>
   {{end}}
   </tbody>

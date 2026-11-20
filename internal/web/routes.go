@@ -67,6 +67,12 @@ func (s *Server) routes() {
 	m.HandleFunc("POST /lists/{id}/reorder", s.requireUser(s.listReorder))
 	m.HandleFunc("POST /lists/{id}/like", s.requireUser(s.likeList))
 	m.HandleFunc("POST /lists/{id}/folder", s.requireUser(s.listFolderAdd))
+	m.HandleFunc("POST /games/{slug}/lists", s.requireUser(s.gameListAdd))
+	m.HandleFunc("POST /folders/new", s.requireUser(s.folderCreate))
+	m.HandleFunc("POST /folders/{id}/rename", s.requireUser(s.folderRename))
+	m.HandleFunc("POST /folders/{id}/delete", s.requireUser(s.folderDelete))
+	m.HandleFunc("POST /folders/{id}/lists", s.requireUser(s.folderAddList))
+	m.HandleFunc("POST /folders/{id}/lists/remove", s.requireUser(s.folderRemoveList))
 
 	// Social
 	m.HandleFunc("POST /comments", s.requireUser(s.commentCreate))

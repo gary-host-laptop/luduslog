@@ -68,6 +68,7 @@ type gamesData struct {
 	Themes      []string
 	Platforms   []string
 	Categories  []string
+	Statuses    []string
 	Years       []string
 	YearFrom    string
 	YearTo      string
@@ -151,6 +152,7 @@ func (s *Server) gamesIndex(w http.ResponseWriter, r *http.Request) {
 		Genres:      f.Genres,
 		Themes:      f.Themes,
 		Categories:  f.Categories,
+		Statuses:    f.Statuses,
 		YearFrom:    q.Get("from"),
 		YearTo:      q.Get("to"),
 		Release:     f.Release,
@@ -195,6 +197,7 @@ type gameData struct {
 	LoggedIn     bool
 	Owned        *models.LibraryEntry
 	InLists      []*models.List
+	MyLists      []*models.List
 	Hidden       bool
 }
 
@@ -254,6 +257,7 @@ func (s *Server) gamePage(w http.ResponseWriter, r *http.Request) {
 		if e, err := s.st.LibraryEntry(r.Context(), u.ID, g.ID); err == nil {
 			data.Owned = e
 		}
+		data.MyLists, _ = s.st.ListsForUser(r.Context(), u.ID, true, 50, 0)
 		for _, fi := range s.st.FriendsWhoInteracted(r.Context(), u.ID, g.ID, 8) {
 			data.Friends = append(data.Friends, friendInteraction{fi.User, fi.Rating, fi.Status})
 		}

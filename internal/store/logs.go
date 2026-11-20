@@ -882,7 +882,6 @@ func (s *Store) LibraryFor(ctx context.Context, userID int64) ([]models.LibraryE
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
 	var out []models.LibraryEntry
 	for rows.Next() {
 		var e models.LibraryEntry
@@ -891,17 +890,27 @@ func (s *Store) LibraryFor(ctx context.Context, userID int64) ([]models.LibraryE
 		rows.Scan(&e.ID, &e.UserID, &e.GameID, &platform, &e.Ownership, &e.Storefront, &e.Edition, &created)
 		if platform.Valid {
 			e.PlatformID = &platform.Int64
-			var name string
-			s.DB.QueryRowContext(ctx, `SELECT name FROM platforms WHERE id=?`, platform.Int64).Scan(&name)
-			e.Platform = name
 		}
 		e.CreatedAt = parseTime(created)
-		if g, err := s.GameByID(ctx, e.GameID); err == nil {
-			e.Game = g
-		}
 		out = append(out, e)
 	}
-	return out, rows.Err()
+	err = rows.Err()
+	// The cursor must be released before the per-row lookups use a connection.
+	rows.Close()
+	if err != nil {
+		return nil, err
+	}
+	for i := range out {
+		if out[i].PlatformID != nil {
+			var name string
+			s.DB.QueryRowContext(ctx, `SELECT name FROM platforms WHERE id=?`, *out[i].PlatformID).Scan(&name)
+			out[i].Platform = name
+		}
+		if g, err := s.GameByID(ctx, out[i].GameID); err == nil {
+			out[i].Game = g
+		}
+	}
+	return out, nil
 }
 
 func (s *Store) LibraryEntry(ctx context.Context, userID, gameID int64) (*models.LibraryEntry, error) {

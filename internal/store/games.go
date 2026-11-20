@@ -456,18 +456,25 @@ func (f GameFilter) where(ctx context.Context, s *Store) (string, []any) {
 	}
 	if f.UserID > 0 {
 		if len(f.Statuses) > 0 {
-			var parts []string
+			// Selected shelf views are alternatives: any one of them matches.
+			var any []string
 			for _, st := range f.Statuses {
 				switch st {
-				case "played":
-					parts = append(parts, "st.played>0")
-				case "playing", "backlog", "wishlist":
-					parts = append(parts, "st."+st+"=1")
+				case "played", "playing", "backlog", "wishlist":
+					expr := "st.played>0"
+					if st != "played" {
+						expr = "st." + st + "=1"
+					}
+					any = append(any, "EXISTS(SELECT 1 FROM statuses st WHERE st.game_id=g.id AND st.user_id=? AND "+expr+")")
+					args = append(args, f.UserID)
+				case "completed", "abandoned", "replayed":
+					// Completed/abandoned are log statuses, not shelf flags.
+					any = append(any, "EXISTS(SELECT 1 FROM logs l WHERE l.game_id=g.id AND l.user_id=? AND l.status=? AND l.deleted_at IS NULL)")
+					args = append(args, f.UserID, st)
 				}
 			}
-			if len(parts) > 0 {
-				conds = append(conds, "EXISTS(SELECT 1 FROM statuses st WHERE st.game_id=g.id AND st.user_id=? AND ("+strings.Join(parts, " OR ")+"))")
-				args = append(args, f.UserID)
+			if len(any) > 0 {
+				conds = append(conds, "("+strings.Join(any, " OR ")+")")
 			}
 		}
 		if f.Ownership != "" {
@@ -1189,19 +1196,26 @@ func (s *Store) GamesInList(ctx context.Context, listID int64) ([]models.ListEnt
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
 	var out []models.ListEntry
 	for rows.Next() {
 		var e models.ListEntry
 		var added string
 		rows.Scan(&e.ListID, &e.GameID, &e.Position, &e.Note, &added)
 		e.AddedAt = parseTime(added)
-		if g, err := s.GameByID(ctx, e.GameID); err == nil {
-			e.Game = g
-		}
 		out = append(out, e)
 	}
-	return out, rows.Err()
+	err = rows.Err()
+	// Hydration needs its own connection, so the cursor must be released first.
+	rows.Close()
+	if err != nil {
+		return nil, err
+	}
+	for i := range out {
+		if g, err := s.GameByID(ctx, out[i].GameID); err == nil {
+			out[i].Game = g
+		}
+	}
+	return out, nil
 }
 
 // AllGenres/Themes are used by settings and discovery.

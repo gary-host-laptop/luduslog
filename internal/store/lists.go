@@ -122,6 +122,42 @@ func (s *Store) ListsForUser(ctx context.Context, userID int64, includePrivate b
 	return out, total
 }
 
+// VisibleListsFor shows the owner's private lists to themselves, personal
+// lists to approved followers, and public/unlisted lists to everyone.
+func (s *Store) VisibleListsFor(ctx context.Context, ownerID, viewerID int64) ([]*models.List, error) {
+	visibility := "l.privacy IN ('public','unlisted')"
+	switch {
+	case viewerID == ownerID:
+		visibility = "1=1"
+	case viewerID != 0:
+		if ok, approved := s.IsFollowing(ctx, viewerID, ownerID); ok && approved {
+			visibility = "l.privacy IN ('public','unlisted','personal')"
+		}
+	}
+	rows, err := s.DB.QueryContext(ctx, `SELECT `+listCols+` FROM lists l WHERE l.user_id=? AND l.deleted_at IS NULL AND `+visibility+`
+		ORDER BY l.updated_at DESC LIMIT 100`, ownerID)
+	if err != nil {
+		return nil, err
+	}
+	var out []*models.List
+	for rows.Next() {
+		l, err := scanList(rows)
+		if err != nil {
+			continue
+		}
+		out = append(out, l)
+	}
+	err = rows.Err()
+	rows.Close()
+	if err != nil {
+		return nil, err
+	}
+	for _, l := range out {
+		s.hydrateList(ctx, l, false)
+	}
+	return out, nil
+}
+
 func (s *Store) CreatedLists(ctx context.Context, userID, viewerID int64) ([]*models.List, error) {
 	out, _ := s.ListsForUser(ctx, userID, userID == viewerID, 100, 0)
 	return out, nil
@@ -356,6 +392,13 @@ func (s *Store) CreateFolder(ctx context.Context, userID int64, name, sortKey st
 		return 0, err
 	}
 	return res.LastInsertId()
+}
+
+// OwnsFolder reports whether a folder belongs to the user.
+func (s *Store) OwnsFolder(ctx context.Context, id, userID int64) bool {
+	var n int
+	s.DB.QueryRowContext(ctx, `SELECT COUNT(*) FROM list_folders WHERE id=? AND user_id=?`, id, userID).Scan(&n)
+	return n > 0
 }
 
 func (s *Store) RenameFolder(ctx context.Context, id, userID int64, name string) error {

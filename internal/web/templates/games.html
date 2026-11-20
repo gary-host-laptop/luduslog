@@ -78,8 +78,12 @@
         <label class="check"><input type="checkbox" name="friends" value="1" {{if .FriendsOnly}}checked{{end}}> Friends' games only</label>
         <label class="check"><input type="checkbox" name="hide_owned" value="1" {{if .HideOwned}}checked{{end}}> Hide games I own</label>
         <label class="check"><input type="checkbox" name="no_status" value="1" {{if .NoStatus}}checked{{end}}> Hide games on my shelves</label>
-        <label class="check"><input type="checkbox" name="status" value="backlog"> Backlog</label>
-        <label class="check"><input type="checkbox" name="status" value="wishlist"> Wishlist</label>
+        <label class="check"><input type="checkbox" name="status" value="playing" {{if contains $.Statuses "playing"}}checked{{end}}> Playing</label>
+        <label class="check"><input type="checkbox" name="status" value="backlog" {{if contains $.Statuses "backlog"}}checked{{end}}> Backlog</label>
+        <label class="check"><input type="checkbox" name="status" value="wishlist" {{if contains $.Statuses "wishlist"}}checked{{end}}> Wishlist</label>
+        <label class="check"><input type="checkbox" name="status" value="completed" {{if contains $.Statuses "completed"}}checked{{end}}> Completed</label>
+        <label class="check"><input type="checkbox" name="status" value="abandoned" {{if contains $.Statuses "abandoned"}}checked{{end}}> Abandoned</label>
+        <div class="field-hint">Completed and abandoned come from your logs; the others are shelf flags.</div>
       </details>
       {{end}}
       <div class="filter-actions"><button class="btn btn-primary btn-sm" type="submit">Apply</button></div>

@@ -29,6 +29,33 @@
         <a class="btn btn-primary btn-block" href="/games/{{.Game.Slug}}/log"><i class="ph-light ph-notebook icon" aria-hidden="true"></i>{{if .UserLog}}Edit your log{{else}}Log this game{{end}}</a>
         {{if .UserLog}}<a class="btn btn-sm btn-block" href="/logs/{{.UserLog.ID}}/sessions"><i class="ph-light ph-clock-counter-clockwise icon" aria-hidden="true"></i>Play sessions</a>{{end}}
       </div>
+      {{if .MyLists}}
+      <details class="game-list-add mt1">
+        <summary>Add to a list</summary>
+        <form class="row mt1" method="post" action="/games/{{.Game.Slug}}/lists">
+          <input type="hidden" name="_csrf" value="{{.CSRF}}">
+          <select name="list_id" aria-label="Choose a list">{{range .MyLists}}<option value="{{.ID}}">{{.Title}}</option>{{end}}</select>
+          <button class="btn btn-sm" type="submit">Add</button>
+        </form>
+      </details>
+      {{end}}
+      <details class="game-library-edit mt1">
+        <summary>{{if .Owned}}Edit library entry{{else}}Add to library{{end}}</summary>
+        <form class="stack mt1" method="post" action="/library">
+          <input type="hidden" name="_csrf" value="{{.CSRF}}">
+          <input type="hidden" name="game_id" value="{{.Game.ID}}">
+          <input type="hidden" name="return_to" value="/games/{{.Game.Slug}}">
+          <select name="platform_id" aria-label="Platform"><option value="">Platform —</option>{{range .Platforms}}<option value="{{.ID}}" {{if and $.Owned $.Owned.PlatformID (eq (derefInt $.Owned.PlatformID) .ID)}}selected{{end}}>{{.Name}}</option>{{end}}</select>
+          <select name="ownership" aria-label="Ownership">
+            {{$own := ""}}{{if .Owned}}{{$own = .Owned.Ownership}}{{end}}
+            <option value="">Ownership —</option><option value="owned" {{if eq $own "owned"}}selected{{end}}>Owned</option><option value="digital" {{if eq $own "digital"}}selected{{end}}>Digital</option><option value="physical" {{if eq $own "physical"}}selected{{end}}>Physical</option><option value="rented" {{if eq $own "rented"}}selected{{end}}>Rented</option><option value="borrowed" {{if eq $own "borrowed"}}selected{{end}}>Borrowed</option><option value="subscription" {{if eq $own "subscription"}}selected{{end}}>Subscription</option><option value="emulated" {{if eq $own "emulated"}}selected{{end}}>Emulated</option>
+          </select>
+          <input type="text" name="storefront" placeholder="Storefront" value="{{if .Owned}}{{.Owned.Storefront}}{{end}}" aria-label="Storefront">
+          <input type="text" name="edition" placeholder="Edition" value="{{if .Owned}}{{.Owned.Edition}}{{end}}" aria-label="Edition">
+          <button class="btn btn-sm btn-primary" type="submit">Save library entry</button>
+        </form>
+        {{if .Owned}}<form class="mt1" method="post" action="/library/remove"><input type="hidden" name="_csrf" value="{{.CSRF}}"><input type="hidden" name="game_id" value="{{.Game.ID}}"><input type="hidden" name="return_to" value="/games/{{.Game.Slug}}"><button class="linklike" type="submit">Remove from library</button></form>{{end}}
+      </details>
       <div class="game-user-rating">
         <form class="quick-rate-form" method="post" action="/games/{{.Game.Slug}}/rate">
           <input type="hidden" name="_csrf" value="{{.CSRF}}">

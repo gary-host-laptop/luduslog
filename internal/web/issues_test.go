@@ -2,7 +2,9 @@ package web
 
 import (
 	"context"
+	"encoding/csv"
 	"net/http"
+	"net/url"
 	"strings"
 	"testing"
 	"luduslog/internal/models"
@@ -332,3 +334,215 @@ func TestGamePageMetadataAndFranchiseFilter(t *testing.T) {
 	}
 }
 
+func TestLibraryAddEditRemoveWeb(t *testing.T) {
+	ts, st := testServer(t)
+	ctx := context.Background()
+	alice, _ := st.CreateUser(ctx, "alice", "alice@example.test", "hash", false)
+	game := mustSaveGame(t, st, &models.Game{IGDBID: -961, Slug: "lib-game", Title: "Lib Game", Category: "main_game", ReleaseStatus: "released"})
+	client, sess := authedClient(t, ts, st, alice)
+	noRedirect := &http.Client{Jar: client.Jar, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
+
+	_, page := getBody(t, client, ts.URL+"/games/lib-game")
+	if !strings.Contains(page, "Add to library") || !strings.Contains(page, `action="/library"`) {
+		t.Fatal("game page has no library entry form")
+	}
+	post := func(path string, values url.Values) *http.Response {
+		t.Helper()
+		resp, err := noRedirect.PostForm(ts.URL+path, values)
+		if err != nil {
+			t.Fatal(err)
+		}
+		resp.Body.Close()
+		return resp
+	}
+	resp := post("/library", url.Values{"_csrf": {sess.CSRF}, "game_id": {itoa(game.ID)}, "ownership": {"owned"}, "storefront": {"Steam"}, "edition": {"Deluxe"}, "return_to": {"/games/lib-game"}})
+	if resp.StatusCode != http.StatusSeeOther || resp.Header.Get("Location") != "/games/lib-game" {
+		t.Fatalf("library add = %d %q", resp.StatusCode, resp.Header.Get("Location"))
+	}
+	entry, err := st.LibraryEntry(ctx, alice.ID, game.ID)
+	if err != nil || entry.Ownership != "owned" || entry.Storefront != "Steam" || entry.Edition != "Deluxe" {
+		t.Fatalf("library entry = %+v, %v", entry, err)
+	}
+	post("/library", url.Values{"_csrf": {sess.CSRF}, "game_id": {itoa(game.ID)}, "ownership": {"rented"}, "return_to": {"/library"}})
+	entry, _ = st.LibraryEntry(ctx, alice.ID, game.ID)
+	if entry.Ownership != "rented" {
+		t.Fatalf("library edit = %+v", entry)
+	}
+	_, lib := getBody(t, client, ts.URL+"/library")
+	if !strings.Contains(lib, `action="/library"`) || !strings.Contains(lib, "Lib Game") || !strings.Contains(lib, `value="rented" selected`) {
+		t.Fatal("library page does not expose editable rows")
+	}
+	post("/library/remove", url.Values{"_csrf": {sess.CSRF}, "game_id": {itoa(game.ID)}, "return_to": {"/games/lib-game"}})
+	if _, err := st.LibraryEntry(ctx, alice.ID, game.ID); err == nil {
+		t.Fatal("library entry was not removed")
+	}
+}
+
+func TestFoldersAndListPicker(t *testing.T) {
+	ts, st := testServer(t)
+	ctx := context.Background()
+	alice, _ := st.CreateUser(ctx, "alice", "alice@example.test", "hash", false)
+	bob, _ := st.CreateUser(ctx, "bob", "bob@example.test", "hash", false)
+	client, sess := authedClient(t, ts, st, alice)
+	noRedirect := &http.Client{Jar: client.Jar, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
+	post := func(path string, values url.Values) int {
+		t.Helper()
+		resp, err := noRedirect.PostForm(ts.URL+path, values)
+		if err != nil {
+			t.Fatal(err)
+		}
+		resp.Body.Close()
+		return resp.StatusCode
+	}
+	if code := post("/folders/new", url.Values{"_csrf": {sess.CSRF}, "name": {"Favourites"}}); code != http.StatusSeeOther {
+		t.Fatalf("create folder = %d", code)
+	}
+	folders, _ := st.Folders(ctx, alice.ID)
+	if len(folders) != 1 || folders[0].Name != "Favourites" {
+		t.Fatalf("folders = %+v", folders)
+	}
+	folder := folders[0]
+	post("/folders/"+itoa(folder.ID)+"/rename", url.Values{"_csrf": {sess.CSRF}, "name": {"Best of"}})
+	folders, _ = st.Folders(ctx, alice.ID)
+	if folders[0].Name != "Best of" {
+		t.Fatalf("rename = %q", folders[0].Name)
+	}
+	list, err := st.CreateList(ctx, store.ListInput{UserID: alice.ID, Title: "My List", Privacy: "public"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	personal, _ := st.CreateList(ctx, store.ListInput{UserID: alice.ID, Title: "Personal List", Privacy: "personal"})
+	if code := post("/folders/"+itoa(folder.ID)+"/lists", url.Values{"_csrf": {sess.CSRF}, "list_id": {itoa(list.ID)}}); code != http.StatusSeeOther {
+		t.Fatalf("add list to folder = %d", code)
+	}
+	code, settings := getBody(t, client, ts.URL+"/settings?tab=folders")
+	if code != 200 || !strings.Contains(settings, "Best of") || !strings.Contains(settings, "Delete folder") || !strings.Contains(settings, "My List") {
+		t.Fatalf("folder management UI = %d", code)
+	}
+	inFolder, _ := st.FolderLists(ctx, folder.ID)
+	if len(inFolder) != 1 || inFolder[0].ID != list.ID {
+		t.Fatalf("folder lists = %+v", inFolder)
+	}
+	post("/folders/"+itoa(folder.ID)+"/lists/remove", url.Values{"_csrf": {sess.CSRF}, "list_id": {itoa(list.ID)}})
+	if inFolder, _ = st.FolderLists(ctx, folder.ID); len(inFolder) != 0 {
+		t.Fatal("list was not removed from the folder")
+	}
+	post("/folders/"+itoa(folder.ID)+"/delete", url.Values{"_csrf": {sess.CSRF}})
+	if folders, _ = st.Folders(ctx, alice.ID); len(folders) != 0 {
+		t.Fatal("folder was not deleted")
+	}
+
+	game := mustSaveGame(t, st, &models.Game{IGDBID: -981, Slug: "picker-game", Title: "Picker Game", Category: "main_game", ReleaseStatus: "released"})
+	_, page := getBody(t, client, ts.URL+"/games/picker-game")
+	if !strings.Contains(page, "Add to a list") || !strings.Contains(page, `action="/games/picker-game/lists"`) {
+		t.Fatal("game page has no list picker")
+	}
+	if code := post("/games/picker-game/lists", url.Values{"_csrf": {sess.CSRF}, "list_id": {itoa(list.ID)}}); code != http.StatusSeeOther {
+		t.Fatalf("game list add = %d", code)
+	}
+	entries, _ := st.GamesInList(ctx, list.ID)
+	if len(entries) != 1 || entries[0].GameID != game.ID {
+		t.Fatalf("list entries = %+v", entries)
+	}
+
+	// Personal lists are visible to approved followers, not strangers.
+	if lists, _ := st.VisibleListsFor(ctx, alice.ID, bob.ID); len(lists) != 1 {
+		t.Fatalf("stranger saw %d lists, want only the public one", len(lists))
+	}
+	st.Follow(ctx, bob.ID, alice.ID)
+	lists, _ := st.VisibleListsFor(ctx, alice.ID, bob.ID)
+	seen := false
+	for _, l := range lists {
+		if l.ID == personal.ID {
+			seen = true
+		}
+	}
+	if !seen {
+		t.Fatal("follower cannot see the personal list")
+	}
+}
+
+func mustSaveGamePlatform(t *testing.T, st *store.Store, name string) int64 {
+	t.Helper()
+	mustSaveGame(t, st, &models.Game{
+		IGDBID: -950 - int64(len(name)), Slug: "platform-" + strings.ToLower(name), Title: "Platform " + name,
+		Category: "main_game", ReleaseStatus: "released",
+		Platforms: []models.Platform{{Name: name}},
+	})
+	var id int64
+	st.DB.QueryRowContext(context.Background(), `SELECT id FROM platforms WHERE name=?`, name).Scan(&id)
+	return id
+}
+
+func TestShelfViews(t *testing.T) {
+	ts, st := testServer(t)
+	ctx := context.Background()
+	alice, _ := st.CreateUser(ctx, "alice", "alice@example.test", "hash", false)
+	completed := mustSaveGame(t, st, &models.Game{IGDBID: -1001, Slug: "done-game", Title: "Done Game", Category: "main_game", ReleaseStatus: "released"})
+	abandoned := mustSaveGame(t, st, &models.Game{IGDBID: -1002, Slug: "dropped-game", Title: "Dropped Game", Category: "main_game", ReleaseStatus: "released"})
+	playing := mustSaveGame(t, st, &models.Game{IGDBID: -1003, Slug: "active-game", Title: "Active Game", Category: "main_game", ReleaseStatus: "released"})
+	st.CreateLog(ctx, store.LogInput{UserID: alice.ID, GameID: completed.ID, Status: "completed"})
+	st.CreateLog(ctx, store.LogInput{UserID: alice.ID, GameID: abandoned.ID, Status: "abandoned"})
+	st.SetStatusFlag(ctx, alice.ID, playing.ID, "playing", true)
+	client, _ := authedClient(t, ts, st, alice)
+
+	cases := []struct {
+		status string
+		want   string
+		avoid  string
+	}{
+		{"completed", "Done Game", "Dropped Game"},
+		{"abandoned", "Dropped Game", "Done Game"},
+		{"playing", "Active Game", "Done Game"},
+	}
+	for _, tc := range cases {
+		code, body := getBody(t, client, ts.URL+"/games?status="+tc.status)
+		if code != 200 || !strings.Contains(body, tc.want) || strings.Contains(body, tc.avoid) {
+			t.Errorf("%s shelf view = %d, missing %q or leaking %q", tc.status, code, tc.want, tc.avoid)
+		}
+		if strings.Count(body, `class="game-card"`) != 1 {
+			t.Errorf("%s shelf view returned the wrong number of cards", tc.status)
+		}
+	}
+	_, empty := getBody(t, client, ts.URL+"/games?status=completed&q=zzzznotfound")
+	if !strings.Contains(empty, "No games match") {
+		t.Fatal("empty shelf state missing")
+	}
+}
+
+func TestCSVExport(t *testing.T) {
+	ts, st := testServer(t)
+	ctx := context.Background()
+	alice, _ := st.CreateUser(ctx, "alice", "alice@example.test", "hash", false)
+	game := mustSaveGame(t, st, &models.Game{IGDBID: -1011, Slug: "csv-game", Title: "CSV Game", Category: "main_game", ReleaseStatus: "released"})
+	review := `He said "hi", then left`
+	st.CreateLog(ctx, store.LogInput{UserID: alice.ID, GameID: game.ID, Review: review, Status: "played", Rating: 8})
+	st.CreateList(ctx, store.ListInput{UserID: alice.ID, Title: "CSV List", Privacy: "public"})
+	st.SaveLibraryEntry(ctx, alice.ID, game.ID, nil, "owned", "Steam", "Deluxe")
+	client, _ := authedClient(t, ts, st, alice)
+
+	resp, err := client.Get(ts.URL + "/settings/export?format=csv")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	if ct := resp.Header.Get("Content-Type"); !strings.HasPrefix(ct, "text/csv") {
+		t.Fatalf("content type = %q", ct)
+	}
+	if cd := resp.Header.Get("Content-Disposition"); !strings.Contains(cd, ".csv") {
+		t.Fatalf("content disposition = %q", cd)
+	}
+	rows, err := csv.NewReader(resp.Body).ReadAll()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(rows) != 4 {
+		t.Fatalf("csv rows = %d, want header + log + list + library\n%v", len(rows), rows)
+	}
+	if rows[0][0] != "kind" || rows[1][0] != "log" || rows[2][0] != "list" || rows[3][0] != "library" {
+		t.Fatalf("unexpected csv kinds: %v", rows)
+	}
+	if rows[1][12] != review {
+		t.Fatalf("review escaping round-trip = %q", rows[1][12])
+	}
+}

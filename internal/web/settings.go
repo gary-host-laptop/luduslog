@@ -1,6 +1,7 @@
 package web
 
 import (
+	"encoding/csv"
 	"encoding/json"
 	"errors"
 	"io"
@@ -22,6 +23,8 @@ type settingsData struct {
 	Links          []models.SocialLink
 	Blocks         []*models.User
 	Folders        []models.Folder
+	FolderLists    map[int64][]*models.List
+	MyLists        []*models.List
 	Sessions       []models.Session
 	Favorites      []models.Game
 	FavoriteSearch []models.Game
@@ -42,6 +45,11 @@ func (s *Server) settingsPage(w http.ResponseWriter, r *http.Request) {
 	}
 	if tab == "folders" {
 		data.Folders, _ = s.st.Folders(r.Context(), u.ID)
+		data.FolderLists = map[int64][]*models.List{}
+		for _, f := range data.Folders {
+			data.FolderLists[f.ID], _ = s.st.FolderLists(r.Context(), f.ID)
+		}
+		data.MyLists, _ = s.st.ListsForUser(r.Context(), u.ID, true, 100, 0)
 	}
 	if tab == "account" {
 		data.SoleAdmin = u.IsAdmin() && s.st.AdminCount(r.Context()) <= 1
@@ -477,6 +485,15 @@ func (s *Server) libraryPage(w http.ResponseWriter, r *http.Request) {
 	s.render(w, r, "library", libraryData{Page: s.page(r, "Library"), Entries: entries, Platforms: s.st.Platforms(r.Context())})
 }
 
+// safeReturnTo keeps redirects local after a library save.
+func safeReturnTo(v string) string {
+	v = strings.TrimSpace(v)
+	if strings.HasPrefix(v, "/") && !strings.HasPrefix(v, "//") {
+		return v
+	}
+	return ""
+}
+
 func (s *Server) librarySave(w http.ResponseWriter, r *http.Request) {
 	u := currentUser(r)
 	gameID, _ := strconv.ParseInt(r.FormValue("game_id"), 10, 64)
@@ -495,6 +512,10 @@ func (s *Server) librarySave(w http.ResponseWriter, r *http.Request) {
 		s.st.SaveLibraryEntry(r.Context(), u.ID, gameID, platform, r.FormValue("ownership"), r.FormValue("storefront"), r.FormValue("edition"))
 		s.flash(w, r, "success", "Library updated.")
 	}
+	if to := safeReturnTo(r.FormValue("return_to")); to != "" {
+		s.redirect(w, r, to)
+		return
+	}
 	s.redirect(w, r, "/library")
 }
 
@@ -503,7 +524,12 @@ func (s *Server) libraryRemove(w http.ResponseWriter, r *http.Request) {
 	gameID, _ := strconv.ParseInt(r.FormValue("game_id"), 10, 64)
 	s.st.RemoveLibraryEntry(r.Context(), u.ID, gameID)
 	s.flash(w, r, "success", "Removed from library.")
+	if to := safeReturnTo(r.FormValue("return_to")); to != "" {
+		s.redirect(w, r, to)
+		return
+	}
 	s.redirect(w, r, "/library")
+
 }
 
 func (s *Server) exportData(w http.ResponseWriter, r *http.Request) {
@@ -511,6 +537,10 @@ func (s *Server) exportData(w http.ResponseWriter, r *http.Request) {
 	logs, _, _ := s.st.UserLogs(r.Context(), u.ID, false, 10000, 0)
 	lists, _ := s.st.ListsForUser(r.Context(), u.ID, true, 1000, 0)
 	library, _ := s.st.LibraryFor(r.Context(), u.ID)
+	if r.URL.Query().Get("format") == "csv" {
+		s.exportCSV(w, u, logs, lists, library)
+		return
+	}
 	type exportLog struct {
 		Game       string  `json:"game"`
 		Rating     float64 `json:"rating"`
@@ -539,6 +569,40 @@ func (s *Server) exportData(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	w.Header().Set("Content-Disposition", `attachment; filename="luduslog-`+u.Username+`.json"`)
 	json.NewEncoder(w).Encode(out)
+}
+
+// exportCSV writes one flat file: logs, lists and library entries share a row
+// shape, distinguished by the kind column. encoding/csv handles quoting.
+func (s *Server) exportCSV(w http.ResponseWriter, u *models.User, logs []*models.Log, lists []*models.List, library []models.LibraryEntry) {
+	w.Header().Set("Content-Type", "text/csv; charset=utf-8")
+	w.Header().Set("Content-Disposition", `attachment; filename="luduslog-`+u.Username+`.csv"`)
+	cw := csv.NewWriter(w)
+	defer cw.Flush()
+	cw.Write([]string{"kind", "game", "list", "rating", "status", "playtime_hours", "started_at", "finished_at", "platform", "ownership", "storefront", "edition", "notes"})
+	for _, l := range logs {
+		game, name := "", ""
+		if l.Game != nil {
+			game, name = l.Game.Slug, l.Game.Title
+		}
+		if name == "" {
+			name = game
+		}
+		cw.Write([]string{
+			"log", name, "", strconv.FormatFloat(l.Rating, 'f', -1, 64), l.Status,
+			strconv.FormatFloat(l.Playtime, 'f', -1, 64), l.StartedAt, l.FinishedAt,
+			l.PlatformName, l.Ownership, l.Storefront, l.EditionName, l.Review,
+		})
+	}
+	for _, l := range lists {
+		cw.Write([]string{"list", "", l.Title, "", l.Privacy, "", "", "", "", "", "", "", l.Description})
+	}
+	for _, e := range library {
+		game := ""
+		if e.Game != nil {
+			game = e.Game.Title
+		}
+		cw.Write([]string{"library", game, "", "", "", "", "", "", e.Platform, e.Ownership, e.Storefront, e.Edition, ""})
+	}
 }
 
 func (s *Server) importData(w http.ResponseWriter, r *http.Request) {
