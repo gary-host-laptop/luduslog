@@ -247,10 +247,12 @@ func (s *Server) settingsFederation(w http.ResponseWriter, r *http.Request) {
 		CoverMode: u.CoverMode, TimeDisplay: u.TimeDisplay, InfiniteScroll: u.InfiniteScroll,
 		Theme: u.Theme, HighContrast: u.HighContrast, Timezone: u.Timezone, FadePlayed: u.FadePlayed,
 		JournalView: u.JournalView, CommentPrivacy: u.CommentPrivacy, NotePrivacy: u.NotePrivacy,
-		Federation:  r.FormValue("federation") == "1",
-		FedStatuses: r.FormValue("fed_statuses") == "1",
+		Federation: r.FormValue("federation") == "1",
+		// Status and list federation have no delivery path yet; keep the stored
+		// values instead of turning them off behind the user's back.
+		FedStatuses: u.FedStatuses,
 		FedReviews:  r.FormValue("fed_reviews") == "1",
-		FedLists:    r.FormValue("fed_lists") == "1",
+		FedLists:    u.FedLists,
 	})
 	if err != nil {
 		s.serverError(w, r, err)

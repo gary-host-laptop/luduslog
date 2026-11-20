@@ -92,6 +92,44 @@ func (s *Store) CommentsFor(ctx context.Context, subjectType string, subjectID i
 	return roots, nil
 }
 
+// CommentSubjectOwner resolves who owns a commentable object.
+func (s *Store) CommentSubjectOwner(ctx context.Context, subjectType string, subjectID int64) (int64, bool) {
+	var owner int64
+	switch subjectType {
+	case "profile":
+		owner = subjectID
+	case "log":
+		if err := s.DB.QueryRowContext(ctx, `SELECT user_id FROM logs WHERE id=? AND deleted_at IS NULL`, subjectID).Scan(&owner); err != nil {
+			return 0, false
+		}
+	case "list":
+		if err := s.DB.QueryRowContext(ctx, `SELECT user_id FROM lists WHERE id=? AND deleted_at IS NULL`, subjectID).Scan(&owner); err != nil {
+			return 0, false
+		}
+	default:
+		return 0, false
+	}
+	return owner, true
+}
+
+// CommentAllowed applies the subject owner's CommentPrivacy setting.
+func (s *Store) CommentAllowed(ctx context.Context, commenterID, ownerID int64) bool {
+	if commenterID == ownerID {
+		return true
+	}
+	var privacy string
+	if err := s.DB.QueryRowContext(ctx, `SELECT comment_privacy FROM users WHERE id=?`, ownerID).Scan(&privacy); err != nil {
+		return true
+	}
+	switch privacy {
+	case "none":
+		return false
+	case "friends":
+		return s.Mutual(ctx, commenterID, ownerID)
+	}
+	return true
+}
+
 func (s *Store) CreateComment(ctx context.Context, userID *int64, subjectType string, subjectID int64, parentID *int64, body, remoteActor, remoteName, remoteAvatar string) (int64, error) {
 	res, err := s.DB.ExecContext(ctx, `INSERT INTO comments(user_id,subject_type,subject_id,parent_id,body,remote_actor,remote_name,remote_avatar,created_at)
 		VALUES(?,?,?,?,?,?,?,?,?)`, userID, subjectType, subjectID, parentID, body, remoteActor, remoteName, remoteAvatar, Now())
@@ -223,9 +261,24 @@ func (s *Store) ActivityFeed(ctx context.Context, viewerID int64, profileID int6
 	if len(userIDs) == 0 {
 		return nil, nil
 	}
+	where := `a.user_id IN (` + placeholders(len(userIDs)) + `)`
+	args := int64Args(userIDs)
+	if profileID > 0 {
+		// A hidden profile activity feed stays visible to its owner only.
+		if profileID != viewerID {
+			var hidden int
+			s.DB.QueryRowContext(ctx, `SELECT hide_activity FROM users WHERE id=?`, profileID).Scan(&hidden)
+			if hidden == 1 {
+				return nil, nil
+			}
+		}
+	} else {
+		where += ` AND (a.user_id=? OR NOT EXISTS(SELECT 1 FROM users hu WHERE hu.id=a.user_id AND hu.hide_activity=1))`
+		args = append(args, viewerID)
+	}
+	args = append(args, limit, offset)
 	rows, err := s.DB.QueryContext(ctx, `SELECT a.id,a.user_id,a.type,a.game_id,a.log_id,a.list_id,a.target_name,a.visibility,a.created_at
-		FROM activities a WHERE a.user_id IN (`+placeholders(len(userIDs))+`) ORDER BY a.created_at DESC LIMIT ? OFFSET ?`,
-		append(int64Args(userIDs), limit, offset)...)
+		FROM activities a WHERE `+where+` ORDER BY a.created_at DESC LIMIT ? OFFSET ?`, args...)
 	if err != nil {
 		return nil, err
 	}

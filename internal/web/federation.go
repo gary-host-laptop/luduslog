@@ -156,16 +156,19 @@ func (s *Server) nodeinfo(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) outboxCollection(r *http.Request, u *models.User) (map[string]any, error) {
-	logs, _, err := s.st.UserLogs(r.Context(), u.ID, false, 40, 0)
-	if err != nil {
-		return nil, err
-	}
 	items := []any{}
-	for _, l := range logs {
-		if l.Draft {
-			continue
+	// Journal-only entries, drafts and private profiles stay off the outbox.
+	if u.Federation && u.FedReviews && !u.PrivateProfile {
+		logs, _, err := s.st.UserLogs(r.Context(), u.ID, false, 40, 0)
+		if err != nil {
+			return nil, err
 		}
-		items = append(items, s.reviewActivity(u, l))
+		for _, l := range logs {
+			if l.Draft || l.Review == "" {
+				continue
+			}
+			items = append(items, s.reviewActivity(u, l))
+		}
 	}
 	return s.collection(s.actorURL(u)+"/outbox", items), nil
 }
@@ -189,11 +192,13 @@ func (s *Server) apFollowers(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	items := []any{}
-	for _, f := range s.st.LocalFollowers(r.Context(), u.ID) {
-		items = append(items, s.actorURL(f))
-	}
-	for _, f := range s.st.RemoteFollowers(r.Context(), u.ID) {
-		items = append(items, f.ActorURI)
+	if !u.HideSocialGraph {
+		for _, f := range s.st.LocalFollowers(r.Context(), u.ID) {
+			items = append(items, s.actorURL(f))
+		}
+		for _, f := range s.st.RemoteFollowers(r.Context(), u.ID) {
+			items = append(items, f.ActorURI)
+		}
 	}
 	writeJSON(w, 200, s.collection(s.actorURL(u)+"/followers", items), activityJSON)
 }
@@ -294,7 +299,7 @@ func (s *Server) apGameActivity(w http.ResponseWriter, r *http.Request) {
 	}
 	items := []any{}
 	for _, l := range logs {
-		if l.User != nil && l.User.Federation && !l.Draft {
+		if l.User != nil && l.User.Federation && l.User.FedReviews && !l.User.PrivateProfile && !l.Draft && l.Review != "" {
 			items = append(items, s.reviewActivity(l.User, l))
 		}
 	}

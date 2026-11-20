@@ -119,7 +119,7 @@ func renderInline(s string) string {
 		return fmt.Sprintf("\x00CODE%d\x00", len(codes)-1)
 	})
 
-	s = reMention.ReplaceAllString(s, `$1<a class="mention" href="/@$2">@$2</a>`)
+	s = reMention.ReplaceAllString(s, `$1<a class="mention" href="/users/$2">@$2</a>`)
 	s = reHashtag.ReplaceAllString(s, `$1<a class="hashtag" href="/search?q=%23$2">#$2</a>`)
 	s = reBold.ReplaceAllString(s, `<strong>$1</strong>`)
 	s = reStrike.ReplaceAllString(s, `<del>$1</del>`)

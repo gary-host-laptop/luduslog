@@ -47,6 +47,14 @@ func (s *Server) commentCreate(w http.ResponseWriter, r *http.Request) {
 		s.redirect(w, r, back)
 		return
 	}
+	if owner, ok := s.st.CommentSubjectOwner(r.Context(), subjectType, subjectID); !ok {
+		s.notFound(w, r)
+		return
+	} else if !s.st.CommentAllowed(r.Context(), u.ID, owner) {
+		s.flash(w, r, "error", "This user does not accept comments from you.")
+		s.redirect(w, r, back)
+		return
+	}
 	var parent *int64
 	if v := r.FormValue("parent_id"); v != "" {
 		if id, err := strconv.ParseInt(v, 10, 64); err == nil {

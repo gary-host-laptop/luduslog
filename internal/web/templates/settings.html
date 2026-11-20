@@ -164,10 +164,8 @@
       <h2>Federation</h2>
       <p class="muted">Your actor: <code>{{abs (printf "/users/%s" .User.Username)}}</code></p>
       <label class="check"><input type="checkbox" name="federation" value="1" {{if .User.Federation}}checked{{end}}> Publish my profile over ActivityPub</label>
-      <label class="check"><input type="checkbox" name="fed_statuses" value="1" {{if .User.FedStatuses}}checked{{end}}> Federate status changes</label>
       <label class="check"><input type="checkbox" name="fed_reviews" value="1" {{if .User.FedReviews}}checked{{end}}> Federate public reviews</label>
-      <label class="check"><input type="checkbox" name="fed_lists" value="1" {{if .User.FedLists}}checked{{end}}> Federate public lists</label>
-      <p class="field-hint">Followers on other servers receive these as ActivityPub objects. Replies and likes federate back to your inbox.</p>
+      <p class="field-hint">Followers on other servers receive your public reviews as ActivityPub objects; drafts and journal-only entries are never published. Status and list federation are not delivered yet. Replies and likes federate back to your inbox.</p>
       <div><button class="btn btn-primary" type="submit">Save federation</button></div>
     </form>
     {{else if eq .Tab "blocks"}}
