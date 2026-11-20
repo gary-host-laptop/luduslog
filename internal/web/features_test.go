@@ -320,7 +320,7 @@ func TestGameReleaseDisplayWeb(t *testing.T) {
 	_, err := st.SaveGame(ctx, &models.Game{
 		IGDBID: -406, Slug: "release-display", Title: "Release Display", ReleaseStatus: "released",
 		ReleaseDate: "2024-05-02", Franchise: "release display", Category: "main_game",
-		ReleaseDates: []models.ReleaseDate{{Platform: "PC", Date: "2024-05-02"}},
+		ReleaseDates: []models.ReleaseDate{{Platform: "PC", Date: "2024-05-02", Region: "Europe", Status: "released"}},
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -342,8 +342,8 @@ func TestGameReleaseDisplayWeb(t *testing.T) {
 	if strings.Contains(body, "franchise=") {
 		t.Fatal("release line repeats the game title as a franchise")
 	}
-	if !strings.Contains(body, "PC 2024/05/02") {
-		t.Fatal("details release date is not formatted with slashes")
+	if !strings.Contains(body, "PC · 2024/05/02 · Europe · released") {
+		t.Fatal("details release row is missing platform, date, region or status")
 	}
 }
 

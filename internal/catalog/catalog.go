@@ -39,5 +39,12 @@ func Save(ctx context.Context, st *store.Store, g *models.Game) (SaveResult, err
 	if err != nil {
 		return SaveResult{}, fmt.Errorf("%s: %w", g.Title, err)
 	}
+	if saved.ParentID == nil && g.ParentIGDBID > 0 {
+		if parent, err := st.GameByIGDB(ctx, g.ParentIGDBID); err == nil {
+			if st.SetGameParent(ctx, saved.ID, parent.ID) == nil {
+				saved.ParentID = &parent.ID
+			}
+		}
+	}
 	return SaveResult{Game: saved, Created: created}, nil
 }

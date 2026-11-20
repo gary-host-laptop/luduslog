@@ -155,16 +155,98 @@ func (s *Store) GameDetail(ctx context.Context, g *models.Game) (*models.Game, e
 	g.Screenshots = m.Screenshots
 	g.Videos = m.Videos
 
+	// Walk parent_id up to the base game so a port page can show what it was
+	// ported from. The chain is reversed to read original first, and cycles in
+	// bad data stop at the hop limit.
+	if g.ParentID != nil {
+		seenAnc := map[int64]bool{g.ID: true}
+		var chain []*models.Game
+		next := g.ParentID
+		for hops := 0; next != nil && hops < 6 && !seenAnc[*next]; hops++ {
+			seenAnc[*next] = true
+			anc, err := s.GameByID(ctx, *next)
+			if err != nil {
+				break
+			}
+			chain = append(chain, anc)
+			next = anc.ParentID
+		}
+		for i := len(chain) - 1; i >= 0; i-- {
+			g.Parents = append(g.Parents, chain[i])
+		}
+	}
+
+	// Child games are split by IGDB game type: a port is a port, an expanded
+	// game is an update, and only true versions fall back to editions.
+	var variants []models.Game
 	if g.ParentID != nil {
 		if parent, err := s.GameByID(ctx, *g.ParentID); err == nil {
-			parent.Editions, _ = s.Editions(ctx, parent.ID)
-			g.Editions = parent.Editions
+			variants, _ = s.Editions(ctx, parent.ID)
 		}
 	} else {
-		g.Editions, _ = s.Editions(ctx, g.ID)
+		variants, _ = s.Editions(ctx, g.ID)
+	}
+	for _, x := range variants {
+		switch x.Category {
+		case "port":
+			g.Ports = append(g.Ports, x)
+		case "remake":
+			g.Remakes = append(g.Remakes, x)
+		case "expanded_game", "update":
+			g.Updates = append(g.Updates, x)
+		default:
+			g.Editions = append(g.Editions, x)
+		}
 	}
 	g.Contents, _ = s.BundleContents(ctx, g.ID)
 	g.Bundles, _ = s.BundlesFor(ctx, g.ID)
+	if remakes, err := s.RemakesFor(ctx, g.ID); err == nil {
+		g.Remakes = append(g.Remakes, remakes...)
+	}
+	if updates, err := s.UpdatesFor(ctx, g.ID); err == nil {
+		g.Updates = append(g.Updates, updates...)
+	}
+	if ports, err := s.PortsFor(ctx, g.ID); err == nil {
+		g.Ports = append(g.Ports, ports...)
+	}
+	// IGDB chains relations: a port of an update is still a port of the base
+	// game, so carry those ports up one level.
+	for _, v := range append(append([]models.Game{}, g.Updates...), g.Editions...) {
+		if ports, err := s.PortsFor(ctx, v.ID); err == nil {
+			g.Ports = append(g.Ports, ports...)
+		}
+	}
+
+	// The related section shows each game once, never the current game, and
+	// prefers the more specific relation when IGDB reports more than one.
+	seen := map[int64]bool{g.ID: true}
+	unique := func(list []models.Game) []models.Game {
+		out := make([]models.Game, 0, len(list))
+		for _, x := range list {
+			if !seen[x.ID] {
+				seen[x.ID] = true
+				out = append(out, x)
+			}
+		}
+		return out
+	}
+	g.Remakes = unique(g.Remakes)
+	g.Updates = unique(g.Updates)
+	g.Ports = unique(g.Ports)
+	g.Editions = unique(g.Editions)
+	g.Bundles = unique(g.Bundles)
+	for _, x := range g.Contents {
+		seen[x.ID] = true
+	}
+	if g.Franchise != "" {
+		series, _ := s.SeriesGames(ctx, g.Franchise, 24)
+		for _, x := range series {
+			if !seen[x.ID] {
+				seen[x.ID] = true
+				g.Series = append(g.Series, x)
+			}
+		}
+	}
 	return g, nil
 }
 
@@ -195,6 +277,22 @@ func (s *Store) BundlesFor(ctx context.Context, gameID int64) ([]models.Game, er
 		WHERE r.game_id=? AND r.kind='bundle' ORDER BY g.title`, gameID)
 }
 
+func (s *Store) RemakesFor(ctx context.Context, gameID int64) ([]models.Game, error) {
+	return s.relatedGames(ctx, `SELECT `+gameCols+` FROM game_relations r JOIN games g ON g.id=r.related_id
+		WHERE r.game_id=? AND r.kind='remake' ORDER BY g.title`, gameID)
+}
+
+// UpdatesFor returns IGDB expanded games: updated releases of the same game.
+func (s *Store) UpdatesFor(ctx context.Context, gameID int64) ([]models.Game, error) {
+	return s.relatedGames(ctx, `SELECT `+gameCols+` FROM game_relations r JOIN games g ON g.id=r.related_id
+		WHERE r.game_id=? AND r.kind='update' ORDER BY g.title`, gameID)
+}
+
+func (s *Store) PortsFor(ctx context.Context, gameID int64) ([]models.Game, error) {
+	return s.relatedGames(ctx, `SELECT `+gameCols+` FROM game_relations r JOIN games g ON g.id=r.related_id
+		WHERE r.game_id=? AND r.kind='port' ORDER BY g.title`, gameID)
+}
+
 func (s *Store) relatedGames(ctx context.Context, query string, args ...any) ([]models.Game, error) {
 	rows, err := s.DB.QueryContext(ctx, query, args...)
 	if err != nil {
@@ -219,6 +317,12 @@ func (s *Store) SeriesGames(ctx context.Context, franchise string, limit int) ([
 	}
 	return s.relatedGames(ctx, `SELECT `+gameCols+` FROM games g WHERE g.franchise=? AND g.parent_id IS NULL
 		ORDER BY COALESCE(g.release_date,'9999') LIMIT ?`, franchise, limit)
+}
+
+// SetGameParent links an edition to its base game.
+func (s *Store) SetGameParent(ctx context.Context, id, parentID int64) error {
+	_, err := s.DB.ExecContext(ctx, `UPDATE games SET parent_id=? WHERE id=? AND id<>?`, parentID, id, parentID)
+	return err
 }
 
 func (s *Store) RelatedGames(ctx context.Context, gameID int64, limit int) ([]models.Game, error) {
@@ -555,49 +659,52 @@ func (s *Store) SaveGame(ctx context.Context, g *models.Game) (*models.Game, err
 	search := buildSearchText(g)
 	media, _ := json.Marshal(map[string]any{"screenshots": g.Screenshots, "videos": g.Videos})
 	parent := nullableInt(g.ParentID)
+	if g.ParentID == nil && g.ParentIGDBID != 0 {
+		if pid, err := lookupIGDBID(ctx, tx, g.ParentIGDBID); err == nil {
+			g.ParentID = &pid
+			parent = pid
+		}
+	}
 	hastily, normally, completely := 0, 0, 0
 	if g.TimeToBeat != nil {
 		hastily, normally, completely = g.TimeToBeat.Hastily, g.TimeToBeat.Normally, g.TimeToBeat.Completely
 	}
 	res, err := tx.ExecContext(ctx, `INSERT INTO games(igdb_id,slug,title,sort_title,summary,cover_url,banner_url,release_date,
-		release_year,release_status,category,parent_id,edition_name,franchise,adult,restricted,search_text,media,
+		release_year,release_status,category,parent_id,parent_igdb_id,edition_name,franchise,adult,restricted,search_text,media,
 		time_hastily,time_normally,time_completely,created_at,updated_at,synced_at)
-		VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+		VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
 		ON CONFLICT(igdb_id) DO UPDATE SET slug=excluded.slug,title=excluded.title,sort_title=excluded.sort_title,
 		summary=excluded.summary,cover_url=CASE WHEN excluded.cover_url<>'' THEN excluded.cover_url ELSE games.cover_url END,
 		banner_url=excluded.banner_url,release_date=excluded.release_date,release_year=excluded.release_year,
 		release_status=excluded.release_status,category=excluded.category,parent_id=excluded.parent_id,
+		parent_igdb_id=excluded.parent_igdb_id,
 		edition_name=excluded.edition_name,franchise=excluded.franchise,adult=excluded.adult,restricted=excluded.restricted,
 		search_text=excluded.search_text,media=excluded.media,time_hastily=excluded.time_hastily,
 		time_normally=excluded.time_normally,time_completely=excluded.time_completely,
 		updated_at=excluded.updated_at,synced_at=excluded.synced_at`,
 		g.IGDBID, g.Slug, g.Title, sortTitle(g.Title), g.Summary, g.CoverURL, g.BannerURL, nullStr(g.ReleaseDate),
-		nullInt(g.ReleaseYear), g.ReleaseStatus, g.Category, parent, g.EditionName, g.Franchise, b2i(g.Adult),
+		nullInt(g.ReleaseYear), g.ReleaseStatus, g.Category, parent, g.ParentIGDBID, g.EditionName, g.Franchise, b2i(g.Adult),
 		b2i(g.Restricted), search, string(media), hastily, normally, completely, now, now, now)
 	if err != nil {
 		return nil, err
 	}
-	// LastInsertId is unreliable for an UPSERT update in SQLite. Prefer the
-	// id the caller already knows, then fall back to a lookup.
-	id, _ := res.LastInsertId()
-	if g.ID > 0 {
-		id = g.ID
-	}
+	// LastInsertId is unreliable for an UPSERT update in SQLite: it can report
+	// an unrelated rowid. Resolve the real id by identity first.
+	id := g.ID
 	if id == 0 && g.IGDBID != 0 {
-		if err := tx.QueryRowContext(ctx, `SELECT id FROM games WHERE igdb_id=?`, g.IGDBID).Scan(&id); err != nil {
-			return nil, err
-		}
+		tx.QueryRowContext(ctx, `SELECT id FROM games WHERE igdb_id=?`, g.IGDBID).Scan(&id)
 	}
 	if id == 0 && g.Slug != "" {
-		if err := tx.QueryRowContext(ctx, `SELECT id FROM games WHERE slug=?`, g.Slug).Scan(&id); err != nil {
-			return nil, err
-		}
+		tx.QueryRowContext(ctx, `SELECT id FROM games WHERE slug=?`, g.Slug).Scan(&id)
+	}
+	if id == 0 {
+		id, _ = res.LastInsertId()
 	}
 	if id == 0 {
 		return nil, fmt.Errorf("games: could not resolve id for %q", g.Title)
 	}
 	g.ID = id
-	for _, table := range []string{"game_platforms", "game_genres", "game_themes", "game_modes", "game_companies", "game_alt_names", "game_release_dates", "game_relations"} {
+	for _, table := range []string{"game_platforms", "game_genres", "game_themes", "game_modes", "game_companies", "game_alt_names", "game_release_dates"} {
 		tx.ExecContext(ctx, `DELETE FROM `+table+` WHERE game_id=?`, id)
 	}
 	for _, p := range g.Platforms {
@@ -636,10 +743,102 @@ func (s *Store) SaveGame(ctx context.Context, g *models.Game) (*models.Game, err
 			return nil, err
 		}
 	}
+	// Relation groups that IGDB returned replace the matching kind. Other kinds
+	// (for example bundle_content built elsewhere) are preserved on refresh.
+	for _, group := range []struct {
+		kind  string
+		games []models.Game
+	}{
+		{"remake", g.Remakes},
+		{"update", g.Updates},
+		{"port", g.Ports},
+		{"bundle", g.Bundles},
+	} {
+		if len(group.games) == 0 {
+			continue
+		}
+		if _, err := tx.ExecContext(ctx, `DELETE FROM game_relations WHERE game_id=? AND kind=?`, id, group.kind); err != nil {
+			return nil, err
+		}
+		for _, rel := range group.games {
+			relatedID, err := ensureGameRef(ctx, tx, rel)
+			if err != nil {
+				return nil, err
+			}
+			if relatedID == 0 || relatedID == id {
+				continue
+			}
+			if _, err := tx.ExecContext(ctx, `INSERT OR IGNORE INTO game_relations(game_id,related_id,kind) VALUES(?,?,?)`, id, relatedID, group.kind); err != nil {
+				return nil, err
+			}
+		}
+	}
 	if err := tx.Commit(); err != nil {
 		return nil, err
 	}
 	return s.GameByID(ctx, id)
+}
+
+// lookupIGDBID resolves an IGDB id to the local row, if it exists.
+func lookupIGDBID(ctx context.Context, q execQueryer, igdbID int64) (int64, error) {
+	var id int64
+	err := q.QueryRowContext(ctx, `SELECT id FROM games WHERE igdb_id=?`, igdbID).Scan(&id)
+	return id, err
+}
+
+// ensureGameRef returns the local id for a related game, creating a minimal
+// row when the relation target has not been imported yet. Existing full rows
+// are never overwritten.
+func ensureGameRef(ctx context.Context, q execQueryer, g models.Game) (int64, error) {
+	if g.ID > 0 {
+		return g.ID, nil
+	}
+	if g.IGDBID != 0 {
+		if id, err := lookupIGDBID(ctx, q, g.IGDBID); err == nil {
+			return id, nil
+		}
+	}
+	if g.IGDBID == 0 {
+		if g.Slug == "" {
+			return 0, nil
+		}
+		var id int64
+		if err := q.QueryRowContext(ctx, `SELECT id FROM games WHERE slug=?`, g.Slug).Scan(&id); err != nil {
+			return 0, err
+		}
+		return id, nil
+	}
+	slug := strings.TrimSpace(g.Slug)
+	if slug == "" {
+		slug = fmt.Sprintf("igdb-%d", g.IGDBID)
+	}
+	title := strings.TrimSpace(g.Title)
+	if title == "" {
+		title = fmt.Sprintf("IGDB #%d", g.IGDBID)
+	}
+	now := Now()
+	// A slug or IGDB id conflict means the row already exists in some form.
+	if _, err := q.ExecContext(ctx, `INSERT OR IGNORE INTO games(igdb_id,slug,title,sort_title,release_status,category,search_text,created_at,updated_at)
+		VALUES(?,?,?,?,'released','main_game',?,?,?)`, g.IGDBID, slug, title, sortTitle(title), buildSearchText(&g), now, now); err != nil {
+		return 0, err
+	}
+	if id, err := lookupIGDBID(ctx, q, g.IGDBID); err == nil {
+		return id, nil
+	}
+	var id int64
+	if err := q.QueryRowContext(ctx, `SELECT id FROM games WHERE slug=?`, slug).Scan(&id); err != nil {
+		return 0, err
+	}
+	return id, nil
+}
+
+// ResolveGameParents connects editions once their parent row is in the
+// catalog. It is safe to run repeatedly, for example after a sync.
+func (s *Store) ResolveGameParents(ctx context.Context) error {
+	_, err := s.DB.ExecContext(ctx, `UPDATE games SET parent_id=(SELECT p.id FROM games p WHERE p.igdb_id=games.parent_igdb_id)
+		WHERE parent_id IS NULL AND parent_igdb_id<>0
+		AND EXISTS(SELECT 1 FROM games p WHERE p.igdb_id=games.parent_igdb_id)`)
+	return err
 }
 
 func savePlatform(ctx context.Context, tx *sql.Tx, p models.Platform) (int64, error) {

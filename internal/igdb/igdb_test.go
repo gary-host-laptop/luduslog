@@ -62,6 +62,50 @@ func TestMapGameCompleteMetadata(t *testing.T) {
 	}
 }
 
+func TestMapGameVariantsAndRelations(t *testing.T) {
+	r := apiGame{
+		ID: 2001, Name: "Base Game - Deluxe Edition", Slug: "base-game-deluxe",
+		VersionParent: 2000, ParentGame: 2000, Category: 10,
+		GameType:      &apiGameType{ID: 10, Type: "Expanded Game"},
+		Remakes:       []apiNamed{{ID: 3001, Name: "Base Game Remake", Slug: "base-game-remake"}},
+		Ports:         []apiNamed{{ID: 3002, Name: "Base Game Portable", Slug: "base-game-portable"}},
+		Bundles:       []apiNamed{{ID: 3003, Name: "Base Bundle", Slug: "base-bundle"}},
+		ExpandedGames: []apiNamed{{ID: 3004, Name: "Base Game Update", Slug: "base-game-update"}},
+	}
+	g := mapGame(r)
+	if g.ParentIGDBID != 2000 {
+		t.Fatalf("parent id = %d, want 2000", g.ParentIGDBID)
+	}
+	if g.EditionName != "Deluxe Edition" {
+		t.Fatalf("edition name = %q", g.EditionName)
+	}
+	if len(g.Remakes) != 1 || g.Remakes[0].IGDBID != 3001 || g.Remakes[0].Title != "Base Game Remake" || g.Remakes[0].Slug != "base-game-remake" {
+		t.Fatalf("remakes = %+v", g.Remakes)
+	}
+	if len(g.Ports) != 1 || g.Ports[0].IGDBID != 3002 || len(g.Bundles) != 1 || g.Bundles[0].IGDBID != 3003 {
+		t.Fatalf("ports/bundles = %+v / %+v", g.Ports, g.Bundles)
+	}
+	if g.Category != "expanded_game" {
+		t.Fatalf("game_type should win over deprecated category, got %q", g.Category)
+	}
+	if len(g.Updates) != 1 || g.Updates[0].IGDBID != 3004 {
+		t.Fatalf("updates = %+v", g.Updates)
+	}
+	// The deprecated category is still honoured when game_type is absent.
+	if g := mapGame(apiGame{ID: 2004, Category: 11}); g.Category != "port" {
+		t.Fatalf("legacy category fallback = %q", g.Category)
+	}
+	// version_parent is the fallback when parent_game is absent.
+	g = mapGame(apiGame{ID: 2002, Name: "Portable Edition", VersionParent: 2000})
+	if g.ParentIGDBID != 2000 || g.EditionName != "Portable Edition" {
+		t.Fatalf("version parent fallback = %d / %q", g.ParentIGDBID, g.EditionName)
+	}
+	// Base games carry no parent.
+	if g := mapGame(apiGame{ID: 2003, Name: "Plain", Category: 0}); g.ParentIGDBID != 0 || g.EditionName != "" {
+		t.Fatalf("base game got edition data: %+v", g)
+	}
+}
+
 func TestTimeToBeatModel(t *testing.T) {
 	got := timeToBeatModel(apiTimeToBeat{Hastily: 19800, Normally: 36000, Completely: 54000})
 	if got == nil || got.Hastily != 19800 || got.Normally != 36000 || got.Completely != 54000 {

@@ -36,6 +36,7 @@ func (s *Server) adminFetchGame(w http.ResponseWriter, r *http.Request) {
 		s.serverError(w, r, err)
 		return
 	}
+	s.st.ResolveGameParents(r.Context())
 	u := currentUser(r)
 	if u != nil {
 		s.st.Audit(r.Context(), u.ID, "fetch_game", res.Game.Title+" (IGDB "+strconv.FormatInt(res.Game.IGDBID, 10)+")")
@@ -95,6 +96,7 @@ func (s *Server) adminRefreshGame(w http.ResponseWriter, r *http.Request) {
 		s.serverError(w, r, err)
 		return
 	}
+	s.st.ResolveGameParents(r.Context())
 	u := currentUser(r)
 	if u != nil {
 		s.st.Audit(r.Context(), u.ID, "refresh_game", res.Game.Title+" (IGDB "+strconv.FormatInt(res.Game.IGDBID, 10)+")")

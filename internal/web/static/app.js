@@ -138,6 +138,37 @@
     });
   }
 
+  // Related-games tabs: without JS the section lists every group under its
+  // heading; with it only the selected tab's group is visible.
+  document.querySelectorAll("[data-related-tabs]").forEach(function (section) {
+    var tabs = Array.prototype.slice.call(section.querySelectorAll('[role="tab"]'));
+    var panels = Array.prototype.slice.call(section.querySelectorAll('[role="tabpanel"]'));
+    if (!tabs.length) return;
+    section.setAttribute("data-enhanced", "");
+    section.querySelectorAll(".related-group h3").forEach(function (h) { h.remove(); });
+    function select(index, focus) {
+      tabs.forEach(function (tab, i) {
+        var on = i === index;
+        tab.setAttribute("aria-selected", on ? "true" : "false");
+        tab.tabIndex = on ? 0 : -1;
+        if (on && focus) tab.focus();
+      });
+      panels.forEach(function (panel, i) { panel.hidden = i !== index; });
+    }
+    tabs.forEach(function (tab, i) {
+      tab.addEventListener("click", function () { select(i, false); });
+      tab.addEventListener("keydown", function (evt) {
+        var next = -1;
+        if (evt.key === "ArrowRight") next = (i + 1) % tabs.length;
+        else if (evt.key === "ArrowLeft") next = (i - 1 + tabs.length) % tabs.length;
+        else if (evt.key === "Home") next = 0;
+        else if (evt.key === "End") next = tabs.length - 1;
+        if (next >= 0) { evt.preventDefault(); select(next, true); }
+      });
+    });
+    select(0, false);
+  });
+
   // Spoiler toggles.
   document.addEventListener("click", function (evt) {
     var btn = evt.target.closest("[data-spoiler-toggle]");

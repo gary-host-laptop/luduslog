@@ -12,6 +12,9 @@
     <form method="get" action="/games">
       <input type="hidden" name="q" value="{{.Q}}">
       <div class="row between"><strong>Filters</strong><a href="/games" class="muted" style="font-size:.8rem">Reset</a></div>
+      {{if .Franchise}}
+      <div class="mt1"><span class="pill">Franchise: {{.Franchise}}</span></div>
+      {{end}}
       <details open>
         <summary>Sort</summary>
         <select name="sort" class="mt1">
@@ -41,6 +44,14 @@
       <details>
         <summary>Theme</summary>
         {{range .Facets.Themes}}<label class="check"><input type="checkbox" name="theme" value="{{.Name}}" {{if contains $.Themes .Name}}checked{{end}}> {{.Name}}</label>{{end}}
+      </details>{{end}}
+      {{if .Facets.Franchises}}
+      <details>
+        <summary>Franchise</summary>
+        <select name="franchise" class="mt1">
+          <option value="">Any franchise</option>
+          {{range .Facets.Franchises}}<option value="{{.}}" {{if eq $.Franchise .}}selected{{end}}>{{.}}</option>{{end}}
+        </select>
       </details>{{end}}
       <details>
         <summary>Release year</summary>

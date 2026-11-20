@@ -56,11 +56,13 @@ func templateFuncs(s *Server) template.FuncMap {
 			}
 			return int(math.Round(float64(n) * 100 / float64(total)))
 		},
-		"plural":      plural,
-		"truncate":    truncate,
-		"creditNames": creditNames,
-		"initials":    initials,
-		"dict":        dict,
+		"plural":       plural,
+		"truncate":     truncate,
+		"creditNames":  creditNames,
+		"relationRole": relationRole,
+		"ancestorTab":  ancestorTab,
+		"initials":     initials,
+		"dict":         dict,
 		"derefInt": func(p *int64) int64 {
 			if p == nil {
 				return 0
@@ -104,6 +106,7 @@ func templateFuncs(s *Server) template.FuncMap {
 		"abs":       func(p string) string { return s.cfg.BaseURL + p },
 		"hasPrefix": strings.HasPrefix,
 		"lower":     strings.ToLower,
+		"join":      strings.Join,
 		"first": func(list []string) string {
 			if len(list) > 0 {
 				return list[0]
@@ -357,6 +360,65 @@ func toJSON(v any) template.JS {
 
 func listPath(u *models.User, l *models.List) string {
 	return "/users/" + u.Username + "/lists/" + l.Slug
+}
+
+// relationRole names what a release is, for the tag on a related card.
+func relationRole(category string) string {
+	switch category {
+	case "main_game":
+		return "Main game"
+	case "expanded_game", "update":
+		return "Update"
+	case "port":
+		return "Port"
+	case "remake":
+		return "Remake"
+	case "remaster":
+		return "Remaster"
+	case "dlc_addon":
+		return "DLC"
+	case "expansion", "standalone_expansion":
+		return "Expansion"
+	case "bundle", "pack":
+		return "Bundle"
+	case "mod":
+		return "Mod"
+	case "":
+		return "Game"
+	}
+	r := []rune(strings.ReplaceAll(category, "_", " "))
+	r[0] = []rune(strings.ToUpper(string(r[0])))[0]
+	return string(r)
+}
+
+// ancestorTab labels the ancestor group from the current game's own type, so a
+// port page says "Port of" rather than a generic "Parents".
+func ancestorTab(category string) string {
+	switch category {
+	case "port":
+		return "Port of"
+	case "expanded_game", "update":
+		return "Update of"
+	case "remake":
+		return "Remake of"
+	case "remaster":
+		return "Remaster of"
+	case "main_game":
+		return "Edition of"
+	default:
+		return "Version of"
+	}
+}
+
+func notePrivacyLabel(p string) string {
+	switch p {
+	case "everyone":
+		return "Notes visible to everyone"
+	case "none":
+		return "Notes private"
+	default:
+		return "Notes visible to friends"
+	}
 }
 
 func privacyLabel(p string) string {

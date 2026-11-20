@@ -77,6 +77,7 @@ type Game struct {
 	ReleaseStatus string
 	Category      string // main_game, dlc_addon, expansion, ...
 	ParentID      *int64
+	ParentIGDBID  int64 // IGDB id of the parent game, used while importing editions
 	EditionName   string
 	Franchise     string
 	Adult         bool
@@ -108,6 +109,11 @@ type Game struct {
 	Contents      []Game // bundle contents
 	Bundles       []Game
 	Editions      []Game
+	Parents       []*Game // ancestor chain, original first
+	Updates       []Game
+	Remakes       []Game
+	Ports         []Game
+	Series        []Game
 }
 
 // TimeToBeat holds IGDB's average completion times in seconds.

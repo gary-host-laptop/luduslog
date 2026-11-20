@@ -123,13 +123,68 @@
 </div>
 
 {{if .Game.Summary}}<div class="prose game-summary mt2">{{md .Game.Summary}}</div>{{end}}
+{{if .Game.AltNames}}<div class="muted mt1">Also known as: {{join .Game.AltNames ", "}}</div>{{end}}
+
+{{if or .Game.Parents .Game.Remakes .Game.Updates .Game.Ports .Game.Editions .Game.Series .Game.Bundles}}
+{{$selected := true}}
+<section class="section related-games" id="related" data-related-tabs>
+  <div class="section-head"><h2>Related games</h2></div>
+  <div class="related-tabs" role="tablist" aria-label="Related games">
+    {{if .Game.Parents}}<button type="button" class="related-tab" role="tab" id="related-tab-parents" aria-controls="related-parents" {{if $selected}}aria-selected="true"{{else}}aria-selected="false" tabindex="-1"{{end}}>{{ancestorTab .Game.Category}}</button>{{$selected = false}}{{end}}
+    {{if .Game.Series}}<button type="button" class="related-tab" role="tab" id="related-tab-series" aria-controls="related-series" {{if $selected}}aria-selected="true"{{else}}aria-selected="false" tabindex="-1"{{end}}>Series</button>{{$selected = false}}{{end}}
+    {{if .Game.Remakes}}<button type="button" class="related-tab" role="tab" id="related-tab-remakes" aria-controls="related-remakes" {{if $selected}}aria-selected="true"{{else}}aria-selected="false" tabindex="-1"{{end}}>Remakes</button>{{$selected = false}}{{end}}
+    {{if .Game.Updates}}<button type="button" class="related-tab" role="tab" id="related-tab-updates" aria-controls="related-updates" {{if $selected}}aria-selected="true"{{else}}aria-selected="false" tabindex="-1"{{end}}>Updates</button>{{$selected = false}}{{end}}
+    {{if .Game.Ports}}<button type="button" class="related-tab" role="tab" id="related-tab-ports" aria-controls="related-ports" {{if $selected}}aria-selected="true"{{else}}aria-selected="false" tabindex="-1"{{end}}>Ports</button>{{$selected = false}}{{end}}
+    {{if .Game.Editions}}<button type="button" class="related-tab" role="tab" id="related-tab-editions" aria-controls="related-editions" {{if $selected}}aria-selected="true"{{else}}aria-selected="false" tabindex="-1"{{end}}>Editions & extras</button>{{$selected = false}}{{end}}
+    {{if .Game.Bundles}}<button type="button" class="related-tab" role="tab" id="related-tab-bundles" aria-controls="related-bundles" {{if $selected}}aria-selected="true"{{else}}aria-selected="false" tabindex="-1"{{end}}>Bundles</button>{{$selected = false}}{{end}}
+  </div>
+  {{if .Game.Parents}}
+  <div class="related-group" id="related-parents" role="tabpanel" aria-labelledby="related-tab-parents">
+    <h3>{{ancestorTab .Game.Category}}</h3>
+    <div class="grid grid-cards">
+      {{range .Game.Parents}}{{template "game_card_role" (dict "Game" . "Role" (relationRole .Category))}}{{end}}
+    </div>
+  </div>
+  {{end}}
+  {{if .Game.Series}}
+  <div class="related-group" id="related-series" role="tabpanel" aria-labelledby="related-tab-series">
+    <h3>Series</h3>{{template "game_grid" .Game.Series}}
+  </div>
+  {{end}}
+  {{if .Game.Remakes}}
+  <div class="related-group" id="related-remakes" role="tabpanel" aria-labelledby="related-tab-remakes">
+    <h3>Remakes</h3>{{template "game_grid" .Game.Remakes}}
+  </div>
+  {{end}}
+  {{if .Game.Updates}}
+  <div class="related-group" id="related-updates" role="tabpanel" aria-labelledby="related-tab-updates">
+    <h3>Updates</h3>{{template "game_grid" .Game.Updates}}
+  </div>
+  {{end}}
+  {{if .Game.Ports}}
+  <div class="related-group" id="related-ports" role="tabpanel" aria-labelledby="related-tab-ports">
+    <h3>Ports</h3>{{template "game_grid" .Game.Ports}}
+  </div>
+  {{end}}
+  {{if .Game.Editions}}
+  <div class="related-group" id="related-editions" role="tabpanel" aria-labelledby="related-tab-editions">
+    <h3>Editions & extras</h3>{{template "game_grid" .Game.Editions}}
+  </div>
+  {{end}}
+  {{if .Game.Bundles}}
+  <div class="related-group" id="related-bundles" role="tabpanel" aria-labelledby="related-tab-bundles">
+    <h3>Bundles</h3>{{template "game_grid" .Game.Bundles}}
+  </div>
+  {{end}}
+</section>
+{{end}}
 
 <section class="card mt3">
   <div class="card-head"><h2>Details</h2></div>
   <dl style="display:grid;grid-template-columns:auto 1fr;gap:.4rem 1rem;font-size:.9rem;margin:0">
     {{if .Game.Modes}}<dt class="muted">Modes</dt><dd style="margin:0">{{range .Game.Modes}}{{.}} {{end}}</dd>{{end}}
     {{if .Game.Themes}}<dt class="muted">Themes</dt><dd style="margin:0">{{range .Game.Themes}}{{.}} {{end}}</dd>{{end}}
-    {{if .Game.ReleaseDates}}<dt class="muted">Releases</dt><dd style="margin:0">{{range .Game.ReleaseDates}}{{.Platform}} {{releaseDate .Date}}<br>{{end}}</dd>{{end}}
+    {{if .Game.ReleaseDates}}<dt class="muted">Releases</dt><dd style="margin:0">{{range .Game.ReleaseDates}}{{if .Platform}}{{.Platform}} · {{end}}{{if .Human}}{{.Human}}{{else}}{{releaseDate .Date}}{{end}}{{if .Region}} · {{.Region}}{{end}}{{if .Status}} · {{.Status}}{{end}}<br>{{end}}</dd>{{end}}
   </dl>
   <div class="mt1"><a class="btn btn-sm" href="/report?target_type=game&target_id={{.Game.ID}}">Report an issue</a>
     {{if .IsAdmin}}<form class="inline-form" method="post" action="/admin/games/{{.Game.Slug}}/refresh"><input type="hidden" name="_csrf" value="{{.CSRF}}"><button class="btn btn-sm" type="submit">Refresh from IGDB</button></form>{{end}}</div>
@@ -171,12 +226,6 @@
 </dialog>
 {{end}}
 
-{{if .Game.Editions}}
-<section class="section">
-  <div class="section-head"><h2>Editions & extras</h2></div>
-  {{template "game_grid" .Game.Editions}}
-</section>
-{{end}}
 {{if .Game.Contents}}
 <section class="section">
   <div class="section-head"><h2>Included in this bundle</h2></div>

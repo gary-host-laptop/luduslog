@@ -73,6 +73,7 @@ func (c *Client) authenticate(ctx context.Context) error {
 type apiNamed struct {
 	ID      int64  `json:"id"`
 	Name    string `json:"name"`
+	Slug    string `json:"slug"`
 	URL     string `json:"url"`
 	VideoID string `json:"video_id"`
 }
@@ -92,15 +93,21 @@ type apiTimeToBeat struct {
 	Completely int   `json:"completely"`
 }
 
+type apiGameType struct {
+	ID   int    `json:"id"`
+	Type string `json:"type"`
+}
+
 type apiGame struct {
-	ID               int64  `json:"id"`
-	Name             string `json:"name"`
-	Slug             string `json:"slug"`
-	Summary          string `json:"summary"`
-	FirstReleaseDate int64  `json:"first_release_date"`
-	Category         int    `json:"category"`
-	VersionParent    int64  `json:"version_parent"`
-	ParentGame       int64  `json:"parent_game"`
+	ID               int64        `json:"id"`
+	Name             string       `json:"name"`
+	Slug             string       `json:"slug"`
+	Summary          string       `json:"summary"`
+	FirstReleaseDate int64        `json:"first_release_date"`
+	Category         int          `json:"category"`
+	GameType         *apiGameType `json:"game_type"`
+	VersionParent    int64        `json:"version_parent"`
+	ParentGame       int64        `json:"parent_game"`
 	Cover            *struct {
 		URL string `json:"url"`
 	} `json:"cover"`
@@ -115,6 +122,10 @@ type apiGame struct {
 	Videos            []apiNamed       `json:"videos"`
 	Alternative       []apiNamed       `json:"alternative_names"`
 	Collections       []apiNamed       `json:"collections"`
+	Remakes           []apiNamed       `json:"remakes"`
+	Ports             []apiNamed       `json:"ports"`
+	Bundles           []apiNamed       `json:"bundles"`
+	ExpandedGames     []apiNamed       `json:"expanded_games"`
 	InvolvedCompanies []struct {
 		Developer bool `json:"developer"`
 		Publisher bool `json:"publisher"`
@@ -129,8 +140,10 @@ type apiGame struct {
 const gameFields = `fields id,name,slug,summary,first_release_date,category,version_parent,parent_game,cover.url,
 genres.name,platforms.id,platforms.name,release_dates.platform.id,release_dates.platform.name,release_dates.date,
 release_dates.region,release_dates.human,release_dates.status,themes.name,game_modes.name,screenshots.url,
-videos.video_id,alternative_names.name,collections.name,involved_companies.developer,involved_companies.publisher,
-involved_companies.company.name,aggregated_rating,rating_count;`
+videos.video_id,alternative_names.name,collections.name,game_type.id,game_type.type,
+remakes.id,remakes.name,remakes.slug,ports.id,ports.name,ports.slug,bundles.id,bundles.name,bundles.slug,
+expanded_games.id,expanded_games.name,expanded_games.slug,involved_companies.developer,
+involved_companies.publisher,involved_companies.company.name,aggregated_rating,rating_count;`
 
 // Games fetches up to limit games ordered by rating count.
 func (c *Client) Games(ctx context.Context, limit int) ([]models.Game, error) {
@@ -149,8 +162,11 @@ func (c *Client) GamesRange(ctx context.Context, limit, offset int, progress fun
 		if pageSize > 500 {
 			pageSize = 500
 		}
+		// Variant records (editions, remasters, ports) are imported too. Their
+		// parent_id keeps them out of the games index and search results while
+		// letting the parent page list them as editions.
 		body := fmt.Sprintf(`%s
-sort rating_count desc; where rating_count > 5 & version_parent = null; limit %d; offset %d;`, gameFields, pageSize, offset+done)
+sort rating_count desc; where rating_count > 5; limit %d; offset %d;`, gameFields, pageSize, offset+done)
 		games, err := c.query(ctx, body)
 		if err != nil {
 			return out, err
@@ -183,7 +199,7 @@ func (c *Client) Search(ctx context.Context, q string, limit int) ([]models.Game
 	}
 	escaped := strings.NewReplacer(`\`, `\\`, `"`, `\"`).Replace(q)
 	body := fmt.Sprintf(`%s
-search "%s"; where version_parent = null; limit %d;`, gameFields, escaped, limit)
+search "%s"; limit %d;`, gameFields, escaped, limit)
 	return c.query(ctx, body)
 }
 
@@ -191,7 +207,7 @@ search "%s"; where version_parent = null; limit %d;`, gameFields, escaped, limit
 func (c *Client) GameBySlug(ctx context.Context, slug string) (*models.Game, error) {
 	escaped := strings.NewReplacer(`\`, `\\`, `"`, `\"`).Replace(strings.TrimSpace(slug))
 	body := fmt.Sprintf(`%s
-where slug = "%s" & version_parent = null; limit 1;`, gameFields, escaped)
+where slug = "%s"; limit 1;`, gameFields, escaped)
 	games, err := c.query(ctx, body)
 	if err != nil {
 		return nil, err
@@ -353,7 +369,14 @@ func (c *Client) post(ctx context.Context, endpoint, body string, out any) error
 func mapGame(r apiGame) models.Game {
 	g := models.Game{
 		IGDBID: r.ID, Slug: r.Slug, Title: r.Name, Summary: r.Summary,
-		ReleaseStatus: "released", Category: categoryName(r.Category), RatingCount: r.RatingCount,
+		ReleaseStatus: "released", RatingCount: r.RatingCount,
+	}
+	// category is deprecated and now returns 0 for most records; game_type is
+	// its replacement and tells updates and ports apart from plain editions.
+	if r.GameType != nil {
+		g.Category = categoryName(r.GameType.ID)
+	} else {
+		g.Category = categoryName(r.Category)
 	}
 	if g.Slug == "" {
 		g.Slug = Slugify(r.Name)
@@ -414,6 +437,20 @@ func mapGame(r apiGame) models.Game {
 	if len(r.Collections) > 0 {
 		g.Franchise = r.Collections[0].Name
 	}
+	// version_parent is set on editions and remasters; parent_game is the
+	// broader DLC/expansion link. Both point at the base game.
+	if r.ParentGame > 0 {
+		g.ParentIGDBID = r.ParentGame
+	} else if r.VersionParent > 0 {
+		g.ParentIGDBID = r.VersionParent
+	}
+	if g.ParentIGDBID > 0 {
+		g.EditionName = editionName(r.Name)
+	}
+	g.Remakes = namedGames(r.Remakes)
+	g.Ports = namedGames(r.Ports)
+	g.Bundles = namedGames(r.Bundles)
+	g.Updates = namedGames(r.ExpandedGames)
 	for _, ic := range r.InvolvedCompanies {
 		role := ""
 		switch {
@@ -427,6 +464,33 @@ func mapGame(r apiGame) models.Game {
 		}
 	}
 	return g
+}
+
+// editionName turns "Base Game - Complete Edition" into "Complete Edition" so
+// the parent page can label a variant without a second IGDB lookup.
+func editionName(title string) string {
+	if i := strings.LastIndex(title, " - "); i >= 0 && i+3 < len(title) {
+		return strings.TrimSpace(title[i+3:])
+	}
+	if i := strings.LastIndex(title, ": "); i >= 0 && i+2 < len(title) {
+		return strings.TrimSpace(title[i+2:])
+	}
+	return strings.TrimSpace(title)
+}
+
+func namedGames(refs []apiNamed) []models.Game {
+	out := make([]models.Game, 0, len(refs))
+	for _, r := range refs {
+		if r.ID <= 0 {
+			continue
+		}
+		g := models.Game{IGDBID: r.ID, Title: r.Name, Slug: r.Slug}
+		if g.Slug == "" {
+			g.Slug = Slugify(r.Name)
+		}
+		out = append(out, g)
+	}
+	return out
 }
 
 func imageURL(raw, size string) string {

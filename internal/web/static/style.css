@@ -473,3 +473,13 @@ th { color: var(--muted); font-size: .76rem; text-transform: uppercase; letter-s
 .htmx-request .htmx-indicator { opacity: 1; }
 @media (prefers-reduced-motion: reduce) { *, *::before, *::after { transition: none !important; animation: none !important; scroll-behavior: auto !important; } }
 @media print { .site-header, .site-footer, .no-print { display: none; } body { background: #fff; color: #000; } }
+
+.related-tabs { display: none; flex-wrap: wrap; gap: .35rem; margin: 0 0 .75rem; }
+.related-games[data-enhanced] .related-tabs { display: flex; }
+.related-tab { font: inherit; font-size: .82rem; padding: .35rem .8rem; border: 0; border-radius: var(--radius-sm); background: var(--bg-elev); color: var(--muted); cursor: pointer; }
+.related-tab:hover { color: var(--text-bright); }
+.related-tab[aria-selected="true"] { background: var(--accent-soft); color: var(--text-bright); font-weight: 600; }
+.related-tab:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.game-role { display: inline-block; margin-left: .35rem; padding: .05rem .4rem; border-radius: var(--radius-sm); background: var(--bg-elev); color: var(--muted); font-size: .68rem; font-weight: 600; text-transform: uppercase; letter-spacing: .04em; }
+.related-group { margin-top: 1rem; }
+.related-group h3 { font-size: .9rem; margin: 0 0 .4rem; color: var(--muted); text-transform: uppercase; letter-spacing: .04em; }

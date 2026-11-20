@@ -36,6 +36,9 @@ func igdbSync(ctx context.Context, st *store.Store, cfg config.Config, limit, of
 			updated++
 		}
 	}
+	if err := st.ResolveGameParents(ctx); err != nil {
+		return err
+	}
 	fmt.Printf("IGDB sync complete: %d added, %d updated (next offset %d)\n", added, updated, offset+len(games))
 	return nil
 }

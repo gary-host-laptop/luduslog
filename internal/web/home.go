@@ -73,6 +73,7 @@ type gamesData struct {
 	YearTo      string
 	Release     string
 	Company     string
+	Franchise   string
 	Sort        string
 	Dir         string
 	MinRating   string
@@ -99,6 +100,7 @@ func (s *Server) gamesIndex(w http.ResponseWriter, r *http.Request) {
 		YearTo:          atoi(q.Get("to")),
 		Release:         q.Get("release"),
 		Company:         q.Get("company"),
+		Franchise:       strings.TrimSpace(q.Get("franchise")),
 		MinRating:       atof(q.Get("min_rating")),
 		Statuses:        nonEmpty(q["status"]),
 		Ownership:       q.Get("ownership"),
@@ -153,6 +155,7 @@ func (s *Server) gamesIndex(w http.ResponseWriter, r *http.Request) {
 		YearTo:      q.Get("to"),
 		Release:     f.Release,
 		Company:     f.Company,
+		Franchise:   f.Franchise,
 		Sort:        f.Sort,
 		Dir:         f.Dir,
 		MinRating:   q.Get("min_rating"),
@@ -425,7 +428,13 @@ func (s *Server) searchPage(w http.ResponseWriter, r *http.Request) {
 		data.Total = total
 		data.Pages = (total + limit - 1) / limit
 		if tab == "games" && page == 1 && total == 0 && s.igdb != nil {
-			data.Remote, _ = s.igdb.Search(r.Context(), q, 6)
+			remote, _ := s.igdb.Search(r.Context(), q, 6)
+			for _, g := range remote {
+				// Editions belong under their parent, not as separate suggestions.
+				if g.ParentIGDBID == 0 {
+					data.Remote = append(data.Remote, g)
+				}
+			}
 		}
 	}
 	s.render(w, r, "search", data)

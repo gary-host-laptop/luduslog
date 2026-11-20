@@ -6,6 +6,14 @@
 </a>
 {{end}}
 
+{{define "game_card_role"}}
+<a class="game-card" href="/games/{{.Game.Slug}}">
+  <div class="cover-wrap"><img class="game-cover" loading="lazy" src="{{cover .Game}}" alt="Cover of {{.Game.Title}}"></div>
+  <div class="game-title">{{.Game.Title}}</div>
+  <div class="game-meta">{{if .Game.ReleaseYear}}{{.Game.ReleaseYear}}{{end}}<span class="game-role">{{.Role}}</span></div>
+</a>
+{{end}}
+
 {{define "game_grid"}}
 <div class="grid grid-cards">
   {{range .}}{{template "game_card" .}}{{end}}
