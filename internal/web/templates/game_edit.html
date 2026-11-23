@@ -1,0 +1,117 @@
+{{define "content"}}
+<div class="section-head"><h1 class="mb0">{{.Heading}}</h1>{{if .Game}}<span class="muted">Slug <code>{{.Game.Slug}}</code>{{if .Game.IGDBID}} · IGDB {{.Game.IGDBID}}{{end}}</span>{{end}}</div>
+{{if .Errors}}
+<div class="alert alert-error"><ul class="mb0">{{range .Errors}}<li>{{.}}</li>{{end}}</ul></div>
+{{end}}
+<form class="card stack" method="post" action="{{.Action}}">
+  <input type="hidden" name="_csrf" value="{{.CSRF}}">
+
+  <h2>Basics</h2>
+  <div>
+    <label for="title">Title</label>
+    <input id="title" type="text" name="title" required maxlength="200" value="{{.Input.Title}}">
+  </div>
+  <div>
+    <label for="summary">Summary</label>
+    <textarea id="summary" name="summary" rows="4">{{.Input.Summary}}</textarea>
+  </div>
+  <div class="form-row">
+    <div><label for="cover_url">Cover URL</label><input id="cover_url" type="url" name="cover_url" value="{{.Input.CoverURL}}"></div>
+    <div><label for="banner_url">Banner URL</label><input id="banner_url" type="url" name="banner_url" value="{{.Input.BannerURL}}"></div>
+  </div>
+  <div class="form-row">
+    <div><label for="release_date">Release date</label><input id="release_date" type="date" name="release_date" value="{{.Input.ReleaseDate}}"></div>
+    <div><label for="release_year">Release year</label><input id="release_year" type="number" name="release_year" min="1950" max="2100" value="{{if .Input.ReleaseYear}}{{.Input.ReleaseYear}}{{end}}"></div>
+    <div>
+      <label for="release_status">Release status</label>
+      <select id="release_status" name="release_status">
+        {{$status := .Input.ReleaseStatus}}
+        <option value="released" {{if or (eq $status "") (eq $status "released")}}selected{{end}}>Released</option>
+        <option value="upcoming" {{if eq $status "upcoming"}}selected{{end}}>Upcoming</option>
+        <option value="early_access" {{if eq $status "early_access"}}selected{{end}}>Early access</option>
+        <option value="cancelled" {{if eq $status "cancelled"}}selected{{end}}>Cancelled</option>
+        <option value="rumored" {{if eq $status "rumored"}}selected{{end}}>Rumored</option>
+        <option value="delisted" {{if eq $status "delisted"}}selected{{end}}>Delisted</option>
+      </select>
+    </div>
+    <div>
+      <label for="category">Category</label>
+      <select id="category" name="category">
+        {{$category := .Input.Category}}
+        <option value="main_game" {{if or (eq $category "") (eq $category "main_game")}}selected{{end}}>Main game</option>
+        <option value="dlc_addon" {{if eq $category "dlc_addon"}}selected{{end}}>DLC add-on</option>
+        <option value="expansion" {{if eq $category "expansion"}}selected{{end}}>Expansion</option>
+        <option value="standalone_expansion" {{if eq $category "standalone_expansion"}}selected{{end}}>Standalone expansion</option>
+        <option value="remake" {{if eq $category "remake"}}selected{{end}}>Remake</option>
+        <option value="remaster" {{if eq $category "remaster"}}selected{{end}}>Remaster</option>
+        <option value="expanded_game" {{if eq $category "expanded_game"}}selected{{end}}>Expanded game</option>
+        <option value="port" {{if eq $category "port"}}selected{{end}}>Port</option>
+        <option value="mod" {{if eq $category "mod"}}selected{{end}}>Mod</option>
+        <option value="episode" {{if eq $category "episode"}}selected{{end}}>Episode</option>
+        <option value="season" {{if eq $category "season"}}selected{{end}}>Season</option>
+        <option value="pack" {{if eq $category "pack"}}selected{{end}}>Pack</option>
+        <option value="bundle" {{if eq $category "bundle"}}selected{{end}}>Bundle</option>
+        <option value="update" {{if eq $category "update"}}selected{{end}}>Update</option>
+        <option value="fork" {{if eq $category "fork"}}selected{{end}}>Fork</option>
+      </select>
+    </div>
+  </div>
+  <div class="form-row">
+    <div><label for="franchise">Franchise / series</label><input id="franchise" type="text" name="franchise" value="{{.Input.Franchise}}"></div>
+    <div><label for="edition_name">Edition name</label><input id="edition_name" type="text" name="edition_name" value="{{.Input.EditionName}}"></div>
+    <div><label for="parent_slug">Parent game slug</label><input id="parent_slug" type="text" name="parent_slug" value="{{.Input.ParentSlug}}"></div>
+  </div>
+  <div class="row">
+    <label class="check"><input type="checkbox" name="adult" value="1" {{if .Input.Adult}}checked{{end}}> Adult</label>
+    <label class="check"><input type="checkbox" name="restricted" value="1" {{if .Input.Restricted}}checked{{end}}> Restricted</label>
+  </div>
+
+  <h2>Associations</h2>
+  <div class="form-row">
+    <div><label for="platforms">Platforms <span class="muted">(one per line, names)</span></label><textarea id="platforms" name="platforms" rows="3">{{.Input.PlatformLines}}</textarea></div>
+    <div><label for="genres">Genres <span class="muted">(one per line)</span></label><textarea id="genres" name="genres" rows="3">{{.Input.GenreLines}}</textarea></div>
+    <div><label for="themes">Themes <span class="muted">(one per line)</span></label><textarea id="themes" name="themes" rows="3">{{.Input.ThemeLines}}</textarea></div>
+  </div>
+  <div class="form-row">
+    <div><label for="modes">Modes <span class="muted">(one per line)</span></label><textarea id="modes" name="modes" rows="3">{{.Input.ModeLines}}</textarea></div>
+    <div><label for="alt_names">Also known as <span class="muted">(one per line)</span></label><textarea id="alt_names" name="alt_names" rows="3">{{.Input.AltNameLines}}</textarea></div>
+  </div>
+  <div>
+    <label for="companies">Companies <span class="muted">(one per line: Name | developer, publisher, porting, supporting)</span></label>
+    <textarea id="companies" name="companies" rows="4">{{.Input.CompanyLines}}</textarea>
+  </div>
+  <div>
+    <label for="releases">Releases <span class="muted">(one per line: Platform | Region | YYYY-MM-DD | status)</span></label>
+    <textarea id="releases" name="releases" rows="3">{{.Input.ReleaseLines}}</textarea>
+  </div>
+
+  <h2>Media and length</h2>
+  <div class="form-row">
+    <div><label for="screenshots">Screenshots <span class="muted">(one URL per line)</span></label><textarea id="screenshots" name="screenshots" rows="3">{{.Input.ScreenshotLines}}</textarea></div>
+    <div><label for="videos">Videos <span class="muted">(one URL per line)</span></label><textarea id="videos" name="videos" rows="3">{{.Input.VideoLines}}</textarea></div>
+  </div>
+  <div class="form-row">
+    <div><label for="time_hastily">Main story (minutes)</label><input id="time_hastily" type="number" min="0" name="time_hastily" value="{{if .Input.TimeHastily}}{{.Input.TimeHastily}}{{end}}"></div>
+    <div><label for="time_normally">Main + extras (minutes)</label><input id="time_normally" type="number" min="0" name="time_normally" value="{{if .Input.TimeNormally}}{{.Input.TimeNormally}}{{end}}"></div>
+    <div><label for="time_completely">Completionist (minutes)</label><input id="time_completely" type="number" min="0" name="time_completely" value="{{if .Input.TimeCompletely}}{{.Input.TimeCompletely}}{{end}}"></div>
+  </div>
+
+  <h2>Related games</h2>
+  <p class="muted mb0">Enter one game slug per line.</p>
+  <div class="form-row">
+    <div><label for="related_remakes">Remakes</label><textarea id="related_remakes" name="related_remakes" rows="2">{{.Input.RelationLines "remakes"}}</textarea></div>
+    <div><label for="related_updates">Updates</label><textarea id="related_updates" name="related_updates" rows="2">{{.Input.RelationLines "updates"}}</textarea></div>
+    <div><label for="related_ports">Ports</label><textarea id="related_ports" name="related_ports" rows="2">{{.Input.RelationLines "ports"}}</textarea></div>
+  </div>
+  <div class="form-row">
+    <div><label for="related_bundles">Bundles</label><textarea id="related_bundles" name="related_bundles" rows="2">{{.Input.RelationLines "bundles"}}</textarea></div>
+    <div><label for="related_related">Related</label><textarea id="related_related" name="related_related" rows="2">{{.Input.RelationLines "related"}}</textarea></div>
+    <div><label for="related_contents">Bundle contents</label><textarea id="related_contents" name="related_contents" rows="2">{{.Input.RelationLines "contents"}}</textarea></div>
+  </div>
+
+  <div class="btn-group">
+    <button class="btn btn-primary" type="submit">{{if .Game}}Save game{{else}}Create game{{end}}</button>
+    <a class="btn" href="{{if .Game}}/games/{{.Game.Slug}}{{else}}/games{{end}}">Cancel</a>
+  </div>
+</form>
+{{end}}

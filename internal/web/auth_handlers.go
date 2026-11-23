@@ -75,6 +75,7 @@ func (s *Server) loginSubmit(w http.ResponseWriter, r *http.Request) {
 		s.serverError(w, r, err)
 		return
 	}
+	s.st.CheckBadges(r.Context(), user.ID)
 	s.st.AddActivity(r.Context(), user.ID, "joined", nil, nil, nil, "", "public")
 	if next != "" && strings.HasPrefix(next, "/") && !strings.HasPrefix(next, "//") {
 		s.redirect(w, r, next)

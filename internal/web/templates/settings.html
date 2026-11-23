@@ -37,6 +37,19 @@
       <label class="check"><input type="checkbox" name="manually_approves" value="1" {{if .User.ManuallyApproves}}checked{{end}}> Manually approve follow requests</label>
       <div><button class="btn btn-primary" type="submit">Save profile</button></div>
     </form>
+    <div class="card stack" id="trophy">
+      <h2>Highlighted trophy</h2>
+      <p class="muted">Choose one earned trophy to show on your profile. Selecting “No trophy” clears it.</p>
+      <form class="row" method="post" action="/settings/trophy">
+        <input type="hidden" name="_csrf" value="{{.CSRF}}">
+        <select id="trophy-badge" name="badge" aria-label="Highlighted trophy">
+          <option value="">No trophy</option>
+          {{range .Badges}}<option value="{{.Key}}"{{if eq $.User.FeaturedBadge .Key}} selected{{end}}>{{.Title}}</option>{{end}}
+        </select>
+        <button class="btn btn-sm" type="submit">Save trophy</button>
+      </form>
+      {{if not .Badges}}<p class="field-hint">Earn your first trophy to highlight it here.</p>{{end}}
+    </div>
     <div class="card" id="favourites">
       <h2>Favourite games</h2>
       <p class="muted">Pick up to five games to show on your profile Overview. Favourites are separate from likes.</p>

@@ -20,16 +20,24 @@ g.avg_rating,g.rating_count,g.weighted,g.popularity,g.plays,g.completions,g.back
 g.likes,g.lists_count,g.reviews,g.time_hastily,g.time_normally,g.time_completely,g.updated_at,g.synced_at`
 
 func scanGame(row scanner) (*models.Game, error) {
+	return scanGameWith(row)
+}
+
+// scanGameWith scans the standard game columns followed by any query-specific
+// values supplied by the caller.
+func scanGameWith(row scanner, extra ...any) (*models.Game, error) {
 	var g models.Game
 	var parent sql.NullInt64
 	var updated string
 	var synced sql.NullString
 	var adult, restricted int
 	var hastily, normally, completely int
-	err := row.Scan(&g.ID, &g.IGDBID, &g.Slug, &g.Title, &g.Summary, &g.CoverURL, &g.BannerURL, &g.ReleaseDate,
+	dest := []any{&g.ID, &g.IGDBID, &g.Slug, &g.Title, &g.Summary, &g.CoverURL, &g.BannerURL, &g.ReleaseDate,
 		&g.ReleaseYear, &g.ReleaseStatus, &g.Category, &parent, &g.EditionName, &g.Franchise, &adult, &restricted,
 		&g.AvgRating, &g.RatingCount, &g.Weighted, &g.Popularity, &g.Plays, &g.Completions, &g.Backlogs,
-		&g.Wishlists, &g.Playing, &g.Likes, &g.ListsCount, &g.Reviews, &hastily, &normally, &completely, &updated, &synced)
+		&g.Wishlists, &g.Playing, &g.Likes, &g.ListsCount, &g.Reviews, &hastily, &normally, &completely, &updated, &synced}
+	dest = append(dest, extra...)
+	err := row.Scan(dest...)
 	if err != nil {
 		return nil, err
 	}
@@ -689,7 +697,7 @@ func (s *Store) SaveGame(ctx context.Context, g *models.Game) (*models.Game, err
 		search_text=excluded.search_text,media=excluded.media,time_hastily=excluded.time_hastily,
 		time_normally=excluded.time_normally,time_completely=excluded.time_completely,
 		updated_at=excluded.updated_at,synced_at=excluded.synced_at`,
-		g.IGDBID, g.Slug, g.Title, sortTitle(g.Title), g.Summary, g.CoverURL, g.BannerURL, nullStr(g.ReleaseDate),
+		nullInt64(g.IGDBID), g.Slug, g.Title, sortTitle(g.Title), g.Summary, g.CoverURL, g.BannerURL, nullStr(g.ReleaseDate),
 		nullInt(g.ReleaseYear), g.ReleaseStatus, g.Category, parent, g.ParentIGDBID, g.EditionName, g.Franchise, b2i(g.Adult),
 		b2i(g.Restricted), search, string(media), hastily, normally, completely, now, now, now)
 	if err != nil {
@@ -982,6 +990,13 @@ func nullStr(s string) any {
 		return nil
 	}
 	return s
+}
+
+func nullInt64(n int64) any {
+	if n == 0 {
+		return nil
+	}
+	return n
 }
 
 func nullInt(n int) any {

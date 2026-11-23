@@ -13,6 +13,7 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 
 	"luduslog/internal/auth"
 	"luduslog/internal/config"
@@ -167,9 +168,14 @@ func TestGameCoverPanelWeb(t *testing.T) {
 	}
 	libStart := strings.Index(body, `class="game-library-card"`)
 	likeStart := strings.Index(body, `class="game-like"`)
-	headStart := strings.Index(body, `class="library-card-head"`)
-	if libStart < 0 || likeStart < libStart || headStart < likeStart {
-		t.Fatal("interactive like control is not at the top of the library card")
+	ratingStart := strings.Index(body, `class="game-user-rating"`)
+	logStart := strings.Index(body, `class="game-log-actions"`)
+	heroStatusStart := strings.Index(body, `class="status-bar"`)
+	if libStart < 0 || likeStart < libStart || ratingStart < likeStart || logStart < ratingStart || heroStatusStart < logStart {
+		t.Fatal("library card should order like, stars, log actions, then play status")
+	}
+	if strings.Contains(body, "In your library") {
+		t.Fatal("library card still shows the 'In your library' label")
 	}
 	statStart := strings.Index(body, `class="stat-strip"`)
 	metaStart := strings.Index(body, `class="game-meta-cards"`)
@@ -292,6 +298,7 @@ func TestGameTimeToBeatWeb(t *testing.T) {
 	for _, want := range []string{
 		`class="game-meta-cards"`,
 		`class="time-blocks"`,
+		`class="time-part"`, `>5H</strong>`, `>30M</strong>`,
 		`Main story`, `>5h 30m<`,
 		`Main + extras`, `>8h<`,
 		`Completionist`, `>15h<`,
@@ -465,9 +472,13 @@ func TestFavouriteGamesWeb(t *testing.T) {
 	}
 	favPos := strings.Index(profile, "<h2>Favourite games</h2>")
 	reviewPos := strings.Index(profile, "<h2>Recent reviews</h2>")
-	journalPos := strings.Index(profile, "<h2>Journal</h2>")
-	if favPos < 0 || reviewPos < 0 || journalPos < 0 || favPos > reviewPos || favPos > journalPos {
+	if favPos < 0 || reviewPos < 0 || favPos > reviewPos {
 		t.Fatal("favourite games are not the first profile overview section")
+	}
+	for _, removed := range []string{"<h2>Journal</h2>", "<h2>Lists</h2>", "<h2>Friends</h2>"} {
+		if strings.Contains(profile, removed) {
+			t.Fatalf("profile overview still contains %s", removed)
+		}
 	}
 	_, reviews := getBody(t, client, ts.URL+"/users/alice?tab=reviews")
 	if strings.Contains(reviews, "Favourite games") {
@@ -486,6 +497,63 @@ func TestFavouriteGamesWeb(t *testing.T) {
 	}
 	if got := st.FavoriteGames(ctx, alice.ID, 5); len(got) != 4 {
 		t.Fatalf("favourites after remove = %d", len(got))
+	}
+}
+
+func TestProfileOverviewRecentlyPlayed(t *testing.T) {
+	ts, st := testServer(t)
+	ctx := context.Background()
+	alice, _ := st.CreateUser(ctx, "recently", "recently@example.test", "hash", false)
+	playing, _ := st.SaveGame(ctx, &models.Game{IGDBID: -701, Slug: "playing-now", Title: "Playing Now", ReleaseStatus: "released"})
+	played, _ := st.SaveGame(ctx, &models.Game{IGDBID: -702, Slug: "finished-game", Title: "Finished Game", ReleaseStatus: "released"})
+	backlog, _ := st.SaveGame(ctx, &models.Game{IGDBID: -703, Slug: "backlog-only", Title: "Backlog Only", ReleaseStatus: "released"})
+
+	if err := st.SetStatusFlag(ctx, alice.ID, playing.ID, "playing", true); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.SetPlayedCount(ctx, alice.ID, played.ID, 1); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.CreateLog(ctx, store.LogInput{UserID: alice.ID, GameID: played.ID, Rating: 8, Status: "played"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.SetStatusFlag(ctx, alice.ID, backlog.ID, "backlog", true); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.DB.ExecContext(ctx, `UPDATE statuses SET playing_at=?,updated_at=? WHERE user_id=? AND game_id=?`,
+		"2026-11-20T12:00:00Z", "2026-11-20T12:00:00Z", alice.ID, playing.ID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.DB.ExecContext(ctx, `UPDATE statuses SET played_at=?,updated_at=? WHERE user_id=? AND game_id=?`,
+		"2026-11-21T12:00:00Z", "2026-11-21T12:00:00Z", alice.ID, played.ID); err != nil {
+		t.Fatal(err)
+	}
+
+	_, body := getBody(t, http.DefaultClient, ts.URL+"/users/recently")
+	start := strings.Index(body, "<h2>Recently played</h2>")
+	if start < 0 {
+		t.Fatal("profile overview is missing Recently played")
+	}
+	end := strings.Index(body[start:], "</section>")
+	if end < 0 {
+		t.Fatal("Recently played section was not closed")
+	}
+	section := body[start : start+end]
+	for _, want := range []string{"Playing Now", "Finished Game", "Playing", "Played", "November 20, 2026", "November 21, 2026", "8.0 / 10"} {
+		if !strings.Contains(section, want) {
+			t.Errorf("Recently played section missing %q", want)
+		}
+	}
+	if strings.Contains(section, "Backlog Only") {
+		t.Error("backlog-only game appeared in Recently played")
+	}
+	if strings.Index(section, "Finished Game") > strings.Index(section, "Playing Now") {
+		t.Error("Recently played games are not ordered newest first")
+	}
+	for _, removed := range []string{"<h2>Journal</h2>", "<h2>Lists</h2>", "<h2>Friends</h2>"} {
+		if strings.Contains(body, removed) {
+			t.Fatalf("profile overview still contains %s", removed)
+		}
 	}
 }
 
@@ -638,4 +706,172 @@ func TestAccountDeletionWeb(t *testing.T) {
 			t.Fatal("admin deleted themselves from the admin page")
 		}
 	})
+}
+
+func TestReviewListingControls(t *testing.T) {
+	ts, st := testServer(t)
+	ctx := context.Background()
+	alice, _ := st.CreateUser(ctx, "reviewalice", "reviewalice@example.test", "hash", false)
+	bob, _ := st.CreateUser(ctx, "reviewbob", "reviewbob@example.test", "hash", false)
+	carol, _ := st.CreateUser(ctx, "reviewcarol", "reviewcarol@example.test", "hash", false)
+	st.Follow(ctx, alice.ID, bob.ID)
+	st.Follow(ctx, bob.ID, alice.ID)
+	st.Follow(ctx, alice.ID, carol.ID)
+	game, _ := st.SaveGame(ctx, &models.Game{IGDBID: -503, Slug: "review-feed", Title: "Review Feed", ReleaseStatus: "released"})
+	for i := 0; i < 21; i++ {
+		if _, err := st.CreateLog(ctx, store.LogInput{UserID: bob.ID, GameID: game.ID, Review: "bob review " + strconv.Itoa(i), Rating: float64(i%10 + 1), Status: "played"}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := st.CreateLog(ctx, store.LogInput{UserID: carol.ID, GameID: game.ID, Review: "carol review", Rating: 7, Status: "played"}); err != nil {
+		t.Fatal(err)
+	}
+	client, _ := authedClient(t, ts, st, alice)
+
+	code, body := getBody(t, client, ts.URL+"/reviews?tab=friends&sort=rating")
+	if code != http.StatusOK {
+		t.Fatalf("global reviews = %d", code)
+	}
+	for _, want := range []string{
+		`href="/reviews?tab=all&amp;sort=rating"`,
+		`href="/reviews?tab=friends&amp;sort=popular"`,
+		`href="/reviews?tab=following&amp;sort=rating"`,
+		"reviewbob",
+	} {
+		if !strings.Contains(body, want) {
+			t.Errorf("global reviews missing %q", want)
+		}
+	}
+	if strings.Contains(body, "reviewcarol") {
+		t.Error("friends tab included a non-mutual follow")
+	}
+
+	code, body = getBody(t, client, ts.URL+"/games/review-feed/reviews?tab=following&sort=oldest")
+	if code != http.StatusOK {
+		t.Fatalf("game reviews = %d", code)
+	}
+	for _, want := range []string{
+		`href="/games/review-feed/reviews?tab=all&amp;sort=oldest"`,
+		`href="/games/review-feed/reviews?tab=following&amp;sort=popular"`,
+		"reviewbob",
+		"page=2",
+	} {
+		if !strings.Contains(body, want) {
+			t.Errorf("game reviews missing %q", want)
+		}
+	}
+
+	code, body = getBody(t, client, ts.URL+"/games/review-feed/reviews?tab=following&sort=oldest&page=2")
+	if code != http.StatusOK || !strings.Contains(body, "reviewcarol") {
+		t.Fatalf("game reviews page 2 = %d: %s", code, body[:min(len(body), 500)])
+	}
+
+	_, profile := getBody(t, client, ts.URL+"/users/reviewalice?tab=reviews")
+	if strings.Contains(profile, "tabs-sort") || strings.Contains(profile, "sort=rating") {
+		t.Error("profile reviews gained listing controls")
+	}
+}
+
+func TestTrophyHighlightWeb(t *testing.T) {
+	ts, st := testServer(t)
+	ctx := context.Background()
+	alice, _ := st.CreateUser(ctx, "trophyalice", "trophyalice@example.test", "hash", false)
+	old := time.Now().UTC().Add(-25 * time.Hour).Format(time.RFC3339)
+	if _, err := st.DB.ExecContext(ctx, `UPDATE users SET created_at=? WHERE id=?`, old, alice.ID); err != nil {
+		t.Fatal(err)
+	}
+	client, sess := authedClient(t, ts, st, alice)
+	plain := noRedirectClient(client)
+
+	// Settings is the only place with a trophy picker.
+	code, settings := getBody(t, client, ts.URL+"/settings")
+	if code != http.StatusOK {
+		t.Fatalf("settings = %d", code)
+	}
+	for _, want := range []string{
+		`id="trophy"`, `action="/settings/trophy"`, `<option value="n00b"`, "No trophy",
+	} {
+		if !strings.Contains(settings, want) {
+			t.Errorf("settings missing %q", want)
+		}
+	}
+	if strings.Contains(settings, `action="/users/trophyalice/trophy"`) {
+		t.Error("settings still uses the old trophy endpoint")
+	}
+
+	// Unearned trophies are rejected.
+	if got := postStatus(t, plain, ts.URL+"/settings/trophy", url.Values{"_csrf": {sess.CSRF}, "badge": {"ten_games"}}); got != http.StatusSeeOther {
+		t.Fatalf("invalid trophy = %d", got)
+	}
+	updated, _ := st.UserByID(ctx, alice.ID)
+	if updated.FeaturedBadge != "" {
+		t.Fatalf("invalid trophy stored as %q", updated.FeaturedBadge)
+	}
+
+	// Selecting an earned trophy highlights it on the read-only profile.
+	if got := postStatus(t, plain, ts.URL+"/settings/trophy", url.Values{"_csrf": {sess.CSRF}, "badge": {"n00b"}}); got != http.StatusSeeOther {
+		t.Fatalf("highlight trophy = %d", got)
+	}
+	updated, _ = st.UserByID(ctx, alice.ID)
+	if updated.FeaturedBadge != "n00b" {
+		t.Fatalf("featured trophy = %q, want n00b", updated.FeaturedBadge)
+	}
+	_, body := getBody(t, client, ts.URL+"/users/trophyalice")
+	for _, want := range []string{`href="/users/trophyalice/trophies"`, `class="profile-trophy-card"`, "<strong>n00b</strong>", "Earned"} {
+		if !strings.Contains(body, want) {
+			t.Errorf("profile missing %q", want)
+		}
+	}
+	if strings.Contains(body, `action="/users/trophyalice/trophy"`) || strings.Contains(body, "profile-trophy-form") {
+		t.Error("profile still contains a trophy form")
+	}
+
+	// The trophies page is read-only, including for the owner.
+	_, trophies := getBody(t, client, ts.URL+"/users/trophyalice/trophies")
+	for _, want := range []string{"1 of 11 earned", "Highlighted"} {
+		if !strings.Contains(trophies, want) {
+			t.Errorf("trophies page missing %q", want)
+		}
+	}
+	for _, old := range []string{">Highlight</button>", "Clear highlighted trophy", `action="/users/trophyalice/trophy"`} {
+		if strings.Contains(trophies, old) {
+			t.Errorf("trophies page is not read-only: %q", old)
+		}
+	}
+	if got := postStatus(t, plain, ts.URL+"/users/trophyalice/trophy", url.Values{"_csrf": {sess.CSRF}, "badge": {""}}); got != http.StatusNotFound {
+		t.Fatalf("old trophy endpoint = %d, want 404", got)
+	}
+
+	// Clearing is done from settings too.
+	if got := postStatus(t, plain, ts.URL+"/settings/trophy", url.Values{"_csrf": {sess.CSRF}, "badge": {""}}); got != http.StatusSeeOther {
+		t.Fatalf("clear trophy = %d", got)
+	}
+	updated, _ = st.UserByID(ctx, alice.ID)
+	if updated.FeaturedBadge != "" {
+		t.Fatalf("featured trophy not cleared: %q", updated.FeaturedBadge)
+	}
+	_, body = getBody(t, client, ts.URL+"/users/trophyalice")
+	if !strings.Contains(body, "No trophy highlighted yet.") {
+		t.Error("cleared profile still shows a trophy")
+	}
+
+	// Viewing your own year recap awards the Recap trophy, and stats link to it.
+	year := strconv.Itoa(time.Now().UTC().Year())
+	if code, _ := getBody(t, client, ts.URL+"/users/trophyalice/year/"+year); code != http.StatusOK {
+		t.Fatalf("year recap = %d", code)
+	}
+	badges, _ := st.BadgesFor(ctx, alice.ID)
+	found := false
+	for _, b := range badges {
+		if b.Key == "year_in_review" && b.EarnedAt != nil {
+			found = true
+		}
+	}
+	if !found {
+		t.Error("viewing the year recap did not award year_in_review")
+	}
+	code, stats := getBody(t, client, ts.URL+"/users/trophyalice/stats")
+	if code != http.StatusOK || !strings.Contains(stats, "Recap") || !strings.Contains(stats, "n00b") {
+		t.Fatalf("stats page does not render earned trophies (%d)", code)
+	}
 }

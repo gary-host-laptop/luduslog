@@ -1,0 +1,67 @@
+{{define "content"}}
+<header class="row between user-log-head">
+  <div>
+    <h1 class="mb0">{{.Profile.Username}} · {{.Game.Title}}</h1>
+    <div class="muted">
+      <a href="/users/{{.Profile.Username}}">{{.Profile.Username}}</a>
+      · <a href="/games/{{.Game.Slug}}">{{.Game.Title}}</a>
+    </div>
+  </div>
+  <a class="btn btn-sm" href="/games/{{.Game.Slug}}">Game page</a>
+</header>
+
+<section class="card mt2 user-log-summary">
+  <div class="row between">
+    <div class="row user-log-id">
+      <img class="avatar avatar-md" src="{{avatar .Profile}}" alt="">
+      <div>
+        <a href="/users/{{.Profile.Username}}"><strong>{{.Profile.Username}}</strong></a>
+        <div class="muted">Log for <a href="/games/{{.Game.Slug}}">{{.Game.Title}}</a></div>
+      </div>
+      <a href="/games/{{.Game.Slug}}"><img class="game-cover user-log-cover" src="{{cover .Game}}" alt="Cover of {{.Game.Title}}"></a>
+    </div>
+    {{if .IsMe}}<a class="btn btn-sm" href="/users/{{.Profile.Username}}?tab=logs">Your journal</a>{{end}}
+  </div>
+  <div class="pill-row">
+    {{if gt .Status.Played 0}}<span class="pill"><i class="ph-light ph-check-circle icon" aria-hidden="true"></i> Played {{.Status.Played}}×</span>{{end}}
+    {{if .Status.Playing}}<span class="pill"><i class="ph-light ph-play icon" aria-hidden="true"></i> Playing</span>{{end}}
+    {{if .Status.Backlog}}<span class="pill"><i class="ph-light ph-stack icon" aria-hidden="true"></i> Backlog</span>{{end}}
+    {{if .Status.Wishlist}}<span class="pill"><i class="ph-light ph-heart icon" aria-hidden="true"></i> Wishlist</span>{{end}}
+    {{if .Rating}}<span class="pill"><i class="ph-fill ph-star icon" aria-hidden="true"></i> {{rating .Rating 10}} / 10</span>{{end}}
+    {{if .Playtime}}<span class="pill"><i class="ph-light ph-clock icon" aria-hidden="true"></i> {{hours .Playtime}}</span>{{end}}
+  </div>
+</section>
+
+{{if .Logs}}
+<section class="section user-log-entries">
+  {{range .Logs}}
+  <article class="card log-entry log-entry-detail" id="log-{{.ID}}">
+    <div class="log-head">
+      <span>{{timeago .CreatedAt}}</span>
+      <span class="pill">{{.Status}}</span>
+      {{if .Rating}}<span>{{stars .Rating 5}}</span><span>{{rating .Rating 10}} / 10</span>{{end}}
+      {{if .Replay}}<span class="pill">Replay</span>{{end}}
+      {{if .Mastered}}<span class="pill">Mastered</span>{{end}}
+      {{if .Draft}}<span class="draft-badge">Draft</span>{{end}}
+      {{if .Spoiler}}<span class="pill">Spoilers</span>{{end}}
+    </div>
+    {{if .Name}}<h2 class="log-title">{{if .Review}}<a href="{{reviewPath .}}">{{.Name}}</a>{{else}}{{.Name}}{{end}}</h2>{{end}}
+    <div class="muted log-dates">
+      {{if .StartedAt}}<span>Started {{.StartedAt}}</span>{{end}}
+      {{if .FinishedAt}}<span>Finished {{.FinishedAt}}</span>{{end}}
+      {{if .PlatformName}}<span>Platform {{.PlatformName}}</span>{{end}}
+      {{if .PlayedOnName}}<span>Played on {{.PlayedOnName}}</span>{{end}}
+      {{if .Playtime}}<span>{{hours .Playtime}}</span>{{end}}
+    </div>
+    {{template "review_preview" .}}
+    {{if .Review}}<div class="log-actions"><a href="{{reviewPath .}}">Read the full review →</a></div>{{end}}
+  </article>
+  {{end}}
+</section>
+{{else}}
+<div class="empty mt2">
+  <h3>No log entries yet</h3>
+  <p>{{if .IsMe}}<a href="/games/{{.Game.Slug}}/log">Log this game</a> to start your diary for it.{{else}}{{.Profile.Username}} has not logged this game yet.{{end}}</p>
+</div>
+{{end}}
+{{end}}

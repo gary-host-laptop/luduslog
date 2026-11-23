@@ -6,13 +6,16 @@
 <table><thead><tr><th>User</th>{{if .IsAdmin}}<th>Email</th><th>Role</th>{{end}}<th>Status</th><th>Joined</th><th>Actions</th></tr></thead><tbody>
 {{range .Users}}
 <tr>
-  <td><a href="/users/{{.Username}}">{{.Username}}</a> <span class="pill">{{.RoleLabel}}</span></td>
+  <td><a href="/users/{{.Username}}">{{.Username}}</a> <span class="pill">{{.RoleLabel}}</span>{{if .CatalogEditor}} <span class="pill">catalog editor</span>{{end}}</td>
   {{if $.IsAdmin}}<td class="muted">{{.Email}}{{if not .EmailVerified}} <span class="pill">unverified</span>{{end}}</td>
   <td>{{if ne .ID $.User.ID}}<form class="inline-form" method="post" action="/admin/users/{{.ID}}/role"><input type="hidden" name="_csrf" value="{{$.CSRF}}"><select name="role" aria-label="Role for {{.Username}}"><option value="user" {{if eq .Role "user"}}selected{{end}}>user</option><option value="mod" {{if eq .Role "mod"}}selected{{end}}>mod</option><option value="admin" {{if eq .Role "admin"}}selected{{end}}>admin</option></select><button class="linklike" type="submit">Save</button></form>{{else}}<span class="muted">you</span>{{end}}</td>{{end}}
   <td>{{if .DeactivatedAt}}<span class="pill">suspended</span>{{else if not .Approved}}<span class="pill">pending</span>{{else}}active{{end}}</td>
   <td class="muted">{{date .CreatedAt}}</td>
   <td>
     <form class="inline-form" method="post" action="/admin/users/{{.ID}}/suspend"><input type="hidden" name="_csrf" value="{{$.CSRF}}"><input type="hidden" name="reason" value="moderation action"><button class="linklike" type="submit">{{if .DeactivatedAt}}Restore{{else}}Suspend{{end}}</button></form>
+    {{if $.IsAdmin}}
+    <form class="inline-form" method="post" action="/admin/users/{{.ID}}/catalog"><input type="hidden" name="_csrf" value="{{$.CSRF}}"><input type="hidden" name="enabled" value="{{if .CatalogEditor}}0{{else}}1{{end}}"><button class="linklike" type="submit">{{if .CatalogEditor}}Revoke catalog editor{{else}}Grant catalog editor{{end}}</button></form>
+    {{end}}
     {{if and $.IsAdmin (ne .ID $.User.ID)}}
     <form class="inline-form" method="post" action="/admin/users/{{.ID}}/delete" onsubmit="return confirm('Permanently delete {{.Username}} and all their data? This cannot be undone.')"><input type="hidden" name="_csrf" value="{{$.CSRF}}"><button class="linklike" type="submit">Delete</button></form>
     {{end}}

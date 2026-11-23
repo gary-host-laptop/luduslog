@@ -192,7 +192,6 @@ type gameData struct {
 	Friends      []friendInteraction
 	Covers       map[int64]string
 	MyCover      string
-	Platforms    []models.Platform
 	AdultBlocked bool
 	LoggedIn     bool
 	Owned        *models.LibraryEntry
@@ -202,9 +201,33 @@ type gameData struct {
 }
 
 type friendInteraction struct {
-	User   *models.User
-	Rating float64
-	Status models.Status
+	User        *models.User
+	Rating      float64
+	Status      models.Status
+	Description string
+}
+
+func friendInteractionDescription(username string, rating float64, st models.Status) string {
+	parts := make([]string, 0, 3)
+	if rating > 0 {
+		parts = append(parts, "rated it "+strconv.FormatFloat(rating, 'f', -1, 64)+"/10")
+	}
+	if st.Playing {
+		parts = append(parts, "is playing it")
+	}
+	if st.Played > 0 {
+		parts = append(parts, "has played it")
+	}
+	if st.Backlog {
+		parts = append(parts, "has it in their backlog")
+	}
+	if st.Wishlist {
+		parts = append(parts, "wants it on their wishlist")
+	}
+	if len(parts) == 0 {
+		return username + " interacted with this game"
+	}
+	return username + " " + strings.Join(parts, ", ")
 }
 
 func (s *Server) gamePage(w http.ResponseWriter, r *http.Request) {
@@ -236,7 +259,6 @@ func (s *Server) gamePage(w http.ResponseWriter, r *http.Request) {
 		Game:      g,
 		Histogram: s.st.RatingDistribution(r.Context(), g.ID),
 		Covers:    s.st.PlayerCovers(r.Context(), g.ID),
-		Platforms: s.st.Platforms(r.Context()),
 	}
 	for _, n := range data.Histogram {
 		if n > data.HistogramMax {
@@ -259,10 +281,76 @@ func (s *Server) gamePage(w http.ResponseWriter, r *http.Request) {
 		}
 		data.MyLists, _ = s.st.ListsForUser(r.Context(), u.ID, true, 50, 0)
 		for _, fi := range s.st.FriendsWhoInteracted(r.Context(), u.ID, g.ID, 8) {
-			data.Friends = append(data.Friends, friendInteraction{fi.User, fi.Rating, fi.Status})
+			data.Friends = append(data.Friends, friendInteraction{
+				User:        fi.User,
+				Rating:      fi.Rating,
+				Status:      fi.Status,
+				Description: friendInteractionDescription(fi.User.Username, fi.Rating, fi.Status),
+			})
 		}
 	}
 	s.render(w, r, "game", data)
+}
+
+// gameRelated shows the full list behind a "See all" link in the related games
+// section. Series comes from the franchise; the other groups are the complete
+// relation lists already loaded with the game.
+func (s *Server) gameRelated(w http.ResponseWriter, r *http.Request) {
+	g, err := s.st.GameBySlug(r.Context(), r.PathValue("slug"))
+	if err == store.ErrNotFound {
+		s.notFound(w, r)
+		return
+	}
+	if err != nil {
+		s.serverError(w, r, err)
+		return
+	}
+	u := currentUser(r)
+	if g.Adult && (u == nil || !u.AdultOptIn) {
+		s.render(w, r, "adult_gate", struct {
+			Page
+			Game *models.Game
+		}{s.page(r, g.Title), g})
+		return
+	}
+	g, err = s.st.GameDetail(r.Context(), g)
+	if err != nil {
+		s.serverError(w, r, err)
+		return
+	}
+
+	var games []models.Game
+	var heading string
+	switch r.PathValue("kind") {
+	case "parents":
+		heading = ancestorTab(g.Category)
+		for _, p := range g.Parents {
+			games = append(games, *p)
+		}
+	case "series":
+		heading = "Series"
+		games, _ = s.st.SeriesGames(r.Context(), g.Franchise, 500)
+	case "remakes":
+		heading, games = "Remakes", g.Remakes
+	case "updates":
+		heading, games = "Updates", g.Updates
+	case "ports":
+		heading, games = "Ports", g.Ports
+	case "editions":
+		heading, games = "Editions & extras", g.Editions
+	case "bundles":
+		heading, games = "Bundles", g.Bundles
+	default:
+		s.notFound(w, r)
+		return
+	}
+
+	s.render(w, r, "game_related", struct {
+		Page
+		Game    *models.Game
+		Heading string
+		Games   []models.Game
+	}{s.page(r, heading+" · "+g.Title), g, heading, games})
 }
 
 type reviewsData struct {
@@ -279,12 +367,32 @@ type reviewsData struct {
 	LoggedIn  bool
 }
 
+func reviewTab(raw string) string {
+	switch raw {
+	case "friends", "following":
+		return raw
+	default:
+		return "all"
+	}
+}
+
+func reviewSort(raw string) (string, string) {
+	switch raw {
+	case "popular":
+		return "popular", "likes"
+	case "rating":
+		return "rating", "rating"
+	case "oldest":
+		return "oldest", "oldest"
+	default:
+		return "newest", "new"
+	}
+}
+
 func (s *Server) reviewsPage(w http.ResponseWriter, r *http.Request) {
 	u := currentUser(r)
-	tab := r.URL.Query().Get("tab")
-	if tab == "" {
-		tab = "all"
-	}
+	tab := reviewTab(r.URL.Query().Get("tab"))
+	sortKey, storeSort := reviewSort(r.URL.Query().Get("sort"))
 	page := atoi(r.URL.Query().Get("page"))
 	if page < 1 {
 		page = 1
@@ -293,17 +401,18 @@ func (s *Server) reviewsPage(w http.ResponseWriter, r *http.Request) {
 	if u != nil {
 		viewer = u.ID
 	}
-	reviews, total, err := s.st.ReviewsFeed(r.Context(), viewer, tab, 0, 30, (page-1)*30)
+	reviews, total, err := s.st.ReviewsFeed(r.Context(), viewer, tab, 0, storeSort, 30, (page-1)*30)
 	if err != nil {
 		s.serverError(w, r, err)
 		return
 	}
-	base := url.Values{"tab": {tab}}
+	base := url.Values{"tab": {tab}, "sort": {sortKey}}
 	data := reviewsData{
 		Page:      s.page(r, "Reviews"),
 		Reviews:   reviews,
 		Total:     total,
 		Tab:       tab,
+		Sort:      sortKey,
 		PageNum:   page,
 		Pages:     (total + 29) / 30,
 		Base:      "/reviews",
@@ -331,32 +440,33 @@ func (s *Server) gameReviews(w http.ResponseWriter, r *http.Request) {
 		}{s.page(r, g.Title), g})
 		return
 	}
-	sortKey := r.URL.Query().Get("sort")
-	storeSort := "likes"
-	switch sortKey {
-	case "newest":
-		storeSort = "new"
-	case "rating":
-		storeSort = "rating"
-	case "oldest":
-		storeSort = "oldest"
+	tab := reviewTab(r.URL.Query().Get("tab"))
+	sortParam := r.URL.Query().Get("sort")
+	switch sortParam {
+	case "popular", "newest", "rating", "oldest":
 	default:
-		sortKey = "popular"
+		sortParam = "popular"
 	}
+	sortKey, storeSort := reviewSort(sortParam)
 	page := atoi(r.URL.Query().Get("page"))
 	if page < 1 {
 		page = 1
 	}
-	reviews, total, err := s.st.ReviewsForGame(r.Context(), g.ID, storeSort, 20, (page-1)*20)
+	var viewer int64
+	if u != nil {
+		viewer = u.ID
+	}
+	reviews, total, err := s.st.ReviewsFeed(r.Context(), viewer, tab, g.ID, storeSort, 20, (page-1)*20)
 	if err != nil {
 		s.serverError(w, r, err)
 		return
 	}
-	base := url.Values{"sort": {sortKey}}
+	base := url.Values{"tab": {tab}, "sort": {sortKey}}
 	data := reviewsData{
 		Page:      s.page(r, "Reviews of "+g.Title),
 		Reviews:   reviews,
 		Total:     total,
+		Tab:       tab,
 		Sort:      sortKey,
 		Game:      g,
 		PageNum:   page,

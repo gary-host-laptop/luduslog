@@ -103,22 +103,23 @@ func (s *Server) handler() http.Handler {
 
 // Page carries the fields every template can rely on.
 type Page struct {
-	Title       string
-	Desc        string
-	User        *models.User
-	CSRF        string
-	Path        string
-	Query       url.Values
-	Flash       []Flash
-	Unread      int
-	Instance    config.Config
-	Year        int
-	Error       string
-	Message     string
-	IsAdmin     bool
-	CanModerate bool
-	SearchQuery string
-	SearchTab   string
+	Title          string
+	Desc           string
+	User           *models.User
+	CSRF           string
+	Path           string
+	Query          url.Values
+	Flash          []Flash
+	Unread         int
+	Instance       config.Config
+	Year           int
+	Error          string
+	Message        string
+	IsAdmin        bool
+	CanModerate    bool
+	CanEditCatalog bool
+	SearchQuery    string
+	SearchTab      string
 }
 
 type Flash struct {
@@ -134,18 +135,19 @@ func (s *Server) page(r *http.Request, title string) Page {
 		unread = s.st.UnreadNotifications(r.Context(), u.ID)
 	}
 	return Page{
-		Title:       title,
-		User:        u,
-		CSRF:        csrf,
-		Path:        r.URL.Path,
-		Query:       r.URL.Query(),
-		Flash:       ctxValue[[]Flash](r.Context(), ctxFlash),
-		Unread:      unread,
-		Instance:    s.instanceConfig(r.Context()),
-		Year:        time.Now().UTC().Year(),
-		IsAdmin:     u.IsAdmin(),
-		CanModerate: u.CanModerate(),
-		SearchQuery: r.URL.Query().Get("q"),
+		Title:          title,
+		User:           u,
+		CSRF:           csrf,
+		Path:           r.URL.Path,
+		Query:          r.URL.Query(),
+		Flash:          ctxValue[[]Flash](r.Context(), ctxFlash),
+		Unread:         unread,
+		Instance:       s.instanceConfig(r.Context()),
+		Year:           time.Now().UTC().Year(),
+		IsAdmin:        u.IsAdmin(),
+		CanModerate:    u.CanModerate(),
+		CanEditCatalog: u.CanEditCatalog(),
+		SearchQuery:    r.URL.Query().Get("q"),
 	}
 }
 
@@ -157,6 +159,20 @@ func (s *Server) render(w http.ResponseWriter, r *http.Request, name string, dat
 		return
 	}
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	if err := t.ExecuteTemplate(w, "layout", data); err != nil {
+		s.log.Error("render", "template", name, "err", err)
+	}
+}
+
+func (s *Server) renderStatus(w http.ResponseWriter, r *http.Request, name string, status int, data any) {
+	t, ok := s.pages[name]
+	if !ok {
+		s.log.Error("template not found", "name", name)
+		http.Error(w, "template not found", http.StatusInternalServerError)
+		return
+	}
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	w.WriteHeader(status)
 	if err := t.ExecuteTemplate(w, "layout", data); err != nil {
 		s.log.Error("render", "template", name, "err", err)
 	}

@@ -9,6 +9,7 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 
 	"luduslog/internal/models"
 )
@@ -388,6 +389,105 @@ func TestGameReviewSorting(t *testing.T) {
 	}
 }
 
+func TestN00bBadgeAndFeaturedTrophy(t *testing.T) {
+	st := testStore(t)
+	ctx := context.Background()
+	fresh, _ := st.CreateUser(ctx, "freshuser", "fresh@example.test", "hash", false)
+	st.CheckBadges(ctx, fresh.ID)
+	if badges, err := st.BadgesFor(ctx, fresh.ID); err != nil || len(badges) != 0 {
+		t.Fatalf("fresh user badges = %+v err=%v", badges, err)
+	}
+
+	u, _ := st.CreateUser(ctx, "dayold", "dayold@example.test", "hash", false)
+	old := time.Now().UTC().Add(-25 * time.Hour).Format(time.RFC3339)
+	if _, err := st.DB.ExecContext(ctx, `UPDATE users SET created_at=? WHERE id=?`, old, u.ID); err != nil {
+		t.Fatal(err)
+	}
+	st.CheckBadges(ctx, u.ID)
+	badges, err := st.BadgesFor(ctx, u.ID)
+	if err != nil || len(badges) != 1 || badges[0].Key != "n00b" || badges[0].EarnedAt == nil {
+		t.Fatalf("day-old badges = %+v err=%v", badges, err)
+	}
+	all, err := st.BadgeCatalogue(ctx, u.ID)
+	if err != nil || len(all) != len(badgeDefs) {
+		t.Fatalf("catalogue = %+v err=%v", all, err)
+	}
+	if all[0].Key != "n00b" || all[0].EarnedAt == nil {
+		t.Fatalf("n00b not in catalogue: %+v", all[0])
+	}
+	if err := st.SetFeaturedBadge(ctx, u.ID, "n00b"); err != nil {
+		t.Fatal(err)
+	}
+	u, err = st.UserByID(ctx, u.ID)
+	if err != nil || u.FeaturedBadge != "n00b" {
+		t.Fatalf("featured badge = %q err=%v", u.FeaturedBadge, err)
+	}
+	if err := st.SetFeaturedBadge(ctx, u.ID, ""); err != nil {
+		t.Fatal(err)
+	}
+	u, _ = st.UserByID(ctx, u.ID)
+	if u.FeaturedBadge != "" {
+		t.Fatalf("featured badge was not cleared: %q", u.FeaturedBadge)
+	}
+}
+
+func TestReviewsFeedAudienceAndSort(t *testing.T) {
+	st := testStore(t)
+	ctx := context.Background()
+	alice, _ := st.CreateUser(ctx, "feedalice", "feedalice@example.test", "hash", false)
+	bob, _ := st.CreateUser(ctx, "feedbob", "feedbob@example.test", "hash", false)
+	carol, _ := st.CreateUser(ctx, "feedcarol", "feedcarol@example.test", "hash", false)
+	dave, _ := st.CreateUser(ctx, "feeddave", "feeddave@example.test", "hash", false)
+	if err := st.Follow(ctx, alice.ID, bob.ID); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.Follow(ctx, bob.ID, alice.ID); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.Follow(ctx, alice.ID, carol.ID); err != nil {
+		t.Fatal(err)
+	}
+	g1, _ := st.SaveGame(ctx, &models.Game{IGDBID: -501, Slug: "feed-one", Title: "Feed One", ReleaseStatus: "released"})
+	g2, _ := st.SaveGame(ctx, &models.Game{IGDBID: -502, Slug: "feed-two", Title: "Feed Two", ReleaseStatus: "released"})
+	bobReview, _ := st.CreateLog(ctx, LogInput{UserID: bob.ID, GameID: g1.ID, Review: "bob review", Rating: 3, Status: "played"})
+	carolReview, _ := st.CreateLog(ctx, LogInput{UserID: carol.ID, GameID: g2.ID, Review: "carol review", Rating: 5, Status: "played"})
+	daveReview, _ := st.CreateLog(ctx, LogInput{UserID: dave.ID, GameID: g1.ID, Review: "dave review", Rating: 8, Status: "played"})
+	if err := st.LikeLog(ctx, daveReview.ID, alice.ID, true); err != nil {
+		t.Fatal(err)
+	}
+
+	ids := func(logs []*models.Log) []int64 {
+		out := make([]int64, len(logs))
+		for i, l := range logs {
+			out[i] = l.ID
+		}
+		return out
+	}
+	friends, total, err := st.ReviewsFeed(ctx, alice.ID, "friends", 0, "new", 20, 0)
+	if err != nil || total != 1 || len(friends) != 1 || friends[0].ID != bobReview.ID {
+		t.Fatalf("friends feed = %v/%d err=%v", ids(friends), total, err)
+	}
+	following, total, err := st.ReviewsFeed(ctx, alice.ID, "following", 0, "new", 20, 0)
+	if err != nil || total != 2 || len(following) != 2 || following[0].ID != carolReview.ID || following[1].ID != bobReview.ID {
+		t.Fatalf("following feed = %v/%d err=%v", ids(following), total, err)
+	}
+	if got, total, err := st.ReviewsFeed(ctx, 0, "friends", 0, "new", 20, 0); err != nil || total != 0 || len(got) != 0 {
+		t.Fatalf("signed-out friends feed = %v/%d err=%v", ids(got), total, err)
+	}
+	popular, _, err := st.ReviewsFeed(ctx, alice.ID, "all", 0, "likes", 20, 0)
+	if err != nil || len(popular) != 3 || popular[0].ID != daveReview.ID {
+		t.Fatalf("popular feed = %v err=%v", ids(popular), err)
+	}
+	rated, _, err := st.ReviewsFeed(ctx, alice.ID, "all", 0, "rating", 20, 0)
+	if err != nil || len(rated) != 3 || rated[0].ID != daveReview.ID || rated[1].ID != carolReview.ID || rated[2].ID != bobReview.ID {
+		t.Fatalf("rating feed = %v err=%v", ids(rated), err)
+	}
+	oldest, _, err := st.ReviewsFeed(ctx, alice.ID, "all", g1.ID, "oldest", 20, 0)
+	if err != nil || len(oldest) != 2 || oldest[0].ID != bobReview.ID || oldest[1].ID != daveReview.ID {
+		t.Fatalf("oldest game feed = %v err=%v", ids(oldest), err)
+	}
+}
+
 func TestPlayedCountAndLikeToggle(t *testing.T) {
 	ctx := context.Background()
 	st := testStore(t)
@@ -514,6 +614,101 @@ func TestPlayedCountAndLikeToggle(t *testing.T) {
 	empty, _ = st.GameByID(ctx, empty.ID)
 	if empty.Popularity != 0 {
 		t.Fatalf("empty status row contributed popularity: %d", empty.Popularity)
+	}
+}
+
+func TestRecentlyPlayedGamesTracksShelfEvents(t *testing.T) {
+	ctx := context.Background()
+	st := testStore(t)
+	alice, _ := st.CreateUser(ctx, "alice", "alice@example.test", "hash", false)
+	old, _ := st.SaveGame(ctx, &models.Game{IGDBID: -801, Slug: "old-played", Title: "Old Played", ReleaseStatus: "released"})
+	playing, _ := st.SaveGame(ctx, &models.Game{IGDBID: -802, Slug: "now-playing", Title: "Now Playing", ReleaseStatus: "released"})
+	rated, _ := st.SaveGame(ctx, &models.Game{IGDBID: -803, Slug: "rated-played", Title: "Rated Played", ReleaseStatus: "released"})
+	both, _ := st.SaveGame(ctx, &models.Game{IGDBID: -804, Slug: "both-shelves", Title: "Both Shelves", ReleaseStatus: "released"})
+	backlog, _ := st.SaveGame(ctx, &models.Game{IGDBID: -805, Slug: "backlog-only", Title: "Backlog Only", ReleaseStatus: "released"})
+
+	if err := st.SetPlayedCount(ctx, alice.ID, old.ID, 1); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.SetStatusFlag(ctx, alice.ID, playing.ID, "playing", true); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.EnsurePlayed(ctx, alice.ID, rated.ID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.CreateLog(ctx, LogInput{UserID: alice.ID, GameID: rated.ID, Rating: 9, Status: "played"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.SetStatuses(ctx, alice.ID, both.ID, true, true, false, false, false); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.SetStatusFlag(ctx, alice.ID, backlog.ID, "backlog", true); err != nil {
+		t.Fatal(err)
+	}
+
+	setEventTimes := func(gameID int64, playedAt, playingAt any, updatedAt string) {
+		t.Helper()
+		if _, err := st.DB.ExecContext(ctx, `UPDATE statuses SET played_at=?,playing_at=?,updated_at=? WHERE user_id=? AND game_id=?`,
+			playedAt, playingAt, updatedAt, alice.ID, gameID); err != nil {
+			t.Fatal(err)
+		}
+	}
+	setEventTimes(old.ID, "2026-01-02T12:00:00Z", nil, "2026-01-02T12:00:00Z")
+	setEventTimes(playing.ID, nil, "2026-02-03T12:00:00Z", "2026-02-03T12:00:00Z")
+	setEventTimes(rated.ID, "2026-03-04T12:00:00Z", nil, "2026-03-04T12:00:00Z")
+	setEventTimes(both.ID, "2026-04-06T12:00:00Z", "2026-04-05T12:00:00Z", "2026-04-06T12:00:00Z")
+
+	// Changing an unrelated shelf flag must not make an old played game recent.
+	if err := st.SetStatusFlag(ctx, alice.ID, old.ID, "backlog", true); err != nil {
+		t.Fatal(err)
+	}
+	oldStatus, _ := st.StatusFor(ctx, alice.ID, old.ID)
+	if want := time.Date(2026, 1, 2, 12, 0, 0, 0, time.UTC); !oldStatus.PlayedAt.Equal(want) {
+		t.Fatalf("backlog edit changed played_at to %v", oldStatus.PlayedAt)
+	}
+
+	entries, err := st.RecentlyPlayedGames(ctx, alice.ID, 6)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(entries) != 4 {
+		t.Fatalf("recently played = %d entries, want 4", len(entries))
+	}
+	wantOrder := []string{"Both Shelves", "Rated Played", "Now Playing", "Old Played"}
+	for i, title := range wantOrder {
+		if entries[i].Game.Title != title {
+			t.Fatalf("entry %d = %q, want %q", i, entries[i].Game.Title, title)
+		}
+	}
+	if entries[0].Event != "Played" || entries[1].Rating != 9 || entries[2].Event != "Playing" {
+		t.Fatalf("unexpected recently played data: %+v", entries)
+	}
+	for _, entry := range entries {
+		if entry.Game.Title == "Backlog Only" {
+			t.Fatal("backlog-only game appeared in recently played")
+		}
+	}
+
+	if err := st.SetStatusFlag(ctx, alice.ID, playing.ID, "playing", false); err != nil {
+		t.Fatal(err)
+	}
+	playingStatus, _ := st.StatusFor(ctx, alice.ID, playing.ID)
+	if !playingStatus.PlayingAt.IsZero() {
+		t.Fatal("leaving the playing shelf did not clear playing_at")
+	}
+	if err := st.SetPlayedCount(ctx, alice.ID, old.ID, 0); err != nil {
+		t.Fatal(err)
+	}
+	oldStatus, _ = st.StatusFor(ctx, alice.ID, old.ID)
+	if !oldStatus.PlayedAt.IsZero() {
+		t.Fatal("removing the last play did not clear played_at")
+	}
+	if err := st.SetPlayedCount(ctx, alice.ID, old.ID, 1); err != nil {
+		t.Fatal(err)
+	}
+	oldStatus, _ = st.StatusFor(ctx, alice.ID, old.ID)
+	if oldStatus.PlayedAt.IsZero() {
+		t.Fatal("replaying did not record a new played_at")
 	}
 }
 

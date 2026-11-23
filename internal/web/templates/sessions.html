@@ -1,7 +1,7 @@
 {{define "content"}}
 <div class="section-head">
   <div><h1 class="mb0">Play sessions</h1><div class="muted">{{if .Game}}{{.Game.Title}}{{end}} · {{hours .Log.Playtime}} total</div></div>
-  <a class="btn btn-sm" href="/users/{{.User.Username}}/reviews/{{.Log.ID}}">Back to log</a>
+  <a class="btn btn-sm" href="{{if .Log.Review}}{{reviewPath .Log}}{{else}}/users/{{.User.Username}}/logs/{{.Game.Slug}}{{end}}">Back to log</a>
 </div>
 <div class="grid grid-2">
   <section>

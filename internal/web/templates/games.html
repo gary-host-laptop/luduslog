@@ -1,10 +1,13 @@
 {{define "content"}}
 <div class="section-head">
   <div><h1 class="mb0">Games</h1><div class="muted">{{.Total}} titles in the catalog</div></div>
-  <form method="get" action="/games" class="row">
-    <input type="search" name="q" value="{{.Q}}" placeholder="Search titles…" aria-label="Search games">
-    <button class="btn" type="submit">Search</button>
-  </form>
+  <div class="row">
+    {{if .CanEditCatalog}}<a class="btn" href="/games/new">New game</a>{{end}}
+    <form method="get" action="/games" class="row">
+      <input type="search" name="q" value="{{.Q}}" placeholder="Search titles…" aria-label="Search games">
+      <button class="btn" type="submit">Search</button>
+    </form>
+  </div>
 </div>
 
 <div class="games-layout">

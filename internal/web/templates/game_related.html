@@ -1,0 +1,13 @@
+{{define "content"}}
+<article class="related-page">
+<header class="game-title-row">
+  <p class="muted"><a href="/games/{{.Game.Slug}}">← {{.Game.Title}}</a></p>
+  <h1>{{.Heading}}</h1>
+</header>
+{{if .Games}}
+{{template "game_grid" .Games}}
+{{else}}
+<p class="muted">No games found.</p>
+{{end}}
+</article>
+{{end}}

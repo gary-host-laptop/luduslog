@@ -28,6 +28,37 @@
   var quickRateForm = document.querySelector(".quick-rate-form");
   if (quickRateForm) {
     var quickRateBusy = false;
+    var quickRateInputs = Array.prototype.slice.call(quickRateForm.querySelectorAll('input[name="rating"]'));
+    var quickRateLabels = Array.prototype.slice.call(quickRateForm.querySelectorAll(".quick-half"));
+    function quickRateValue(el) {
+      return Number(el.htmlFor.slice(3));
+    }
+    function checkedRating() {
+      for (var i = 0; i < quickRateInputs.length; i++) {
+        if (quickRateInputs[i].checked) return Number(quickRateInputs[i].value);
+      }
+      return 0;
+    }
+    function clearDropping() {
+      quickRateLabels.forEach(function (label) { label.classList.remove("dropping"); });
+    }
+    function previewDropped(hovered) {
+      var current = checkedRating();
+      quickRateLabels.forEach(function (label) {
+        var value = quickRateValue(label);
+        label.classList.toggle("dropping", current > 0 && hovered < current && value > hovered && value <= current);
+      });
+    }
+    var quickRateClearSlot = quickRateForm.querySelector(".rating-clear-slot");
+    if (quickRateClearSlot) {
+      quickRateClearSlot.addEventListener("mouseenter", function () { previewDropped(0); });
+    }
+    quickRateLabels.forEach(function (label) {
+      label.addEventListener("mouseenter", function () { previewDropped(quickRateValue(label)); });
+    });
+    // Keep the preview alive across the gaps between stars and the clear button;
+    // only leaving the whole control restores the saved rating.
+    quickRateForm.addEventListener("mouseleave", clearDropping);
     quickRateForm.addEventListener("submit", function (evt) {
       if (quickRateBusy) {
         evt.preventDefault();
@@ -35,7 +66,7 @@
       }
       quickRateBusy = true;
     });
-    quickRateForm.querySelectorAll('input[name="rating"]').forEach(function (input) {
+    quickRateInputs.forEach(function (input) {
       input.addEventListener("change", function () {
         if (quickRateBusy) return;
         if (quickRateForm.requestSubmit) quickRateForm.requestSubmit();
@@ -145,7 +176,7 @@
     var panels = Array.prototype.slice.call(section.querySelectorAll('[role="tabpanel"]'));
     if (!tabs.length) return;
     section.setAttribute("data-enhanced", "");
-    section.querySelectorAll(".related-group h3").forEach(function (h) { h.remove(); });
+    var seeAll = section.querySelector("[data-related-see-all]");
     function select(index, focus) {
       tabs.forEach(function (tab, i) {
         var on = i === index;
@@ -154,6 +185,11 @@
         if (on && focus) tab.focus();
       });
       panels.forEach(function (panel, i) { panel.hidden = i !== index; });
+      if (seeAll) {
+        var href = tabs[index].getAttribute("data-see-all");
+        seeAll.hidden = !href;
+        if (href) seeAll.setAttribute("href", href);
+      }
     }
     tabs.forEach(function (tab, i) {
       tab.addEventListener("click", function () { select(i, false); });
@@ -233,6 +269,28 @@
       lightboxImg.alt = "";
     });
   }
+
+  // Game-page quick actions. Native dialogs keep the hero card height stable;
+  // the buttons stay hidden without JavaScript and the noscript forms are used.
+  var actionDialogs = document.querySelectorAll("dialog.game-action-dialog");
+  document.querySelectorAll("[data-dialog-open]").forEach(function (trigger) {
+    trigger.addEventListener("click", function () {
+      var dialog = document.getElementById(trigger.getAttribute("data-dialog-open"));
+      if (!dialog || !dialog.showModal) return;
+      dialog.showModal();
+    });
+  });
+  actionDialogs.forEach(function (dialog) {
+    dialog.addEventListener("click", function (evt) {
+      if (evt.target !== dialog) return;
+      // Clicks on the dialog's own padding target the dialog too, so only
+      // close when the pointer landed outside the dialog box (the backdrop).
+      var box = dialog.getBoundingClientRect();
+      if (evt.clientX < box.left || evt.clientX > box.right || evt.clientY < box.top || evt.clientY > box.bottom) {
+        dialog.close();
+      }
+    });
+  });
 
   // No-cookie video player: the iframe is created only after a click, and
   // removed on close so playback stops and no further requests are made.

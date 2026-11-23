@@ -315,20 +315,28 @@ func TestGamePageMetadataAndFranchiseFilter(t *testing.T) {
 		ReleaseDates: []models.ReleaseDate{{Platform: "PC", Date: "2021-03-04", Human: "March 4, 2021", Region: "Europe", Status: "released"}},
 	})
 	mustSaveGame(t, st, &models.Game{IGDBID: -912, Slug: "franchise-two", Title: "Franchise Two", Franchise: "Franchise Two", Category: "main_game", ReleaseStatus: "released"})
+	mustSaveGame(t, st, &models.Game{IGDBID: -913, Slug: "franchise-one-2", Title: "Franchise One 2", Franchise: "Saga", Category: "main_game", ReleaseStatus: "released"})
 
 	_, body := getBody(t, http.DefaultClient, ts.URL+"/games/franchise-one")
-	if !strings.Contains(body, "Also known as: F1, First One") {
-		t.Error("alternate names are not rendered")
+	if !strings.Contains(body, `<dt class="muted">Also known as</dt>`) || !strings.Contains(body, `<dd style="margin:0">F1, First One</dd>`) {
+		t.Error("alternate names are not rendered in the details card")
 	}
 	if !strings.Contains(body, "PC · March 4, 2021 · Europe · released") {
 		t.Error("release region/status/human date are not rendered")
 	}
-	if !strings.Contains(body, `href="/games?franchise=Saga"`) {
-		t.Error("franchise link missing")
+	if !strings.Contains(body, `href="/games/franchise-one/related/series"`) {
+		t.Error("series See all link missing")
+	}
+	if strings.Contains(body, `href="/games?franchise=Saga"`) {
+		t.Error("franchise is still linked next to the release date")
+	}
+	_, series := getBody(t, http.DefaultClient, ts.URL+"/games/franchise-one/related/series")
+	if !strings.Contains(series, "<h1>Series</h1>") || !strings.Contains(series, "Franchise One") {
+		t.Error("series See all page does not list the franchise games")
 	}
 
 	_, filtered := getBody(t, http.DefaultClient, ts.URL+"/games?franchise=Saga")
-	if strings.Count(filtered, `class="game-card"`) != 1 || !strings.Contains(filtered, "Franchise One") {
+	if strings.Count(filtered, `class="game-card"`) != 2 || !strings.Contains(filtered, "Franchise One") {
 		t.Error("franchise query did not filter the games index")
 	}
 	if !strings.Contains(filtered, `name="franchise"`) || !strings.Contains(filtered, "Franchise: Saga") {
@@ -822,5 +830,148 @@ func TestCSVExport(t *testing.T) {
 	}
 	if rows[1][12] != review {
 		t.Fatalf("review escaping round-trip = %q", rows[1][12])
+	}
+}
+
+func TestGamePageActionDialogs(t *testing.T) {
+	ts, st := testServer(t)
+	ctx := context.Background()
+	alice, _ := st.CreateUser(ctx, "alice", "alice@example.test", "hash", false)
+	bob, _ := st.CreateUser(ctx, "bob", "bob@example.test", "hash", false)
+	mustSaveGame(t, st, &models.Game{IGDBID: -1021, Slug: "dialog-game", Title: "Dialog Game", Category: "main_game", ReleaseStatus: "released", Platforms: []models.Platform{{Name: "PC"}}})
+	mustSaveGamePlatform(t, st, "Switch")
+	list, err := st.CreateList(ctx, store.ListInput{UserID: alice.ID, Title: "Shelf", Privacy: "public"})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	client, _ := authedClient(t, ts, st, alice)
+	_, page := getBody(t, client, ts.URL+"/games/dialog-game")
+	for _, want := range []string{
+		`data-dialog-open="game-list-dialog"`,
+		`data-dialog-open="game-library-dialog"`,
+		`<dialog class="game-action-dialog" id="game-list-dialog"`,
+		`<dialog class="game-action-dialog" id="game-library-dialog"`,
+		`name="list_id" value="` + itoa(list.ID) + `"`,
+		"Shelf",
+		"Public · 0 games",
+		`href="/lists/new"`,
+		`action="/library"`,
+	} {
+		if !strings.Contains(page, want) {
+			t.Errorf("game page missing %q", want)
+		}
+	}
+	for _, unwanted := range []string{`class="game-list-add"`, `class="game-library-edit"`, "<summary>Add to a list</summary>"} {
+		if strings.Contains(page, unwanted) {
+			t.Errorf("game page still has legacy disclosure %q", unwanted)
+		}
+	}
+	if strings.Count(page, `class="btn btn-sm btn-block game-action-open"`) != 2 {
+		t.Error("quick actions should be two buttons")
+	}
+	// The platform picker offers only platforms this game released on.
+	start := strings.Index(page, `id="game-library-dialog"`)
+	end := strings.Index(page[start:], "</dialog>")
+	if start < 0 || end < 0 {
+		t.Fatal("could not isolate the library dialog")
+	}
+	libraryDialog := page[start : start+end]
+	if !strings.Contains(libraryDialog, ">PC</option>") {
+		t.Error("library dialog is missing the game's PC platform")
+	}
+	if strings.Contains(libraryDialog, ">Switch</option>") {
+		t.Error("library dialog lists a platform the game was not released on")
+	}
+
+	// A user without lists sees the empty state and the create link.
+	emptyClient, _ := authedClient(t, ts, st, bob)
+	_, empty := getBody(t, emptyClient, ts.URL+"/games/dialog-game")
+	if !strings.Contains(empty, "You don't have any lists yet.") || !strings.Contains(empty, `href="/lists/new"`) {
+		t.Error("empty list dialog is missing its create link")
+	}
+	if strings.Contains(empty, `name="list_id"`) {
+		t.Error("empty list dialog should not render list radios")
+	}
+}
+
+func TestFriendsActivityCard(t *testing.T) {
+	ts, st := testServer(t)
+	ctx := context.Background()
+	alice, _ := st.CreateUser(ctx, "alice", "alice@example.test", "hash", false)
+	bob, _ := st.CreateUser(ctx, "bob", "bob@example.test", "hash", false)
+	carol, _ := st.CreateUser(ctx, "carol", "carol@example.test", "hash", false)
+	dave, _ := st.CreateUser(ctx, "dave", "dave@example.test", "hash", false)
+	eve, _ := st.CreateUser(ctx, "eve", "eve@example.test", "hash", false)
+	game := mustSaveGame(t, st, &models.Game{IGDBID: -1031, Slug: "friends-game", Title: "Friends Game", Category: "main_game", ReleaseStatus: "released"})
+	friend := func(a, b *models.User) {
+		st.Follow(ctx, a.ID, b.ID)
+		st.ApproveFollow(ctx, a.ID, b.ID)
+		st.Follow(ctx, b.ID, a.ID)
+		st.ApproveFollow(ctx, b.ID, a.ID)
+	}
+	friend(alice, bob)
+	friend(alice, carol)
+	friend(alice, dave)
+
+	st.SetStatuses(ctx, bob.ID, game.ID, true, true, false, false, false)
+	st.CreateLog(ctx, store.LogInput{UserID: bob.ID, GameID: game.ID, Rating: 8, Status: "played"})
+	st.SetStatuses(ctx, carol.ID, game.ID, false, false, true, true, false)
+	st.CreateLog(ctx, store.LogInput{UserID: dave.ID, GameID: game.ID, Rating: 7, Status: "played"})
+	st.DB.ExecContext(ctx, `DELETE FROM statuses WHERE user_id=? AND game_id=?`, dave.ID, game.ID)
+	// Eve is not a mutual friend, so her playing status must stay private.
+	st.SetStatuses(ctx, eve.ID, game.ID, false, true, false, false, false)
+
+	client, _ := authedClient(t, ts, st, alice)
+	_, page := getBody(t, client, ts.URL+"/games/friends-game")
+	if !strings.Contains(page, "Friends' activity") {
+		t.Fatal("friends activity card missing")
+	}
+	row := func(name string) string {
+		t.Helper()
+		i := strings.Index(page, name)
+		if i < 0 {
+			t.Fatalf("no row for %s", name)
+		}
+		start := strings.LastIndex(page[:i], `<li class="friend-activity-row">`)
+		end := strings.Index(page[i:], "</li>")
+		if start < 0 || end < 0 {
+			t.Fatalf("could not isolate row for %s", name)
+		}
+		return page[start : i+end]
+	}
+	if bobRow := row(">bob<"); !strings.Contains(bobRow, "ph-check-circle") || !strings.Contains(bobRow, "ph-play") ||
+		!strings.Contains(bobRow, "8.0") || strings.Count(bobRow, "ph-star") != 1 ||
+		!strings.Contains(bobRow, `href="/users/bob/logs/friends-game"`) ||
+		!strings.Contains(bobRow, `aria-label="Rated 8.0 out of 10"`) ||
+		!strings.Contains(bobRow, `data-description="bob rated it 8/10, is playing it, has played it"`) {
+		t.Errorf("bob row = %s", bobRow)
+	}
+	if carolRow := row(">carol<"); !strings.Contains(carolRow, "ph-stack") || !strings.Contains(carolRow, "ph-heart") || strings.Contains(carolRow, "ph-star") ||
+		!strings.Contains(carolRow, `data-description="carol has it in their backlog, wants it on their wishlist"`) {
+		t.Errorf("carol row = %s", carolRow)
+	}
+	if daveRow := row(">dave<"); !strings.Contains(daveRow, "7.0") || strings.Count(daveRow, "ph-star") != 1 ||
+		strings.Contains(daveRow, "ph-check-circle") || strings.Contains(daveRow, "ph-play") {
+		t.Errorf("dave row = %s", daveRow)
+	}
+	if strings.Contains(page, ">eve<") {
+		t.Error("stranger appears in the friends activity card")
+	}
+	for _, name := range []string{">bob<", ">carol<", ">dave<"} {
+		if !strings.Contains(row(name), `class="avatar avatar-sm"`) {
+			t.Errorf("row for %s has no avatar", name)
+		}
+	}
+
+	// Logged-out visitors and non-friends never see the card.
+	_, loggedOut := getBody(t, http.DefaultClient, ts.URL+"/games/friends-game")
+	if strings.Contains(loggedOut, "Friends' activity") {
+		t.Error("logged-out visitor sees the friends activity card")
+	}
+	eveClient, _ := authedClient(t, ts, st, eve)
+	_, stranger := getBody(t, eveClient, ts.URL+"/games/friends-game")
+	if strings.Contains(stranger, "Friends' activity") {
+		t.Error("non-friend sees the friends activity card")
 	}
 }

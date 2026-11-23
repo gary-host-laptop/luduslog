@@ -14,7 +14,7 @@ import (
 const userCols = `id,username,email,email_verified,approved,password_hash,bio,avatar,header,role,created_at,
 deactivated_at,last_username_change,private_profile,hide_activity,manually_approves,hide_social_graph,adult_optin,
 star_scale,cover_mode,time_display,infinite_scroll,theme,high_contrast,timezone,fade_played,journal_view,
-comment_privacy,note_privacy,federation,fed_statuses,fed_reviews,fed_lists,remote_actor,social_links`
+comment_privacy,note_privacy,catalog_editor,featured_badge,federation,fed_statuses,fed_reviews,fed_lists,remote_actor,social_links`
 
 type scanner interface{ Scan(dest ...any) error }
 
@@ -22,11 +22,11 @@ func scanUser(row scanner) (*models.User, error) {
 	var u models.User
 	var createdAt, social string
 	var deact, lastChange sql.NullString
-	var emailVerified, approved, private, hideAct, manual, hideGraph, adult, scroll, hc, fade, fed, fedS, fedR, fedL int
+	var emailVerified, approved, private, hideAct, manual, hideGraph, adult, scroll, hc, fade, catalog, fed, fedS, fedR, fedL int
 	err := row.Scan(&u.ID, &u.Username, &u.Email, &emailVerified, &approved, &u.PasswordHash, &u.Bio, &u.Avatar, &u.Header,
 		&u.Role, &createdAt, &deact, &lastChange, &private, &hideAct, &manual, &hideGraph, &adult,
 		&u.StarScale, &u.CoverMode, &u.TimeDisplay, &scroll, &u.Theme, &hc, &u.Timezone, &fade, &u.JournalView,
-		&u.CommentPrivacy, &u.NotePrivacy, &fed, &fedS, &fedR, &fedL, &u.RemoteActor, &social)
+		&u.CommentPrivacy, &u.NotePrivacy, &catalog, &u.FeaturedBadge, &fed, &fedS, &fedR, &fedL, &u.RemoteActor, &social)
 	if err != nil {
 		return nil, err
 	}
@@ -43,6 +43,7 @@ func scanUser(row scanner) (*models.User, error) {
 	u.InfiniteScroll = scroll == 1
 	u.HighContrast = hc == 1
 	u.FadePlayed = fade == 1
+	u.CatalogEditor = catalog == 1
 	u.Federation = fed == 1
 	u.FedStatuses = fedS == 1
 	u.FedReviews = fedR == 1
@@ -404,6 +405,22 @@ func (s *Store) followUsers(ctx context.Context, query string, args ...any) ([]*
 	return out, rows.Err()
 }
 
+// FollowingIDs returns approved followees, used by following-only filters.
+func (s *Store) FollowingIDs(ctx context.Context, id int64) []int64 {
+	rows, err := s.DB.QueryContext(ctx, `SELECT followee_id FROM follows WHERE follower_id=? AND approved=1`, id)
+	if err != nil {
+		return nil
+	}
+	defer rows.Close()
+	var ids []int64
+	for rows.Next() {
+		var x int64
+		rows.Scan(&x)
+		ids = append(ids, x)
+	}
+	return ids
+}
+
 // FriendIDs returns approved mutual follows, used by friends-only filters.
 func (s *Store) FriendIDs(ctx context.Context, id int64) []int64 {
 	rows, err := s.DB.QueryContext(ctx, `SELECT f1.followee_id FROM follows f1 JOIN follows f2
@@ -506,6 +523,19 @@ func (s *Store) SetRole(ctx context.Context, id int64, role string) error {
 		return fmt.Errorf("invalid role %q", role)
 	}
 	_, err := s.DB.ExecContext(ctx, `UPDATE users SET role=? WHERE id=?`, role, id)
+	return err
+}
+
+// SetCatalogEditor grants or revokes the trusted catalog editor privilege.
+func (s *Store) SetCatalogEditor(ctx context.Context, id int64, enabled bool) error {
+	_, err := s.DB.ExecContext(ctx, `UPDATE users SET catalog_editor=? WHERE id=?`, b2i(enabled), id)
+	return err
+}
+
+// SetFeaturedBadge chooses the trophy highlighted on a profile. An empty key
+// clears the highlight.
+func (s *Store) SetFeaturedBadge(ctx context.Context, id int64, key string) error {
+	_, err := s.DB.ExecContext(ctx, `UPDATE users SET featured_badge=? WHERE id=?`, key, id)
 	return err
 }
 

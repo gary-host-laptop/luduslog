@@ -42,7 +42,7 @@
 
 {{if .Badges}}
 <section class="section">
-  <div class="section-head"><h2>Badges</h2></div>
+  <div class="section-head"><h2>Trophies</h2><a class="more" href="/users/{{.Profile.Username}}/trophies">All trophies →</a></div>
   <div class="grid grid-3">
     {{range .Badges}}{{if .EarnedAt}}<div class="card"><strong>{{.Title}}</strong><div class="muted">{{.Desc}}</div><div class="muted mt1">Earned {{.EarnedAt.Format "Jan 2, 2006"}}</div></div>{{end}}{{end}}
   </div>

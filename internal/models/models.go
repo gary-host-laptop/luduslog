@@ -33,6 +33,8 @@ type User struct {
 	JournalView        string // calendar | activity | list
 	CommentPrivacy     string // everyone | friends | none
 	NotePrivacy        string // everyone | friends | none
+	CatalogEditor      bool
+	FeaturedBadge      string
 	Federation         bool
 	FedStatuses        bool
 	FedReviews         bool
@@ -43,6 +45,10 @@ type User struct {
 func (u *User) IsAdmin() bool { return u != nil && u.Role == "admin" }
 
 func (u *User) CanModerate() bool { return u != nil && (u.Role == "mod" || u.Role == "admin") }
+
+func (u *User) CanEditCatalog() bool {
+	return u != nil && (u.CatalogEditor || u.CanModerate())
+}
 
 func (u *User) RoleLabel() string {
 	if u == nil {
@@ -110,6 +116,7 @@ type Game struct {
 	Bundles       []Game
 	Editions      []Game
 	Parents       []*Game // ancestor chain, original first
+	Related       []Game
 	Updates       []Game
 	Remakes       []Game
 	Ports         []Game
@@ -225,6 +232,8 @@ type Status struct {
 	Backlog   bool
 	Wishlist  bool
 	Liked     bool
+	PlayedAt  time.Time
+	PlayingAt time.Time
 	UpdatedAt time.Time
 }
 

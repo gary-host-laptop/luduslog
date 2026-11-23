@@ -1,6 +1,7 @@
 package web
 
 import (
+	"errors"
 	"net/http"
 	"strconv"
 	"strings"
@@ -16,10 +17,11 @@ type profileData struct {
 	Tab            string
 	Logs           []*models.Log
 	Reviews        []*models.Log
+	RecentlyPlayed []store.RecentlyPlayed
 	Lists          []*models.List
 	Favorites      []models.Game
 	Stats          *store.UserStats
-	Badges         []models.Badge
+	FeaturedBadge  *models.Badge
 	Links          []models.SocialLink
 	IsMe           bool
 	IsFollowing    bool
@@ -27,7 +29,6 @@ type profileData struct {
 	FollowsYou     bool
 	Private        bool
 	Blocked        bool
-	Friends        []*models.User
 	Followers      []*models.User
 	Following      []*models.User
 	CountFollowers int
@@ -131,6 +132,11 @@ func (s *Server) profile(w http.ResponseWriter, r *http.Request) {
 	if page < 1 {
 		page = 1
 	}
+	var badges []models.Badge
+	if canView {
+		s.st.CheckBadges(r.Context(), p.ID)
+		badges, _ = s.st.BadgesFor(r.Context(), p.ID)
+	}
 	data := profileData{
 		Page:           s.page(r, p.Username),
 		Profile:        p,
@@ -142,13 +148,12 @@ func (s *Server) profile(w http.ResponseWriter, r *http.Request) {
 		Private:        !canView,
 		CountFollowers: s.st.CountFollowers(r.Context(), p.ID),
 		CountFollowing: s.st.CountFollowing(r.Context(), p.ID),
-		Badges:         badgesOrEmpty(s.st.BadgesFor(r.Context(), p.ID)),
+		FeaturedBadge:  featuredBadge(badges, p.FeaturedBadge),
 		Links:          s.st.SocialLinksFor(r.Context(), p.ID),
 	}
 	if canView {
 		data.Stats, _ = s.st.StatsFor(r.Context(), p.ID)
 		data.Favorites = s.st.FavoriteGames(r.Context(), p.ID, 5)
-		data.Friends, _ = s.st.MutualUsers(r.Context(), p.ID, 12)
 		data.JournalView = p.JournalView
 		if data.JournalView == "" {
 			data.JournalView = "calendar"
@@ -175,14 +180,8 @@ func (s *Server) profile(w http.ResponseWriter, r *http.Request) {
 		case "activity":
 			data.Activity, _ = s.st.UserActivities(r.Context(), p.ID, 30, 0)
 		default:
-			data.Logs, _, _ = s.st.UserLogs(r.Context(), p.ID, false, 6, 0)
-			lists, _ := s.st.VisibleListsFor(r.Context(), p.ID, viewerID)
-			if len(lists) > 4 {
-				lists = lists[:4]
-			}
-			data.Lists = lists
+			data.RecentlyPlayed, _ = s.st.RecentlyPlayedGames(r.Context(), p.ID, 6)
 			data.Reviews, _, _ = s.st.UserLogs(r.Context(), p.ID, true, 2, 0)
-			data.Activity, _ = s.st.UserActivities(r.Context(), p.ID, 8, 0)
 		}
 		if data.Total > 0 {
 			data.Pages = (data.Total + 14) / 15
@@ -192,7 +191,99 @@ func (s *Server) profile(w http.ResponseWriter, r *http.Request) {
 	s.render(w, r, "profile", data)
 }
 
-func badgesOrEmpty(b []models.Badge, err error) []models.Badge { return b }
+type userGameLogData struct {
+	Page
+	Profile  *models.User
+	Game     *models.Game
+	Status   models.Status
+	Rating   float64
+	Playtime float64
+	Logs     []*models.Log
+	IsMe     bool
+}
+
+// userGameLogsPage is the stable destination for a person's log of one game.
+// It follows the profile's privacy rules, gates adult games, and only shows
+// drafts to their owner.
+func (s *Server) userGameLogsPage(w http.ResponseWriter, r *http.Request) {
+	p, err := s.st.UserByUsername(r.Context(), r.PathValue("name"))
+	if err != nil {
+		s.notFound(w, r)
+		return
+	}
+	g, err := s.st.GameBySlug(r.Context(), r.PathValue("slug"))
+	if err != nil {
+		s.notFound(w, r)
+		return
+	}
+	viewer := currentUser(r)
+	var viewerID int64
+	if viewer != nil {
+		viewerID = viewer.ID
+	}
+	isMe := viewerID != 0 && viewerID == p.ID
+	if viewer != nil && !isMe && s.st.IsBlocked(r.Context(), viewer.ID, p.ID) {
+		s.render(w, r, "message", struct {
+			Page
+			Message string
+		}{s.page(r, p.Username), "This profile is unavailable."})
+		return
+	}
+	canView := !p.PrivateProfile || isMe
+	if !canView && viewer != nil {
+		_, approved := s.st.IsFollowing(r.Context(), viewer.ID, p.ID)
+		canView = approved
+	}
+	if !canView {
+		s.render(w, r, "message", struct {
+			Page
+			Message string
+		}{s.page(r, p.Username), "This profile is private."})
+		return
+	}
+	if g.Adult && (viewer == nil || !viewer.AdultOptIn) {
+		s.render(w, r, "adult_gate", struct {
+			Page
+			Game *models.Game
+		}{s.page(r, g.Title), g})
+		return
+	}
+
+	logs, err := s.st.UserGameLogs(r.Context(), p.ID, g.ID, isMe)
+	if err != nil {
+		s.serverError(w, r, err)
+		return
+	}
+	status, _ := s.st.StatusFor(r.Context(), p.ID, g.ID)
+	var playtime float64
+	for _, l := range logs {
+		playtime += l.Playtime
+	}
+	data := userGameLogData{
+		Page:     s.page(r, p.Username+" · "+g.Title),
+		Profile:  p,
+		Game:     g,
+		Status:   status,
+		Rating:   s.st.RatingForUser(r.Context(), p.ID, g.ID),
+		Playtime: playtime,
+		Logs:     logs,
+		IsMe:     isMe,
+	}
+	s.render(w, r, "user_game_logs", data)
+}
+
+func featuredBadge(badges []models.Badge, key string) *models.Badge {
+	if key == "" {
+		return nil
+	}
+	for i := range badges {
+		if badges[i].Key == key {
+			b := badges[i]
+			return &b
+		}
+	}
+	return nil
+}
 
 type reviewData struct {
 	Page
@@ -389,6 +480,55 @@ func (s *Server) unblockUser(w http.ResponseWriter, r *http.Request) {
 	s.redirect(w, r, "/users/"+target.Username)
 }
 
+type trophiesData struct {
+	Page
+	Profile  *models.User
+	Trophies []models.Badge
+	Featured string
+	Earned   int
+}
+
+func (s *Server) trophiesPage(w http.ResponseWriter, r *http.Request) {
+	p, err := s.st.UserByUsername(r.Context(), r.PathValue("name"))
+	if errors.Is(err, store.ErrNotFound) {
+		s.notFound(w, r)
+		return
+	}
+	if err != nil {
+		s.serverError(w, r, err)
+		return
+	}
+	viewer := currentUser(r)
+	isMe := viewer != nil && viewer.ID == p.ID
+	approved := false
+	if viewer != nil && !isMe {
+		_, approved = s.st.IsFollowing(r.Context(), viewer.ID, p.ID)
+	}
+	if p.PrivateProfile && !isMe && !approved {
+		s.notFound(w, r)
+		return
+	}
+	s.st.CheckBadges(r.Context(), p.ID)
+	trophies, err := s.st.BadgeCatalogue(r.Context(), p.ID)
+	if err != nil {
+		s.serverError(w, r, err)
+		return
+	}
+	earned := 0
+	for _, t := range trophies {
+		if t.EarnedAt != nil {
+			earned++
+		}
+	}
+	s.render(w, r, "trophies", trophiesData{
+		Page:     s.page(r, "Trophies of "+p.Username),
+		Profile:  p,
+		Trophies: trophies,
+		Featured: p.FeaturedBadge,
+		Earned:   earned,
+	})
+}
+
 func (s *Server) statsPage(w http.ResponseWriter, r *http.Request) {
 	p, err := s.st.UserByUsername(r.Context(), r.PathValue("name"))
 	if err != nil {
@@ -401,6 +541,7 @@ func (s *Server) statsPage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	st, _ := s.st.StatsFor(r.Context(), p.ID)
+	s.st.CheckBadges(r.Context(), p.ID)
 	badges, _ := s.st.BadgesFor(r.Context(), p.ID)
 	s.render(w, r, "stats", struct {
 		Page
@@ -426,6 +567,9 @@ func (s *Server) yearPage(w http.ResponseWriter, r *http.Request) {
 	if year < 2000 || year > time.Now().Year() {
 		s.notFound(w, r)
 		return
+	}
+	if viewer != nil && viewer.ID == p.ID {
+		s.st.AwardBadge(r.Context(), p.ID, "year_in_review")
 	}
 	recap, logs, _ := s.st.YearRecap(r.Context(), p.ID, year)
 	s.render(w, r, "year", struct {

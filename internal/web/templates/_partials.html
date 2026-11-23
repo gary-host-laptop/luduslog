@@ -44,10 +44,10 @@
       {{if .Spoiler}}<span class="pill">Spoilers</span>{{end}}
       <span class="pill">{{.Status}}</span>
     </div>
-    {{if .Name}}<div class="log-title">{{if .Review}}<a href="{{reviewPath .}}">{{.Name}}</a>{{else}}{{.Name}}{{end}}</div>{{end}}
+    {{if .Name}}<div class="log-title">{{if .Review}}<a href="{{reviewPath .}}">{{.Name}}</a>{{else if and .User .Game}}<a href="/users/{{.User.Username}}/logs/{{.Game.Slug}}">{{.Name}}</a>{{else}}{{.Name}}{{end}}</div>{{end}}
     {{if .Game}}<div class="muted"><a href="/games/{{.Game.Slug}}">{{.Game.Title}}</a>{{if .PlatformName}} · {{.PlatformName}}{{end}}{{if .Playtime}} · {{hours .Playtime}}{{end}}</div>{{end}}
     {{template "review_preview" .}}
-    {{template "review_actions" .}}
+    {{if .Review}}{{template "review_actions" .}}{{else if and .User .Game}}<div class="log-actions"><a href="/users/{{.User.Username}}/logs/{{.Game.Slug}}">View log →</a></div>{{end}}
   </div>
 </article>
 {{end}}

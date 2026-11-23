@@ -427,6 +427,7 @@ func (s *Store) StatsFor(ctx context.Context, userID int64) (*UserStats, error) 
 // ---- badges ----
 
 var badgeDefs = []models.Badge{
+	{Key: "n00b", Title: "n00b", Desc: "Your account is one day old."},
 	{Key: "first_log", Title: "First Steps", Desc: "Log your first game."},
 	{Key: "first_review", Title: "Critic", Desc: "Publish your first review."},
 	{Key: "ten_games", Title: "Dedicated", Desc: "Play 10 games."},
@@ -439,18 +440,26 @@ var badgeDefs = []models.Badge{
 	{Key: "year_in_review", Title: "Recap", Desc: "View your year in review."},
 }
 
-func (s *Store) BadgesFor(ctx context.Context, userID int64) ([]models.Badge, error) {
+func (s *Store) earnedBadges(ctx context.Context, userID int64) (map[string]time.Time, error) {
 	earned := map[string]time.Time{}
-	rows, err := s.DB.QueryContext(ctx, `SELECT badge_key,earned_at FROM user_badges WHERE user_id=?`, userID)
+	rows, err := s.DB.QueryContext(ctx, `SELECT badge,earned_at FROM user_badges WHERE user_id=?`, userID)
 	if err != nil {
 		return nil, err
 	}
+	defer rows.Close()
 	for rows.Next() {
 		var k, at string
 		rows.Scan(&k, &at)
 		earned[k] = parseTime(at)
 	}
-	rows.Close()
+	return earned, rows.Err()
+}
+
+func (s *Store) BadgesFor(ctx context.Context, userID int64) ([]models.Badge, error) {
+	earned, err := s.earnedBadges(ctx, userID)
+	if err != nil {
+		return nil, err
+	}
 	var out []models.Badge
 	for _, b := range badgeDefs {
 		if at, ok := earned[b.Key]; ok {
@@ -462,8 +471,25 @@ func (s *Store) BadgesFor(ctx context.Context, userID int64) ([]models.Badge, er
 	return out, nil
 }
 
+// BadgeCatalogue returns every trophy, with EarnedAt set only for earned ones.
+func (s *Store) BadgeCatalogue(ctx context.Context, userID int64) ([]models.Badge, error) {
+	earned, err := s.earnedBadges(ctx, userID)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]models.Badge, 0, len(badgeDefs))
+	for _, b := range badgeDefs {
+		if at, ok := earned[b.Key]; ok {
+			t := at
+			b.EarnedAt = &t
+		}
+		out = append(out, b)
+	}
+	return out, nil
+}
+
 func (s *Store) AwardBadge(ctx context.Context, userID int64, key string) error {
-	_, err := s.DB.ExecContext(ctx, `INSERT INTO user_badges(user_id,badge_key,earned_at) VALUES(?,?,?) ON CONFLICT DO NOTHING`, userID, key, Now())
+	_, err := s.DB.ExecContext(ctx, `INSERT INTO user_badges(user_id,badge,earned_at) VALUES(?,?,?) ON CONFLICT DO NOTHING`, userID, key, Now())
 	return err
 }
 
@@ -485,6 +511,12 @@ func (s *Store) CheckBadges(ctx context.Context, userID int64) {
 		var n int
 		if err := s.DB.QueryRowContext(ctx, q, userID).Scan(&n); err == nil && n >= thresholds[key] {
 			s.AwardBadge(ctx, userID, key)
+		}
+	}
+	var createdAt string
+	if err := s.DB.QueryRowContext(ctx, `SELECT created_at FROM users WHERE id=?`, userID).Scan(&createdAt); err == nil {
+		if created := parseTime(createdAt); !created.IsZero() && time.Since(created) >= 24*time.Hour {
+			s.AwardBadge(ctx, userID, "n00b")
 		}
 	}
 }
@@ -545,7 +577,7 @@ func (s *Store) ResolveReport(ctx context.Context, id int64, status string) erro
 // ---- lookups used across pages ----
 
 func (s *Store) RecentReviews(ctx context.Context, limit int) ([]*models.Log, error) {
-	out, _, err := s.ReviewsFeed(ctx, 0, "all", 0, limit, 0)
+	out, _, err := s.ReviewsFeed(ctx, 0, "all", 0, "new", limit, 0)
 	return out, err
 }
 

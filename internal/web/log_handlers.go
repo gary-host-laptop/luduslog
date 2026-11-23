@@ -52,7 +52,7 @@ func (s *Server) likeGame(w http.ResponseWriter, r *http.Request) {
 	if s.isHTMX(r) {
 		likes, _ := s.st.GameLikes(r.Context(), g.ID, 0)
 		csrf, _ := r.Context().Value(ctxCSRF).(string)
-		s.renderFragment(w, "game", "game_like", map[string]any{
+		s.renderFragment(w, "game", "game_like_fragment", map[string]any{
 			"Slug": g.Slug, "Liked": liked, "Likes": likes, "CSRF": csrf,
 		})
 		return

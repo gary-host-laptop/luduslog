@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"html/template"
 	"math"
+	"path"
 	"strconv"
 	"strings"
 	"time"
@@ -31,11 +32,13 @@ func templateFuncs(s *Server) template.FuncMap {
 		"rating":          ratingText,
 		"halfStarLabel":   halfStarLabel,
 		"beatTime":        beatTime,
+		"beatParts":       beatParts,
 		"timeago":         timeAgo,
 		"date":            dateFmt,
 		"dateLong":        dateLong,
 		"releaseDate":     releaseDate,
 		"sameTitle":       sameTitle,
+		"altNames":        displayAltNames,
 		"year":            func(t time.Time) int { return t.Year() },
 		"add":             func(a, b int) int { return a + b },
 		"sub":             func(a, b int) int { return a - b },
@@ -231,24 +234,36 @@ func ratingText(r float64, scale int) string {
 	return strconv.FormatFloat(r/2, 'f', 1, 64)
 }
 
-// beatTime formats an IGDB time-to-beat value in seconds as hours and minutes.
-func beatTime(seconds int) string {
+// beatDuration splits a time-to-beat duration into display parts.
+type beatDuration struct {
+	Hours   int
+	Minutes int
+}
+
+func beatParts(seconds int) beatDuration {
 	if seconds <= 0 {
-		return "—"
+		return beatDuration{}
 	}
 	minutes := int(math.Round(float64(seconds) / 60))
 	if minutes < 1 {
 		minutes = 1
 	}
-	hours := minutes / 60
-	remainder := minutes % 60
+	return beatDuration{Hours: minutes / 60, Minutes: minutes % 60}
+}
+
+// beatTime formats an IGDB time-to-beat value in seconds as hours and minutes.
+func beatTime(seconds int) string {
+	parts := beatParts(seconds)
+	if parts.Hours == 0 && parts.Minutes == 0 {
+		return "—"
+	}
 	switch {
-	case hours == 0:
-		return fmt.Sprintf("%dm", remainder)
-	case remainder == 0:
-		return fmt.Sprintf("%dh", hours)
+	case parts.Hours == 0:
+		return fmt.Sprintf("%dm", parts.Minutes)
+	case parts.Minutes == 0:
+		return fmt.Sprintf("%dh", parts.Hours)
 	default:
-		return fmt.Sprintf("%dh %dm", hours, remainder)
+		return fmt.Sprintf("%dh %dm", parts.Hours, parts.Minutes)
 	}
 }
 
@@ -305,6 +320,34 @@ func releaseDate(s string) string {
 
 func sameTitle(a, b string) bool {
 	return strings.EqualFold(strings.TrimSpace(a), strings.TrimSpace(b))
+}
+
+var executableNameExts = map[string]bool{
+	".exe": true, ".bat": true, ".cmd": true, ".com": true, ".msi": true,
+	".bin": true, ".sh": true, ".app": true, ".dll": true, ".lnk": true,
+}
+
+// displayAltNames hides launcher/executable artifacts and case-insensitive
+// duplicates that IGDB sometimes lists as alternate titles.
+func displayAltNames(names []string) []string {
+	seen := make(map[string]bool, len(names))
+	out := make([]string, 0, len(names))
+	for _, raw := range names {
+		name := strings.TrimSpace(raw)
+		if name == "" {
+			continue
+		}
+		lower := strings.ToLower(name)
+		if executableNameExts[path.Ext(lower)] {
+			continue
+		}
+		if seen[lower] {
+			continue
+		}
+		seen[lower] = true
+		out = append(out, name)
+	}
+	return out
 }
 
 func seq(from, to int) []int {

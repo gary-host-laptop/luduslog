@@ -1,12 +1,15 @@
 {{define "content"}}
 <article>
 <header class="game-title-row">
-  <h1>{{.Game.Title}}</h1>
-  {{if .Game.Companies}}
-  <div class="game-credits">
-    <span><span class="role">By</span> {{creditNames .Game.Companies}}</span>
+  <div class="game-title-main">
+    <h1>{{.Game.Title}}</h1>
+    {{if .Game.Companies}}
+    <div class="game-credits">
+      <span><span class="role">By</span> {{creditNames .Game.Companies}}</span>
+    </div>
+    {{end}}
   </div>
-  {{end}}
+  {{if .CanEditCatalog}}<a class="icon-btn game-edit-link" href="/games/{{.Game.Slug}}/edit" aria-label="Edit game" title="Edit game"><i class="ph-light ph-pencil-simple" aria-hidden="true"></i></a>{{end}}
 </header>
 <div class="game-hero">
   <div class="game-cover-panel">
@@ -16,50 +19,11 @@
     {{if .LoggedIn}}
     <div class="game-library-card">
       <div class="library-card-top">{{template "game_like" dict "Slug" .Game.Slug "Liked" .Status.Liked "Likes" .Game.Likes "CSRF" .CSRF}}</div>
-      <div class="library-card-head">
-        <span class="muted">In your library</span>
-      </div>
-      <div class="status-bar">
-        <a class="played-pill" href="/games/{{.Game.Slug}}/log" title="Edit your log to change the played count" aria-label="Played {{.Status.Played}} times. Edit your log to change the count."><i class="ph-light ph-check-circle icon" aria-hidden="true"></i><span>Played</span><strong>{{.Status.Played}}</strong></a>
-        <form method="post" action="/games/{{.Game.Slug}}/status"><input type="hidden" name="_csrf" value="{{.CSRF}}"><input type="hidden" name="flag" value="playing"><input type="hidden" name="on" value="{{if .Status.Playing}}0{{else}}1{{end}}"><button class="{{if .Status.Playing}}on{{end}}" type="submit"><i class="ph-light ph-play icon" aria-hidden="true"></i>Playing</button></form>
-        <form method="post" action="/games/{{.Game.Slug}}/status"><input type="hidden" name="_csrf" value="{{.CSRF}}"><input type="hidden" name="flag" value="backlog"><input type="hidden" name="on" value="{{if .Status.Backlog}}0{{else}}1{{end}}"><button class="{{if .Status.Backlog}}on{{end}}" type="submit"><i class="ph-light ph-stack icon" aria-hidden="true"></i>Backlog</button></form>
-        <form method="post" action="/games/{{.Game.Slug}}/status"><input type="hidden" name="_csrf" value="{{.CSRF}}"><input type="hidden" name="flag" value="wishlist"><input type="hidden" name="on" value="{{if .Status.Wishlist}}0{{else}}1{{end}}"><button class="{{if .Status.Wishlist}}on{{end}}" type="submit"><i class="ph-light ph-heart icon" aria-hidden="true"></i>Wishlist</button></form>
-      </div>
-      <div class="game-log-actions">
-        <a class="btn btn-primary btn-block" href="/games/{{.Game.Slug}}/log"><i class="ph-light ph-notebook icon" aria-hidden="true"></i>{{if .UserLog}}Edit your log{{else}}Log this game{{end}}</a>
-        {{if .UserLog}}<a class="btn btn-sm btn-block" href="/logs/{{.UserLog.ID}}/sessions"><i class="ph-light ph-clock-counter-clockwise icon" aria-hidden="true"></i>Play sessions</a>{{end}}
-      </div>
-      {{if .MyLists}}
-      <details class="game-list-add mt1">
-        <summary>Add to a list</summary>
-        <form class="row mt1" method="post" action="/games/{{.Game.Slug}}/lists">
-          <input type="hidden" name="_csrf" value="{{.CSRF}}">
-          <select name="list_id" aria-label="Choose a list">{{range .MyLists}}<option value="{{.ID}}">{{.Title}}</option>{{end}}</select>
-          <button class="btn btn-sm" type="submit">Add</button>
-        </form>
-      </details>
-      {{end}}
-      <details class="game-library-edit mt1">
-        <summary>{{if .Owned}}Edit library entry{{else}}Add to library{{end}}</summary>
-        <form class="stack mt1" method="post" action="/library">
-          <input type="hidden" name="_csrf" value="{{.CSRF}}">
-          <input type="hidden" name="game_id" value="{{.Game.ID}}">
-          <input type="hidden" name="return_to" value="/games/{{.Game.Slug}}">
-          <select name="platform_id" aria-label="Platform"><option value="">Platform —</option>{{range .Platforms}}<option value="{{.ID}}" {{if and $.Owned $.Owned.PlatformID (eq (derefInt $.Owned.PlatformID) .ID)}}selected{{end}}>{{.Name}}</option>{{end}}</select>
-          <select name="ownership" aria-label="Ownership">
-            {{$own := ""}}{{if .Owned}}{{$own = .Owned.Ownership}}{{end}}
-            <option value="">Ownership —</option><option value="owned" {{if eq $own "owned"}}selected{{end}}>Owned</option><option value="digital" {{if eq $own "digital"}}selected{{end}}>Digital</option><option value="physical" {{if eq $own "physical"}}selected{{end}}>Physical</option><option value="rented" {{if eq $own "rented"}}selected{{end}}>Rented</option><option value="borrowed" {{if eq $own "borrowed"}}selected{{end}}>Borrowed</option><option value="subscription" {{if eq $own "subscription"}}selected{{end}}>Subscription</option><option value="emulated" {{if eq $own "emulated"}}selected{{end}}>Emulated</option>
-          </select>
-          <input type="text" name="storefront" placeholder="Storefront" value="{{if .Owned}}{{.Owned.Storefront}}{{end}}" aria-label="Storefront">
-          <input type="text" name="edition" placeholder="Edition" value="{{if .Owned}}{{.Owned.Edition}}{{end}}" aria-label="Edition">
-          <button class="btn btn-sm btn-primary" type="submit">Save library entry</button>
-        </form>
-        {{if .Owned}}<form class="mt1" method="post" action="/library/remove"><input type="hidden" name="_csrf" value="{{.CSRF}}"><input type="hidden" name="game_id" value="{{.Game.ID}}"><input type="hidden" name="return_to" value="/games/{{.Game.Slug}}"><button class="linklike" type="submit">Remove from library</button></form>{{end}}
-      </details>
       <div class="game-user-rating">
         <form class="quick-rate-form" method="post" action="/games/{{.Game.Slug}}/rate">
           <input type="hidden" name="_csrf" value="{{.CSRF}}">
           <div class="quick-rate-control">
+            <span class="rating-clear-slot">{{if .UserRating}}<button class="quick-rate-clear" type="submit" name="clear" value="1" aria-label="Clear rating"><i class="ph-light ph-x" aria-hidden="true"></i></button>{{end}}</span>
             <fieldset class="quick-rate" aria-label="Rate this game out of 5 stars">
               <legend class="sr-only">Rate this game</legend>
               {{range $star := seq 5 1}}{{$full := add $star $star}}{{$half := sub $full 1}}
@@ -69,15 +33,60 @@
               <label class="quick-half" for="qr-{{$half}}"><i class="ph-light ph-star" aria-hidden="true"></i><span class="sr-only">{{rating (float64 $half) 10}} out of 10</span></label>
               {{end}}
             </fieldset>
-            {{if .UserRating}}<button class="quick-rate-clear" type="submit" name="clear" value="1" aria-label="Clear rating"><i class="ph-light ph-x" aria-hidden="true"></i></button>{{end}}
           </div>
           <noscript><button class="btn btn-sm btn-block quick-rate-save" type="submit">Save rating</button></noscript>
         </form>
       </div>
+      <div class="game-log-actions">
+        <a class="btn btn-primary btn-block" href="/games/{{.Game.Slug}}/log"><i class="ph-light ph-notebook icon" aria-hidden="true"></i>{{if .UserLog}}Edit your log{{else}}Log this game{{end}}</a>
+        {{if .UserLog}}<a class="btn btn-sm btn-block" href="/logs/{{.UserLog.ID}}/sessions"><i class="ph-light ph-clock-counter-clockwise icon" aria-hidden="true"></i>Play sessions</a>{{end}}
+      </div>
+      <div class="status-bar">
+        <a class="played-pill" href="/games/{{.Game.Slug}}/log" title="Edit your log to change the played count" aria-label="Played {{.Status.Played}} times. Edit your log to change the count."><i class="ph-light ph-check-circle icon" aria-hidden="true"></i><span>Played</span><strong>{{.Status.Played}}</strong></a>
+        <form method="post" action="/games/{{.Game.Slug}}/status"><input type="hidden" name="_csrf" value="{{.CSRF}}"><input type="hidden" name="flag" value="playing"><input type="hidden" name="on" value="{{if .Status.Playing}}0{{else}}1{{end}}"><button class="{{if .Status.Playing}}on{{end}}" type="submit"><i class="ph-light ph-play icon" aria-hidden="true"></i>Playing</button></form>
+        <form method="post" action="/games/{{.Game.Slug}}/status"><input type="hidden" name="_csrf" value="{{.CSRF}}"><input type="hidden" name="flag" value="backlog"><input type="hidden" name="on" value="{{if .Status.Backlog}}0{{else}}1{{end}}"><button class="{{if .Status.Backlog}}on{{end}}" type="submit"><i class="ph-light ph-stack icon" aria-hidden="true"></i>Backlog</button></form>
+        <form method="post" action="/games/{{.Game.Slug}}/status"><input type="hidden" name="_csrf" value="{{.CSRF}}"><input type="hidden" name="flag" value="wishlist"><input type="hidden" name="on" value="{{if .Status.Wishlist}}0{{else}}1{{end}}"><button class="{{if .Status.Wishlist}}on{{end}}" type="submit"><i class="ph-light ph-heart icon" aria-hidden="true"></i>Wishlist</button></form>
+      </div>
+      <div class="game-library-actions">
+        <button class="btn btn-sm btn-block game-action-open" type="button" data-dialog-open="game-list-dialog"><i class="ph-light ph-list-plus icon" aria-hidden="true"></i>Add to a list</button>
+        <button class="btn btn-sm btn-block game-action-open" type="button" data-dialog-open="game-library-dialog"><i class="ph-light ph-books icon" aria-hidden="true"></i>{{if .Owned}}Edit library entry{{else}}Add to library{{end}}</button>
+      </div>
+      <noscript>
+        <style>.game-library-actions .game-action-open{display:none}</style>
+        <details class="game-library-actions game-library-actions-fallback mt1">
+          <summary class="btn btn-sm btn-block">Add to a list</summary>
+          <form class="stack mt1" method="post" action="/games/{{.Game.Slug}}/lists">
+            <input type="hidden" name="_csrf" value="{{.CSRF}}">
+            {{if .MyLists}}
+            <select name="list_id" aria-label="Choose a list">{{range .MyLists}}<option value="{{.ID}}">{{.Title}}</option>{{end}}</select>
+            <button class="btn btn-sm" type="submit">Add</button>
+            {{else}}
+            <p class="muted">You don't have any lists yet. <a href="/lists/new">Create list</a></p>
+            {{end}}
+          </form>
+        </details>
+        <details class="game-library-actions game-library-actions-fallback mt1">
+          <summary class="btn btn-sm btn-block">{{if .Owned}}Edit library entry{{else}}Add to library{{end}}</summary>
+          <form class="stack mt1" method="post" action="/library">
+            <input type="hidden" name="_csrf" value="{{.CSRF}}">
+            <input type="hidden" name="game_id" value="{{.Game.ID}}">
+            <input type="hidden" name="return_to" value="/games/{{.Game.Slug}}">
+            <select name="platform_id" aria-label="Platform"><option value="">Platform —</option>{{range .Game.Platforms}}<option value="{{.ID}}" {{if and $.Owned $.Owned.PlatformID (eq (derefInt $.Owned.PlatformID) .ID)}}selected{{end}}>{{.Name}}</option>{{end}}</select>
+            <select name="ownership" aria-label="Ownership">
+              {{$own := ""}}{{if .Owned}}{{$own = .Owned.Ownership}}{{end}}
+              <option value="">Ownership —</option><option value="owned" {{if eq $own "owned"}}selected{{end}}>Owned</option><option value="digital" {{if eq $own "digital"}}selected{{end}}>Digital</option><option value="physical" {{if eq $own "physical"}}selected{{end}}>Physical</option><option value="rented" {{if eq $own "rented"}}selected{{end}}>Rented</option><option value="borrowed" {{if eq $own "borrowed"}}selected{{end}}>Borrowed</option><option value="subscription" {{if eq $own "subscription"}}selected{{end}}>Subscription</option><option value="emulated" {{if eq $own "emulated"}}selected{{end}}>Emulated</option>
+            </select>
+            <input type="text" name="storefront" placeholder="Storefront" value="{{if .Owned}}{{.Owned.Storefront}}{{end}}" aria-label="Storefront">
+            <input type="text" name="edition" placeholder="Edition" value="{{if .Owned}}{{.Owned.Edition}}{{end}}" aria-label="Edition">
+            <button class="btn btn-sm btn-primary" type="submit">Save library entry</button>
+          </form>
+          {{if .Owned}}<form class="mt1" method="post" action="/library/remove"><input type="hidden" name="_csrf" value="{{.CSRF}}"><input type="hidden" name="game_id" value="{{.Game.ID}}"><input type="hidden" name="return_to" value="/games/{{.Game.Slug}}"><button class="linklike" type="submit">Remove from library</button></form>{{end}}
+        </details>
+      </noscript>
     </div>
     {{else}}
     <div class="game-library-card">
-      <div class="library-card-top"><span class="game-like like-count-only" aria-label="{{.Game.Likes}} likes"><i class="ph-light ph-heart icon" aria-hidden="true"></i>{{.Game.Likes}}</span></div>
+      <div class="library-card-top"><span class="game-like like-count-only" aria-label="{{.Game.Likes}} likes" title="{{.Game.Likes}} likes"><i class="ph-light ph-heart icon" aria-hidden="true"></i></span></div>
       <a class="btn btn-primary btn-block" href="/login">Log in to track this game</a>
     </div>
     {{end}}
@@ -85,7 +94,6 @@
   <div class="game-info">
     <div class="release">
       {{if .Game.ReleaseDate}}Released on {{releaseDate .Game.ReleaseDate}}{{else if .Game.ReleaseYear}}Released on {{.Game.ReleaseYear}}{{end}}
-      {{if and .Game.Franchise (not (sameTitle .Game.Franchise .Game.Title))}} · <a href="/games?franchise={{.Game.Franchise}}">{{.Game.Franchise}}</a>{{end}}
       {{if .Game.Adult}}<span class="pill">18+</span>{{end}}
     </div>
 
@@ -95,23 +103,11 @@
       <div><strong>{{.Game.Playing}}</strong><span class="stat-label"><i class="ph-light ph-play icon" aria-hidden="true"></i>playing</span></div>
       <div><strong>{{.Game.Backlogs}}</strong><span class="stat-label"><i class="ph-light ph-stack icon" aria-hidden="true"></i>backlog</span></div>
       <div><strong>{{.Game.Wishlists}}</strong><span class="stat-label"><i class="ph-light ph-heart icon" aria-hidden="true"></i>wishlist</span></div>
+      <div><strong id="game-like-count">{{.Game.Likes}}</strong><span class="stat-label"><i class="ph-light ph-heart icon" aria-hidden="true"></i>likes</span></div>
     </div>
 
-    {{if .Game.Genres}}<div class="pill-row">{{range .Game.Genres}}<a class="pill" href="/games?genre={{.}}">{{.}}</a>{{end}}</div>{{end}}
+    {{if .Game.Genres}}<div class="genre-row">{{range .Game.Genres}}<a href="/games?genre={{.}}">{{.}}</a>{{end}}</div>{{end}}
     {{if .Game.Platforms}}<div class="pill-row">{{range .Game.Platforms}}<span class="pill">{{.Name}}</span>{{end}}</div>{{end}}
-
-    {{if .Friends}}
-    <div class="card mt2">
-      <h3>Friends who played it</h3>
-      <div class="row">
-        {{range .Friends}}<a href="/users/{{.User.Username}}" class="row" style="gap:.35rem"><img class="avatar avatar-sm" src="{{avatar .User}}" alt="">{{.User.Username}}{{if .Rating}} {{stars .Rating 5}}{{end}}</a>{{end}}
-      </div>
-    </div>
-    {{end}}
-
-    {{if .Owned}}
-    <div class="muted mt1">In your library: {{.Owned.Ownership}}{{if .Owned.Platform}} · {{.Owned.Platform}}{{end}}</div>
-    {{end}}
 
     <div class="game-meta-cards">
       <section class="card game-ratings">
@@ -128,20 +124,29 @@
       </section>
       {{if .Game.TimeToBeat.HasData}}
       <div class="time-blocks">
+        {{$main := beatParts .Game.TimeToBeat.Hastily}}
         <div class="time-block">
+          <span class="sr-only">{{beatTime .Game.TimeToBeat.Hastily}}</span>
           <i class="ph-light ph-flag-checkered icon" aria-hidden="true"></i>
-          <strong>{{beatTime .Game.TimeToBeat.Hastily}}</strong>
-          <span>Main story</span>
+          {{if $main.Hours}}<span class="time-part" aria-hidden="true"><strong>{{$main.Hours}}H</strong></span>{{end}}
+          {{if $main.Minutes}}<span class="time-part" aria-hidden="true"><strong>{{$main.Minutes}}M</strong></span>{{end}}
+          <span class="time-label">Main story</span>
         </div>
+        {{$extras := beatParts .Game.TimeToBeat.Normally}}
         <div class="time-block">
+          <span class="sr-only">{{beatTime .Game.TimeToBeat.Normally}}</span>
           <i class="ph-light ph-compass icon" aria-hidden="true"></i>
-          <strong>{{beatTime .Game.TimeToBeat.Normally}}</strong>
-          <span>Main + extras</span>
+          {{if $extras.Hours}}<span class="time-part" aria-hidden="true"><strong>{{$extras.Hours}}H</strong></span>{{end}}
+          {{if $extras.Minutes}}<span class="time-part" aria-hidden="true"><strong>{{$extras.Minutes}}M</strong></span>{{end}}
+          <span class="time-label">Main + extras</span>
         </div>
+        {{$complete := beatParts .Game.TimeToBeat.Completely}}
         <div class="time-block">
+          <span class="sr-only">{{beatTime .Game.TimeToBeat.Completely}}</span>
           <i class="ph-light ph-trophy icon" aria-hidden="true"></i>
-          <strong>{{beatTime .Game.TimeToBeat.Completely}}</strong>
-          <span>Completionist</span>
+          {{if $complete.Hours}}<span class="time-part" aria-hidden="true"><strong>{{$complete.Hours}}H</strong></span>{{end}}
+          {{if $complete.Minutes}}<span class="time-part" aria-hidden="true"><strong>{{$complete.Minutes}}M</strong></span>{{end}}
+          <span class="time-label">Completionist</span>
         </div>
       </div>
       {{end}}
@@ -149,25 +154,75 @@
   </div>
 </div>
 
+{{if .LoggedIn}}
+<dialog class="game-action-dialog" id="game-list-dialog" aria-labelledby="game-list-dialog-title">
+  <form method="dialog"><button class="dialog-close" aria-label="Close add to list dialog">×</button></form>
+  <h2 id="game-list-dialog-title">Add to a list</h2>
+  {{if .MyLists}}
+  <form method="post" action="/games/{{.Game.Slug}}/lists">
+    <input type="hidden" name="_csrf" value="{{.CSRF}}">
+    <div class="dialog-options">
+      {{range .MyLists}}
+      <label class="dialog-option">
+        <input type="radio" name="list_id" value="{{.ID}}" required>
+        <span><strong>{{.Title}}</strong><span class="muted">{{privacyLabel .Privacy}} · {{.EntryCount}} {{plural .EntryCount "game" "games"}}</span></span>
+      </label>
+      {{end}}
+    </div>
+    <div class="dialog-actions">
+      <a href="/lists/new">Create list</a>
+      <button class="btn btn-sm btn-primary" type="submit">Add to list</button>
+    </div>
+  </form>
+  {{else}}
+  <p class="muted">You don't have any lists yet.</p>
+  <div class="dialog-actions">
+    <a class="btn btn-sm btn-primary" href="/lists/new">Create list</a>
+  </div>
+  {{end}}
+</dialog>
+
+<dialog class="game-action-dialog" id="game-library-dialog" aria-labelledby="game-library-dialog-title">
+  <form method="dialog"><button class="dialog-close" aria-label="Close library dialog">×</button></form>
+  <h2 id="game-library-dialog-title">{{if .Owned}}Edit library entry{{else}}Add to library{{end}}</h2>
+  <form class="stack" method="post" action="/library">
+    <input type="hidden" name="_csrf" value="{{.CSRF}}">
+    <input type="hidden" name="game_id" value="{{.Game.ID}}">
+    <input type="hidden" name="return_to" value="/games/{{.Game.Slug}}">
+    <select name="platform_id" aria-label="Platform"><option value="">Platform —</option>{{range .Game.Platforms}}<option value="{{.ID}}" {{if and $.Owned $.Owned.PlatformID (eq (derefInt $.Owned.PlatformID) .ID)}}selected{{end}}>{{.Name}}</option>{{end}}</select>
+    <select name="ownership" aria-label="Ownership">
+      {{$own := ""}}{{if .Owned}}{{$own = .Owned.Ownership}}{{end}}
+      <option value="">Ownership —</option><option value="owned" {{if eq $own "owned"}}selected{{end}}>Owned</option><option value="digital" {{if eq $own "digital"}}selected{{end}}>Digital</option><option value="physical" {{if eq $own "physical"}}selected{{end}}>Physical</option><option value="rented" {{if eq $own "rented"}}selected{{end}}>Rented</option><option value="borrowed" {{if eq $own "borrowed"}}selected{{end}}>Borrowed</option><option value="subscription" {{if eq $own "subscription"}}selected{{end}}>Subscription</option><option value="emulated" {{if eq $own "emulated"}}selected{{end}}>Emulated</option>
+    </select>
+    <input type="text" name="storefront" placeholder="Storefront" value="{{if .Owned}}{{.Owned.Storefront}}{{end}}" aria-label="Storefront">
+    <input type="text" name="edition" placeholder="Edition" value="{{if .Owned}}{{.Owned.Edition}}{{end}}" aria-label="Edition">
+    <button class="btn btn-sm btn-primary" type="submit">Save library entry</button>
+  </form>
+  {{if .Owned}}<form class="mt1" method="post" action="/library/remove"><input type="hidden" name="_csrf" value="{{.CSRF}}"><input type="hidden" name="game_id" value="{{.Game.ID}}"><input type="hidden" name="return_to" value="/games/{{.Game.Slug}}"><button class="linklike" type="submit">Remove from library</button></form>{{end}}
+</dialog>
+{{end}}
+
 {{if .Game.Summary}}<div class="prose game-summary mt2">{{md .Game.Summary}}</div>{{end}}
-{{if .Game.AltNames}}<div class="muted mt1">Also known as: {{join .Game.AltNames ", "}}</div>{{end}}
 
 {{if or .Game.Parents .Game.Remakes .Game.Updates .Game.Ports .Game.Editions .Game.Series .Game.Bundles}}
-{{$selected := true}}
+{{$selected := true}}{{$seeAll := ""}}
 <section class="section related-games" id="related" data-related-tabs>
   <div class="section-head"><h2>Related games</h2></div>
-  <div class="related-tabs" role="tablist" aria-label="Related games">
-    {{if .Game.Parents}}<button type="button" class="related-tab" role="tab" id="related-tab-parents" aria-controls="related-parents" {{if $selected}}aria-selected="true"{{else}}aria-selected="false" tabindex="-1"{{end}}>{{ancestorTab .Game.Category}}</button>{{$selected = false}}{{end}}
-    {{if .Game.Series}}<button type="button" class="related-tab" role="tab" id="related-tab-series" aria-controls="related-series" {{if $selected}}aria-selected="true"{{else}}aria-selected="false" tabindex="-1"{{end}}>Series</button>{{$selected = false}}{{end}}
-    {{if .Game.Remakes}}<button type="button" class="related-tab" role="tab" id="related-tab-remakes" aria-controls="related-remakes" {{if $selected}}aria-selected="true"{{else}}aria-selected="false" tabindex="-1"{{end}}>Remakes</button>{{$selected = false}}{{end}}
-    {{if .Game.Updates}}<button type="button" class="related-tab" role="tab" id="related-tab-updates" aria-controls="related-updates" {{if $selected}}aria-selected="true"{{else}}aria-selected="false" tabindex="-1"{{end}}>Updates</button>{{$selected = false}}{{end}}
-    {{if .Game.Ports}}<button type="button" class="related-tab" role="tab" id="related-tab-ports" aria-controls="related-ports" {{if $selected}}aria-selected="true"{{else}}aria-selected="false" tabindex="-1"{{end}}>Ports</button>{{$selected = false}}{{end}}
-    {{if .Game.Editions}}<button type="button" class="related-tab" role="tab" id="related-tab-editions" aria-controls="related-editions" {{if $selected}}aria-selected="true"{{else}}aria-selected="false" tabindex="-1"{{end}}>Editions & extras</button>{{$selected = false}}{{end}}
-    {{if .Game.Bundles}}<button type="button" class="related-tab" role="tab" id="related-tab-bundles" aria-controls="related-bundles" {{if $selected}}aria-selected="true"{{else}}aria-selected="false" tabindex="-1"{{end}}>Bundles</button>{{$selected = false}}{{end}}
+  <div class="related-tabbar">
+    <div class="related-tabs" role="tablist" aria-label="Related games">
+      {{if .Game.Parents}}<button type="button" class="related-tab" role="tab" id="related-tab-parents" aria-controls="related-parents" data-see-all="/games/{{.Game.Slug}}/related/parents" {{if $selected}}aria-selected="true"{{else}}aria-selected="false" tabindex="-1"{{end}}>{{ancestorTab .Game.Category}}</button>{{if $selected}}{{$seeAll = printf "/games/%s/related/parents" .Game.Slug}}{{end}}{{$selected = false}}{{end}}
+      {{if .Game.Series}}<button type="button" class="related-tab" role="tab" id="related-tab-series" aria-controls="related-series" data-see-all="/games/{{.Game.Slug}}/related/series" {{if $selected}}aria-selected="true"{{else}}aria-selected="false" tabindex="-1"{{end}}>Series</button>{{if $selected}}{{$seeAll = printf "/games/%s/related/series" .Game.Slug}}{{end}}{{$selected = false}}{{end}}
+      {{if .Game.Remakes}}<button type="button" class="related-tab" role="tab" id="related-tab-remakes" aria-controls="related-remakes" data-see-all="/games/{{.Game.Slug}}/related/remakes" {{if $selected}}aria-selected="true"{{else}}aria-selected="false" tabindex="-1"{{end}}>Remakes</button>{{if $selected}}{{$seeAll = printf "/games/%s/related/remakes" .Game.Slug}}{{end}}{{$selected = false}}{{end}}
+      {{if .Game.Updates}}<button type="button" class="related-tab" role="tab" id="related-tab-updates" aria-controls="related-updates" data-see-all="/games/{{.Game.Slug}}/related/updates" {{if $selected}}aria-selected="true"{{else}}aria-selected="false" tabindex="-1"{{end}}>Updates</button>{{if $selected}}{{$seeAll = printf "/games/%s/related/updates" .Game.Slug}}{{end}}{{$selected = false}}{{end}}
+      {{if .Game.Ports}}<button type="button" class="related-tab" role="tab" id="related-tab-ports" aria-controls="related-ports" data-see-all="/games/{{.Game.Slug}}/related/ports" {{if $selected}}aria-selected="true"{{else}}aria-selected="false" tabindex="-1"{{end}}>Ports</button>{{if $selected}}{{$seeAll = printf "/games/%s/related/ports" .Game.Slug}}{{end}}{{$selected = false}}{{end}}
+      {{if .Game.Editions}}<button type="button" class="related-tab" role="tab" id="related-tab-editions" aria-controls="related-editions" data-see-all="/games/{{.Game.Slug}}/related/editions" {{if $selected}}aria-selected="true"{{else}}aria-selected="false" tabindex="-1"{{end}}>Editions & extras</button>{{if $selected}}{{$seeAll = printf "/games/%s/related/editions" .Game.Slug}}{{end}}{{$selected = false}}{{end}}
+      {{if .Game.Bundles}}<button type="button" class="related-tab" role="tab" id="related-tab-bundles" aria-controls="related-bundles" data-see-all="/games/{{.Game.Slug}}/related/bundles" {{if $selected}}aria-selected="true"{{else}}aria-selected="false" tabindex="-1"{{end}}>Bundles</button>{{if $selected}}{{$seeAll = printf "/games/%s/related/bundles" .Game.Slug}}{{end}}{{$selected = false}}{{end}}
+    </div>
+    <a class="more related-see-all" data-related-see-all href="{{$seeAll}}">See all</a>
   </div>
   {{if .Game.Parents}}
   <div class="related-group" id="related-parents" role="tabpanel" aria-labelledby="related-tab-parents">
-    <h3>{{ancestorTab .Game.Category}}</h3>
+    <div class="related-group-head"><h3>{{ancestorTab .Game.Category}}</h3><a class="btn btn-sm" href="/games/{{.Game.Slug}}/related/parents">See all</a></div>
     <div class="grid grid-cards">
       {{range .Game.Parents}}{{template "game_card_role" (dict "Game" . "Role" (relationRole .Category))}}{{end}}
     </div>
@@ -175,34 +230,57 @@
   {{end}}
   {{if .Game.Series}}
   <div class="related-group" id="related-series" role="tabpanel" aria-labelledby="related-tab-series">
-    <h3>Series</h3>{{template "game_grid" .Game.Series}}
+    <div class="related-group-head"><h3>Series</h3><a class="btn btn-sm" href="/games/{{.Game.Slug}}/related/series">See all</a></div>{{template "game_grid" .Game.Series}}
   </div>
   {{end}}
   {{if .Game.Remakes}}
   <div class="related-group" id="related-remakes" role="tabpanel" aria-labelledby="related-tab-remakes">
-    <h3>Remakes</h3>{{template "game_grid" .Game.Remakes}}
+    <div class="related-group-head"><h3>Remakes</h3><a class="btn btn-sm" href="/games/{{.Game.Slug}}/related/remakes">See all</a></div>{{template "game_grid" .Game.Remakes}}
   </div>
   {{end}}
   {{if .Game.Updates}}
   <div class="related-group" id="related-updates" role="tabpanel" aria-labelledby="related-tab-updates">
-    <h3>Updates</h3>{{template "game_grid" .Game.Updates}}
+    <div class="related-group-head"><h3>Updates</h3><a class="btn btn-sm" href="/games/{{.Game.Slug}}/related/updates">See all</a></div>{{template "game_grid" .Game.Updates}}
   </div>
   {{end}}
   {{if .Game.Ports}}
   <div class="related-group" id="related-ports" role="tabpanel" aria-labelledby="related-tab-ports">
-    <h3>Ports</h3>{{template "game_grid" .Game.Ports}}
+    <div class="related-group-head"><h3>Ports</h3><a class="btn btn-sm" href="/games/{{.Game.Slug}}/related/ports">See all</a></div>{{template "game_grid" .Game.Ports}}
   </div>
   {{end}}
   {{if .Game.Editions}}
   <div class="related-group" id="related-editions" role="tabpanel" aria-labelledby="related-tab-editions">
-    <h3>Editions & extras</h3>{{template "game_grid" .Game.Editions}}
+    <div class="related-group-head"><h3>Editions & extras</h3><a class="btn btn-sm" href="/games/{{.Game.Slug}}/related/editions">See all</a></div>{{template "game_grid" .Game.Editions}}
   </div>
   {{end}}
   {{if .Game.Bundles}}
   <div class="related-group" id="related-bundles" role="tabpanel" aria-labelledby="related-tab-bundles">
-    <h3>Bundles</h3>{{template "game_grid" .Game.Bundles}}
+    <div class="related-group-head"><h3>Bundles</h3><a class="btn btn-sm" href="/games/{{.Game.Slug}}/related/bundles">See all</a></div>{{template "game_grid" .Game.Bundles}}
   </div>
   {{end}}
+</section>
+{{end}}
+
+{{if .Friends}}
+<section class="section friends-activity" id="friends-activity">
+  <div class="section-head"><h2>Friends' activity</h2></div>
+  <ul class="friend-activity-list">
+    {{range .Friends}}
+    <li class="friend-activity-row">
+      <a href="/users/{{.User.Username}}/logs/{{$.Game.Slug}}" data-description="{{.Description}}" aria-label="{{.Description}}">
+        <img class="avatar avatar-sm" src="{{avatar .User}}" alt="">
+        <span class="friend-activity-name">{{.User.Username}}</span>
+        <span class="friend-activity-status">
+          {{if gt .Status.Played 0}}<i class="ph-light ph-check-circle" role="img" title="Played" aria-label="Played"></i>{{end}}
+          {{if .Status.Playing}}<i class="ph-light ph-play" role="img" title="Playing" aria-label="Playing"></i>{{end}}
+          {{if .Status.Backlog}}<i class="ph-light ph-stack" role="img" title="Backlog" aria-label="Backlog"></i>{{end}}
+          {{if .Status.Wishlist}}<i class="ph-light ph-heart" role="img" title="Wishlist" aria-label="Wishlist"></i>{{end}}
+        </span>
+        {{if .Rating}}<span class="friend-activity-rating" aria-label="Rated {{rating .Rating 10}} out of 10">{{rating .Rating 10}} <i class="ph-fill ph-star" aria-hidden="true"></i></span>{{end}}
+      </a>
+    </li>
+    {{end}}
+  </ul>
 </section>
 {{end}}
 
@@ -212,9 +290,9 @@
     {{if .Game.Modes}}<dt class="muted">Modes</dt><dd style="margin:0">{{range .Game.Modes}}{{.}} {{end}}</dd>{{end}}
     {{if .Game.Themes}}<dt class="muted">Themes</dt><dd style="margin:0">{{range .Game.Themes}}{{.}} {{end}}</dd>{{end}}
     {{if .Game.ReleaseDates}}<dt class="muted">Releases</dt><dd style="margin:0">{{range .Game.ReleaseDates}}{{if .Platform}}{{.Platform}} · {{end}}{{if .Human}}{{.Human}}{{else}}{{releaseDate .Date}}{{end}}{{if .Region}} · {{.Region}}{{end}}{{if .Status}} · {{.Status}}{{end}}<br>{{end}}</dd>{{end}}
+    {{if $names := altNames .Game.AltNames}}<dt class="muted">Also known as</dt><dd style="margin:0">{{join $names ", "}}</dd>{{end}}
   </dl>
-  <div class="mt1"><a class="btn btn-sm" href="/report?target_type=game&target_id={{.Game.ID}}">Report an issue</a>
-    {{if .IsAdmin}}<form class="inline-form" method="post" action="/admin/games/{{.Game.Slug}}/refresh"><input type="hidden" name="_csrf" value="{{.CSRF}}"><button class="btn btn-sm" type="submit">Refresh from IGDB</button></form>{{end}}</div>
+  {{if .IsAdmin}}<div class="mt1"><form class="inline-form" method="post" action="/admin/games/{{.Game.Slug}}/refresh"><input type="hidden" name="_csrf" value="{{.CSRF}}"><button class="btn btn-sm" type="submit">Refresh from IGDB</button></form></div>{{end}}
 </section>
 
 {{if or .Game.Screenshots .Game.Videos}}
@@ -286,6 +364,11 @@
 {{define "game_like"}}
 <form class="game-like" method="post" action="/games/{{.Slug}}/like" hx-post="/games/{{.Slug}}/like" hx-target="this" hx-swap="outerHTML">
   <input type="hidden" name="_csrf" value="{{.CSRF}}">
-  <button class="heart{{if .Liked}} on{{end}}" type="submit" aria-pressed="{{if .Liked}}true{{else}}false{{end}}" aria-label="{{if .Liked}}Unlike{{else}}Like{{end}} this game"><i class="ph-light ph-heart icon" aria-hidden="true"></i>{{if .Likes}}<span class="heart-count">{{.Likes}}</span>{{end}}</button>
+  <button class="heart{{if .Liked}} on{{end}}" type="submit" aria-pressed="{{if .Liked}}true{{else}}false{{end}}" aria-label="{{if .Liked}}Unlike{{else}}Like{{end}} this game" title="{{if .Liked}}Unlike{{else}}Like{{end}} this game"><i class="ph-light ph-heart icon" aria-hidden="true"></i></button>
 </form>
+{{end}}
+
+{{define "game_like_fragment"}}
+{{template "game_like" .}}
+<strong id="game-like-count" hx-swap-oob="true">{{.Likes}}</strong>
 {{end}}

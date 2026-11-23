@@ -18,7 +18,6 @@
     <div class="profile-actions">
       {{if .IsMe}}
         <a class="btn" href="/settings">Edit profile</a>
-        <a class="btn" href="/users/{{.Profile.Username}}/stats">Stats</a>
       {{else if .Page.User}}
         {{if .IsFollowing}}
           <form method="post" action="/users/{{.Profile.Username}}/unfollow"><input type="hidden" name="_csrf" value="{{.CSRF}}"><button class="btn" type="submit">{{if .Pending}}Requested{{else}}Following{{end}}</button></form>
@@ -30,10 +29,34 @@
       {{else}}
         <a class="btn btn-primary" href="/login">Follow</a>
       {{end}}
-      {{if .Profile.Federation}}<a class="btn btn-sm" href="/users/{{.Profile.Username}}" hx-boost="false" onclick="navigator.clipboard.writeText('{{abs (printf "/users/%s" .Profile.Username)}}')">Copy fediverse handle</a>{{end}}
     </div>
   </div>
-  {{if .Profile.Bio}}<div class="profile-bio prose">{{md .Profile.Bio}}</div>{{end}}
+  {{if .Private}}
+    {{if .Profile.Bio}}<div class="profile-bio prose">{{md .Profile.Bio}}</div>{{end}}
+  {{else}}
+  <div class="profile-about">
+    <div class="profile-bio prose">
+      {{if .Profile.Bio}}{{md .Profile.Bio}}{{else}}<p class="muted">No bio yet.</p>{{end}}
+    </div>
+    <aside class="profile-trophy" aria-label="Highlighted trophy">
+      <div class="profile-trophy-head">
+        <span class="tabs-label">Trophy</span>
+      </div>
+      {{if .FeaturedBadge}}
+      <div class="profile-trophy-card">
+        <i class="ph-fill ph-trophy icon" aria-hidden="true"></i>
+        <div>
+          <strong>{{.FeaturedBadge.Title}}</strong>
+          <div class="muted">{{.FeaturedBadge.Desc}}</div>
+          {{if .FeaturedBadge.EarnedAt}}<div class="muted">Earned {{.FeaturedBadge.EarnedAt.Format "Jan 2, 2006"}}</div>{{end}}
+        </div>
+      </div>
+      {{else}}
+      <p class="muted">No trophy highlighted yet.</p>
+      {{end}}
+    </aside>
+  </div>
+  {{end}}
 </div>
 
 {{if .Private}}
@@ -46,6 +69,7 @@
   <a href="/users/{{.Profile.Username}}?tab=lists" class="{{if eq .Tab "lists"}}on{{end}}">Lists</a>
   <a href="/users/{{.Profile.Username}}?tab=activity" class="{{if eq .Tab "activity"}}on{{end}}">Activity</a>
   <a href="/users/{{.Profile.Username}}/stats">Stats</a>
+  <a href="/users/{{.Profile.Username}}/trophies">Trophies</a>
 </div>
 
 {{if eq .Tab "overview"}}
@@ -54,24 +78,23 @@
     <div class="section-head"><h2>Favourite games</h2></div>
     <div class="fav-grid">{{range .Favorites}}<a href="/games/{{.Slug}}"><img class="game-cover" src="{{cover .}}" alt="{{.Title}}" title="{{.Title}}"></a>{{end}}</div>
   </section>{{end}}
+  {{if .RecentlyPlayed}}
+  <section class="section">
+    <div class="section-head"><h2>Recently played</h2></div>
+    <div class="recent-grid">{{range .RecentlyPlayed}}
+      <a class="recent-card" href="/games/{{.Game.Slug}}">
+        <img class="game-cover" src="{{cover .Game}}" alt="{{.Game.Title}}">
+        <div class="recent-title">{{.Game.Title}}</div>
+        <div class="recent-meta"><span class="pill">{{.Event}}</span><span>{{dateLong .EventAt}}</span></div>
+        {{if .Rating}}<div class="recent-rating">{{stars .Rating 5}} <span>{{rating .Rating 10}} / 10</span></div>{{end}}
+      </a>
+    {{end}}</div>
+  </section>{{end}}
   {{if .Reviews}}
   <section class="section">
     <div class="section-head"><h2>Recent reviews</h2><a class="more" href="?tab=reviews">All reviews →</a></div>
     {{range .Reviews}}{{template "log_row" .}}{{end}}
   </section>{{end}}
-  {{if .Logs}}
-  <section class="section">
-    <div class="section-head"><h2>Journal</h2><a class="more" href="?tab=logs">Everything →</a></div>
-    {{range .Logs}}{{template "log_row" .}}{{end}}
-  </section>{{end}}
-  {{if .Lists}}
-  <section class="section">
-    <div class="section-head"><h2>Lists</h2><a class="more" href="?tab=lists">All →</a></div>
-    <div class="grid grid-2">{{range .Lists}}<a class="list-card" href="/users/{{$.Profile.Username}}/lists/{{.Slug}}"><div class="list-thumbs">{{range .Entries}}<img src="{{cover .Game}}" alt="">{{end}}</div><div><h3>{{.Title}}</h3><div class="muted">{{len .Entries}} games · {{privacyLabel .Privacy}}</div></div></a>{{end}}</div>
-  </section>{{end}}
-  {{if .Friends}}
-  <section class="section"><div class="section-head"><h2>Friends</h2></div><div class="grid grid-3">{{range .Friends}}{{template "user_row" .}}{{end}}</div></section>
-  {{end}}
 {{else if eq .Tab "reviews"}}
   <section class="section" style="margin-top:0">
   {{range .Reviews}}{{template "log_row" .}}{{else}}<div class="empty">No reviews yet.</div>{{end}}

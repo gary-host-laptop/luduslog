@@ -29,6 +29,7 @@ type settingsData struct {
 	Favorites      []models.Game
 	FavoriteSearch []models.Game
 	FavoriteQuery  string
+	Badges         []models.Badge
 	SoleAdmin      bool
 }
 
@@ -55,6 +56,8 @@ func (s *Server) settingsPage(w http.ResponseWriter, r *http.Request) {
 		data.SoleAdmin = u.IsAdmin() && s.st.AdminCount(r.Context()) <= 1
 	}
 	if tab == "" || tab == "profile" {
+		s.st.CheckBadges(r.Context(), u.ID)
+		data.Badges, _ = s.st.BadgesFor(r.Context(), u.ID)
 		data.Favorites = s.st.FavoriteGames(r.Context(), u.ID, 5)
 		data.FavoriteQuery = strings.TrimSpace(r.URL.Query().Get("q"))
 		if data.FavoriteQuery != "" {
@@ -161,6 +164,41 @@ func (s *Server) settingsProfile(w http.ResponseWriter, r *http.Request) {
 	}
 	s.flash(w, r, "success", "Profile updated.")
 	s.redirect(w, r, "/settings")
+}
+
+func (s *Server) settingsTrophy(w http.ResponseWriter, r *http.Request) {
+	u := currentUser(r)
+	key := strings.TrimSpace(r.FormValue("badge"))
+	if key != "" {
+		s.st.CheckBadges(r.Context(), u.ID)
+		badges, err := s.st.BadgesFor(r.Context(), u.ID)
+		if err != nil {
+			s.serverError(w, r, err)
+			return
+		}
+		earned := false
+		for _, b := range badges {
+			if b.Key == key {
+				earned = true
+				break
+			}
+		}
+		if !earned {
+			s.flash(w, r, "error", "Choose one of your earned trophies.")
+			s.redirect(w, r, "/settings#trophy")
+			return
+		}
+	}
+	if err := s.st.SetFeaturedBadge(r.Context(), u.ID, key); err != nil {
+		s.serverError(w, r, err)
+		return
+	}
+	if key == "" {
+		s.flash(w, r, "success", "Trophy highlight cleared.")
+	} else {
+		s.flash(w, r, "success", "Trophy highlighted on your profile.")
+	}
+	s.redirect(w, r, "/settings#trophy")
 }
 
 func parseLinks(raw string) []models.SocialLink {

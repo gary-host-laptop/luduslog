@@ -111,6 +111,36 @@ func (s *Server) adminSetRole(w http.ResponseWriter, r *http.Request) {
 	s.redirect(w, r, "/admin/users")
 }
 
+// adminSetCatalogEditor grants or revokes the trusted catalog editor privilege.
+func (s *Server) adminSetCatalogEditor(w http.ResponseWriter, r *http.Request) {
+	u := currentUser(r)
+	id, _ := strconv.ParseInt(r.PathValue("id"), 10, 64)
+	target, err := s.st.UserByID(r.Context(), id)
+	if err != nil {
+		s.notFound(w, r)
+		return
+	}
+	enabled := r.FormValue("enabled") == "1"
+	if err := s.st.SetCatalogEditor(r.Context(), id, enabled); err != nil {
+		s.serverError(w, r, err)
+		return
+	}
+	action := "revoke_catalog_editor"
+	if enabled {
+		action = "grant_catalog_editor"
+	}
+	if err := s.st.Audit(r.Context(), u.ID, action, target.Username); err != nil {
+		s.serverError(w, r, err)
+		return
+	}
+	if enabled {
+		s.flash(w, r, "success", target.Username+" can now edit the game catalog.")
+	} else {
+		s.flash(w, r, "success", target.Username+" can no longer edit the game catalog.")
+	}
+	s.redirect(w, r, "/admin/users")
+}
+
 func (s *Server) adminSuspend(w http.ResponseWriter, r *http.Request) {
 	u := currentUser(r)
 	id, _ := strconv.ParseInt(r.PathValue("id"), 10, 64)

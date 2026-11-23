@@ -396,7 +396,7 @@ func TestGameMediaAndReviewsRoute(t *testing.T) {
 	}
 
 	status, reviewsBody := getBody(t, http.DefaultClient, ts.URL+"/games/celeste/reviews?sort=rating")
-	if status != 200 || !strings.Contains(reviewsBody, "Highest rated") || !strings.Contains(reviewsBody, "?sort=rating") {
+	if status != 200 || !strings.Contains(reviewsBody, "Highest rated") || !strings.Contains(reviewsBody, "sort=rating") {
 		t.Fatalf("game reviews = %d: %s", status, reviewsBody[:min(len(reviewsBody), 500)])
 	}
 	if !strings.Contains(reviewsBody, "Back to Celeste") {
@@ -512,7 +512,8 @@ func TestPlayedCountLogFormAndLikeFragment(t *testing.T) {
 	}
 	fragment, _ := io.ReadAll(resp.Body)
 	resp.Body.Close()
-	if resp.StatusCode != 200 || !strings.Contains(string(fragment), "hx-post=\"/games/counter/like\"") || !strings.Contains(string(fragment), "heart on") || !strings.Contains(string(fragment), "heart-count") {
+	if resp.StatusCode != 200 || !strings.Contains(string(fragment), "hx-post=\"/games/counter/like\"") || !strings.Contains(string(fragment), "heart on") ||
+		!strings.Contains(string(fragment), `id="game-like-count" hx-swap-oob="true">1<`) || strings.Contains(string(fragment), "heart-count") {
 		t.Fatalf("like fragment = %d: %s", resp.StatusCode, fragment)
 	}
 	stStatus, _ = st.StatusFor(ctx, alice.ID, game.ID)

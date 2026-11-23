@@ -5,21 +5,19 @@
     <div class="muted">{{.Total}} published</div>
   </div>
 </div>
-{{if .Game}}
 <div class="tabs">
-  <a href="/games/{{.Game.Slug}}/reviews?sort=popular" class="{{if eq .Sort "popular"}}on{{end}}">Popular</a>
-  <a href="/games/{{.Game.Slug}}/reviews?sort=newest" class="{{if eq .Sort "newest"}}on{{end}}">Newest</a>
-  <a href="/games/{{.Game.Slug}}/reviews?sort=rating" class="{{if eq .Sort "rating"}}on{{end}}">Highest rated</a>
-  <a href="/games/{{.Game.Slug}}/reviews?sort=oldest" class="{{if eq .Sort "oldest"}}on{{end}}">Oldest</a>
+  <a href="{{.Base}}?tab=all&amp;sort={{.Sort}}" class="{{if eq .Tab "all"}}on{{end}}">Everyone</a>
+  <a href="{{.Base}}?tab=friends&amp;sort={{.Sort}}" class="{{if eq .Tab "friends"}}on{{end}}">Friends</a>
+  <a href="{{.Base}}?tab=following&amp;sort={{.Sort}}" class="{{if eq .Tab "following"}}on{{end}}">Following</a>
 </div>
-<div class="mb2"><a href="/games/{{.Game.Slug}}">← Back to {{.Game.Title}}</a></div>
-{{else}}
-<div class="tabs">
-  <a href="/reviews?tab=all" class="{{if eq .Tab "all"}}on{{end}}">Everyone</a>
-  <a href="/reviews?tab=friends" class="{{if eq .Tab "friends"}}on{{end}}">Friends</a>
-  <a href="/reviews?tab=following" class="{{if eq .Tab "following"}}on{{end}}">Following</a>
+<div class="tabs tabs-sort" aria-label="Review sorting">
+  <span class="tabs-label">Sort</span>
+  <a href="{{.Base}}?tab={{.Tab}}&amp;sort=popular" class="{{if eq .Sort "popular"}}on{{end}}">Popular</a>
+  <a href="{{.Base}}?tab={{.Tab}}&amp;sort=newest" class="{{if eq .Sort "newest"}}on{{end}}">Newest</a>
+  <a href="{{.Base}}?tab={{.Tab}}&amp;sort=rating" class="{{if eq .Sort "rating"}}on{{end}}">Highest rated</a>
+  <a href="{{.Base}}?tab={{.Tab}}&amp;sort=oldest" class="{{if eq .Sort "oldest"}}on{{end}}">Oldest</a>
 </div>
-{{end}}
+{{if .Game}}<div class="mb2"><a href="/games/{{.Game.Slug}}">← Back to {{.Game.Title}}</a></div>{{end}}
 {{if .Reviews}}
   {{range .Reviews}}<div class="review-card mb1">
     <div class="log-head">
@@ -33,6 +31,16 @@
   </div>{{end}}
   {{template "pager" .}}
 {{else}}
-  <div class="empty"><h3>No reviews here yet</h3><p>{{if .Game}}Be the first to review this game.{{else}}Follow more people or write the first review.{{end}}</p><a class="btn" href="/games">Find a game</a></div>
+  <div class="empty">
+    <h3>No reviews here yet</h3>
+    {{if eq .Tab "all"}}
+      <p>{{if .Game}}Be the first to review this game.{{else}}Follow more people or write the first review.{{end}}</p>
+    {{else if not .LoggedIn}}
+      <p>Log in to see reviews from people you {{if eq .Tab "friends"}}are friends with{{else}}follow{{end}}.</p>
+    {{else}}
+      <p>No reviews from {{if eq .Tab "friends"}}friends{{else}}people you follow{{end}} yet.</p>
+    {{end}}
+    <a class="btn" href="/games">Find a game</a>
+  </div>
 {{end}}
 {{end}}

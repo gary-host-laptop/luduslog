@@ -1,0 +1,22 @@
+{{define "content"}}
+<div class="section-head">
+  <div>
+    <h1 class="mb0">{{.Profile.Username}}'s trophies</h1>
+    <div class="muted">{{.Earned}} of {{len .Trophies}} earned</div>
+  </div>
+  <a class="btn btn-sm" href="/users/{{.Profile.Username}}">← Profile</a>
+</div>
+
+<div class="grid grid-3">
+  {{range .Trophies}}
+  <article class="trophy-card{{if not .EarnedAt}} locked{{end}}">
+    <div class="trophy-icon"><i class="ph-fill ph-trophy icon" aria-hidden="true"></i></div>
+    <div>
+      <h2>{{.Title}}{{if eq $.Featured .Key}} <span class="pill">Highlighted</span>{{end}}</h2>
+      <p class="muted">{{.Desc}}</p>
+      {{if .EarnedAt}}<div class="muted">Earned {{.EarnedAt.Format "Jan 2, 2006"}}</div>{{else}}<div class="muted">Locked</div>{{end}}
+    </div>
+  </article>
+  {{end}}
+</div>
+{{end}}
