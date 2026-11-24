@@ -474,11 +474,11 @@ func TestFavouriteGamesWeb(t *testing.T) {
 		t.Fatal("profile overview did not show favourites")
 	}
 	favPos := strings.Index(profile, "<h2>Favourite games</h2>")
-	reviewPos := strings.Index(profile, "<h2>Recent reviews</h2>")
-	if favPos < 0 || reviewPos < 0 || favPos > reviewPos {
+	activityPos := strings.Index(profile, "<h2>Activity</h2>")
+	if favPos < 0 || activityPos < 0 || favPos > activityPos {
 		t.Fatal("favourite games are not the first profile overview section")
 	}
-	for _, removed := range []string{"<h2>Journal</h2>", "<h2>Lists</h2>", "<h2>Friends</h2>"} {
+	for _, removed := range []string{"<h2>Recent reviews</h2>", "<h2>Journal</h2>", "<h2>Lists</h2>", "<h2>Friends</h2>"} {
 		if strings.Contains(profile, removed) {
 			t.Fatalf("profile overview still contains %s", removed)
 		}
@@ -705,7 +705,7 @@ func TestProfilePolishAndInlineTrophies(t *testing.T) {
 	client, _ := authedClient(t, ts, st, alice)
 
 	_, body := getBody(t, client, ts.URL+"/users/polishalice")
-	for _, want := range []string{"Joined " + oldTime.Format("2006/01/02"), `class="profile-trophy-card"`, `class="byline-author"`} {
+	for _, want := range []string{"Joined " + oldTime.Format("2006/01/02"), `class="profile-trophy-card"`, `class="timeline-item timeline-review"`} {
 		if !strings.Contains(body, want) {
 			t.Errorf("profile missing %q", want)
 		}
@@ -1007,8 +1007,8 @@ func TestHomeFeedRendersMissingUser(t *testing.T) {
 		t.Fatal("test server handler is not *Server")
 	}
 	data := homeData{
-		Feed:  []models.Activity{{Type: "log"}},
-		Lists: []*models.List{{Slug: "orphan", Title: "Orphan list"}},
+		Timeline: []models.TimelineItem{{Kind: "log"}},
+		Lists:    []*models.List{{Slug: "orphan", Title: "Orphan list"}},
 	}
 	var buf bytes.Buffer
 	if err := srv.pages["home"].ExecuteTemplate(&buf, "content", data); err != nil {

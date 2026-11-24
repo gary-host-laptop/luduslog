@@ -576,7 +576,7 @@ func TestReviewPreviewsAndSearchTabs(t *testing.T) {
 	if !strings.Contains(profile, "Read more →") || !strings.Contains(profile, "/users/alice/reviews/") {
 		t.Fatal("profile review lacks Read more")
 	}
-	_, journal := getBody(t, http.DefaultClient, ts.URL+"/users/journalonly?tab=logs")
+	_, journal := getBody(t, http.DefaultClient, ts.URL+"/users/journalonly?kind=logs")
 	if strings.Contains(journal, "/users/journalonly/reviews/") || strings.Contains(journal, "Read more →") {
 		t.Fatal("bare journal entry renders a broken review link")
 	}

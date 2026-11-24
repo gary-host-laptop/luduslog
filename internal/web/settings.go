@@ -18,21 +18,22 @@ import (
 
 type settingsData struct {
 	Page
-	Tab             string
-	Error           string
-	Links           []models.SocialLink
-	Blocks          []*models.User
-	Folders         []models.Folder
-	FolderLists     map[int64][]*models.List
-	MyLists         []*models.List
-	Sessions        []models.Session
-	Favorites       []models.Game
-	FavoriteSearch  []models.Game
-	FavoriteQuery   string
-	FeaturedReviews []*models.Log
-	FeaturedLists   []*models.List
-	Badges          []models.Badge
-	SoleAdmin       bool
+	Tab                string
+	Error              string
+	Links              []models.SocialLink
+	Blocks             []*models.User
+	Folders            []models.Folder
+	FolderLists        map[int64][]*models.List
+	MyLists            []*models.List
+	Sessions           []models.Session
+	Favorites          []models.Game
+	FavoriteSearch     []models.Game
+	FavoriteQuery      string
+	FeaturedReviews    []*models.Log
+	FeaturedLists      []*models.List
+	Badges             []models.Badge
+	ActivityVisibility map[string]string
+	SoleAdmin          bool
 }
 
 func (s *Server) settingsPage(w http.ResponseWriter, r *http.Request) {
@@ -45,6 +46,9 @@ func (s *Server) settingsPage(w http.ResponseWriter, r *http.Request) {
 	data := settingsData{Page: s.page(r, "Settings"), Tab: tab, Links: s.st.SocialLinksFor(r.Context(), u.ID)}
 	if tab == "blocks" {
 		data.Blocks, _ = s.st.BlockedUsers(r.Context(), u.ID)
+	}
+	if tab == "privacy" {
+		data.ActivityVisibility, _ = s.st.ActivityVisibility(r.Context(), u.ID)
 	}
 	if tab == "folders" {
 		data.Folders, _ = s.st.Folders(r.Context(), u.ID)
@@ -310,7 +314,7 @@ func (s *Server) settingsPreferences(w http.ResponseWriter, r *http.Request) {
 		StarScale: scale, CoverMode: cover, TimeDisplay: r.FormValue("time_display"),
 		InfiniteScroll: r.FormValue("infinite_scroll") == "1", Theme: theme,
 		HighContrast: r.FormValue("high_contrast") == "1", Timezone: r.FormValue("timezone"),
-		FadePlayed: r.FormValue("fade_played") == "1", JournalView: r.FormValue("journal_view"),
+		FadePlayed: r.FormValue("fade_played") == "1", JournalView: u.JournalView,
 		CommentPrivacy: r.FormValue("comment_privacy"), NotePrivacy: r.FormValue("note_privacy"),
 		Federation: u.Federation, FedStatuses: u.FedStatuses, FedReviews: u.FedReviews, FedLists: u.FedLists,
 	})
@@ -342,6 +346,22 @@ func (s *Server) settingsPrivacy(w http.ResponseWriter, r *http.Request) {
 		Federation: u.Federation, FedStatuses: u.FedStatuses, FedReviews: u.FedReviews, FedLists: u.FedLists,
 	})
 	if err != nil {
+		s.serverError(w, r, err)
+		return
+	}
+	visibility := make(map[string]string, len(store.ActivityKinds))
+	for _, kind := range store.ActivityKinds {
+		value := strings.ToLower(strings.TrimSpace(r.FormValue("activity_" + kind)))
+		switch value {
+		case "everyone", "followers", "private":
+			visibility[kind] = value
+		default:
+			s.flash(w, r, "error", "Choose a valid visibility for every activity type.")
+			s.redirect(w, r, "/settings?tab=privacy")
+			return
+		}
+	}
+	if err := s.st.SetActivityVisibility(r.Context(), u.ID, visibility); err != nil {
 		s.serverError(w, r, err)
 		return
 	}

@@ -13,25 +13,47 @@ import (
 type homeData struct {
 	Page
 	Trending    []models.Game
+	ComingSoon  []comingSoonItem
 	Sleepers    []models.Game
 	Anticipated []models.Game
 	Reviews     []*models.Log
 	Lists       []*models.List
-	Feed        []models.Activity
+	Timeline    []models.TimelineItem
 	News        []models.News
 	GamesCount  int
 }
 
+type comingSoonItem struct {
+	Game       models.Game
+	Wishlisted bool
+}
+
 func (s *Server) home(w http.ResponseWriter, r *http.Request) {
 	u := currentUser(r)
+	allowAdult := u != nil && u.AdultOptIn
 	trending, _ := s.st.RecentlyTrending(r.Context(), 12)
 	sleepers, _ := s.st.SleeperHits(r.Context(), 6)
-	anticipated, _ := s.st.RecentlyAnticipated(r.Context(), 6)
+	coming, _ := s.st.ComingSoon(r.Context(), 60, allowAdult)
+	if len(coming) > 6 {
+		coming = coming[:6]
+	}
+	var comingSoon []comingSoonItem
+	for _, g := range coming {
+		wishlisted := false
+		if u != nil {
+			if status, err := s.st.StatusFor(r.Context(), u.ID, g.ID); err == nil {
+				wishlisted = status.Wishlist
+			}
+		}
+		comingSoon = append(comingSoon, comingSoonItem{Game: g, Wishlisted: wishlisted})
+	}
+	anticipated, _ := s.st.RecentlyAnticipated(r.Context(), 6, 30, allowAdult)
 	reviews, _ := s.st.RecentReviews(r.Context(), 4)
 	lists, _ := s.st.PopularLists(r.Context(), 4)
-	var feed []models.Activity
+	var timeline []models.TimelineItem
 	if u != nil {
-		feed, _ = s.st.ActivityFeed(r.Context(), u.ID, 0, 12, 0, true)
+		owners := append([]int64{u.ID}, s.st.FollowingIDs(r.Context(), u.ID)...)
+		timeline, _, _ = s.st.Timeline(r.Context(), u.ID, owners, "all", "", 12)
 	}
 	var news []models.News
 	if nrows, nerr := s.st.DB.QueryContext(r.Context(), `SELECT id,title,body,created_at FROM news ORDER BY created_at DESC LIMIT 3`); nerr == nil {
@@ -48,11 +70,12 @@ func (s *Server) home(w http.ResponseWriter, r *http.Request) {
 	data := homeData{
 		Page:        s.page(r, ""),
 		Trending:    trending,
+		ComingSoon:  comingSoon,
 		Sleepers:    sleepers,
 		Anticipated: anticipated,
 		Reviews:     reviews,
 		Lists:       lists,
-		Feed:        feed,
+		Timeline:    timeline,
 		News:        news,
 	}
 	s.render(w, r, "home", data)

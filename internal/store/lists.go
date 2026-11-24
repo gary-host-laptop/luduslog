@@ -298,14 +298,26 @@ func (s *Store) UpdateList(ctx context.Context, id, userID int64, in ListInput) 
 }
 
 func (s *Store) DeleteList(ctx context.Context, id, userID int64) error {
-	_, err := s.DB.ExecContext(ctx, `UPDATE lists SET deleted_at=? WHERE id=? AND user_id=?`, Now(), id, userID)
-	return err
+	res, err := s.DB.ExecContext(ctx, `UPDATE lists SET deleted_at=? WHERE id=? AND user_id=?`, Now(), id, userID)
+	if err != nil {
+		return err
+	}
+	if n, _ := res.RowsAffected(); n > 0 {
+		s.DB.ExecContext(ctx, `DELETE FROM activities WHERE list_id=?`, id)
+	}
+	return nil
 }
 
 // ModDeleteList removes any user's list after a moderator review.
 func (s *Store) ModDeleteList(ctx context.Context, id int64) error {
-	_, err := s.DB.ExecContext(ctx, `UPDATE lists SET deleted_at=? WHERE id=? AND deleted_at IS NULL`, Now(), id)
-	return err
+	res, err := s.DB.ExecContext(ctx, `UPDATE lists SET deleted_at=? WHERE id=? AND deleted_at IS NULL`, Now(), id)
+	if err != nil {
+		return err
+	}
+	if n, _ := res.RowsAffected(); n > 0 {
+		s.DB.ExecContext(ctx, `DELETE FROM activities WHERE list_id=?`, id)
+	}
+	return nil
 }
 
 func (s *Store) AddListEntry(ctx context.Context, listID, gameID int64, note string) error {

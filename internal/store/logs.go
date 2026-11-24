@@ -12,17 +12,17 @@ import (
 const logCols = `l.id,l.user_id,l.game_id,l.name,l.rating,l.review,l.spoiler,l.status,l.replay,l.mastered,
 l.difficulty,l.platform_id,l.played_on_id,l.ownership,l.storefront,l.edition_game_id,COALESCE(l.started_at,''),
 COALESCE(l.finished_at,''),l.time_to_finish,l.time_to_master,l.playtime,l.sync_sessions,l.primary_rating,
-l.language,l.draft,l.created_at,l.updated_at`
+l.language,l.draft,l.auto_created,l.created_at,l.updated_at`
 
 func scanLog(row scanner) (*models.Log, error) {
 	var l models.Log
-	var spoiler, replay, mastered, sync, primary, draft int
+	var spoiler, replay, mastered, sync, primary, draft, autoCreated int
 	var platform, playedOn, edition sql.NullInt64
 	var created, updated string
 	err := row.Scan(&l.ID, &l.UserID, &l.GameID, &l.Name, &l.Rating, &l.Review, &spoiler, &l.Status, &replay,
 		&mastered, &l.Difficulty, &platform, &playedOn, &l.Ownership, &l.Storefront, &edition, &l.StartedAt,
 		&l.FinishedAt, &l.TimeToFinish, &l.TimeToMaster, &l.Playtime, &sync, &primary, &l.Language, &draft,
-		&created, &updated)
+		&autoCreated, &created, &updated)
 	if err != nil {
 		return nil, err
 	}
@@ -41,6 +41,7 @@ func scanLog(row scanner) (*models.Log, error) {
 	l.SyncSessions = sync == 1
 	l.PrimaryRating = primary == 1
 	l.Draft = draft == 1
+	l.AutoCreated = autoCreated == 1
 	l.CreatedAt = parseTime(created)
 	l.UpdatedAt = parseTime(updated)
 	return &l, nil
@@ -117,6 +118,7 @@ type LogInput struct {
 	SyncSessions  bool
 	Language      string
 	Draft         bool
+	AutoCreated   bool
 }
 
 func (in LogInput) statusOr() string {
@@ -130,12 +132,12 @@ func (s *Store) CreateLog(ctx context.Context, in LogInput) (*models.Log, error)
 	now := Now()
 	res, err := s.DB.ExecContext(ctx, `INSERT INTO logs(user_id,game_id,name,rating,review,spoiler,status,replay,mastered,
 		difficulty,platform_id,played_on_id,ownership,storefront,edition_game_id,started_at,finished_at,time_to_finish,
-		time_to_master,playtime,sync_sessions,primary_rating,language,draft,created_at,updated_at)
-		VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,1,?,?,?,?)`,
+		time_to_master,playtime,sync_sessions,primary_rating,language,draft,auto_created,created_at,updated_at)
+		VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,1,?,?,?,?,?)`,
 		in.UserID, in.GameID, in.Name, in.Rating, in.Review, b2i(in.Spoiler), in.statusOr(), b2i(in.Replay),
 		b2i(in.Mastered), in.Difficulty, in.PlatformID, in.PlayedOnID, in.Ownership, in.Storefront, in.EditionGameID,
 		nullStr(in.StartedAt), nullStr(in.FinishedAt), in.TimeToFinish, in.TimeToMaster, in.Playtime,
-		b2i(in.SyncSessions), in.Language, b2i(in.Draft), now, now)
+		b2i(in.SyncSessions), in.Language, b2i(in.Draft), b2i(in.AutoCreated), now, now)
 	if err != nil {
 		return nil, err
 	}
@@ -209,7 +211,7 @@ func logInputFromLog(l *models.Log) LogInput {
 		Ownership: l.Ownership, Storefront: l.Storefront, EditionGameID: l.EditionGameID,
 		StartedAt: l.StartedAt, FinishedAt: l.FinishedAt, TimeToFinish: l.TimeToFinish,
 		TimeToMaster: l.TimeToMaster, Playtime: l.Playtime, SyncSessions: l.SyncSessions,
-		Language: l.Language, Draft: l.Draft,
+		Language: l.Language, Draft: l.Draft, AutoCreated: l.AutoCreated,
 	}
 }
 
@@ -234,6 +236,7 @@ func (s *Store) DeleteLog(ctx context.Context, id, userID int64) error {
 	if _, err := s.DB.ExecContext(ctx, `UPDATE logs SET deleted_at=? WHERE id=?`, Now(), id); err != nil {
 		return err
 	}
+	s.DB.ExecContext(ctx, `DELETE FROM activities WHERE log_id=?`, id)
 	return s.RefreshGameStats(ctx, gameID)
 }
 
@@ -246,6 +249,7 @@ func (s *Store) ModDeleteLog(ctx context.Context, id int64) error {
 	if _, err := s.DB.ExecContext(ctx, `UPDATE logs SET deleted_at=? WHERE id=?`, Now(), id); err != nil {
 		return err
 	}
+	s.DB.ExecContext(ctx, `DELETE FROM activities WHERE log_id=?`, id)
 	return s.RefreshGameStats(ctx, gameID)
 }
 
@@ -260,7 +264,33 @@ func (s *Store) RestoreLog(ctx context.Context, id, userID int64) error {
 
 func (s *Store) PurgeLog(ctx context.Context, id, userID int64) error {
 	_, err := s.DB.ExecContext(ctx, `DELETE FROM logs WHERE id=? AND user_id=?`, id, userID)
+	if err == nil {
+		s.DB.ExecContext(ctx, `DELETE FROM activities WHERE log_id=?`, id)
+	}
 	return err
+}
+
+// SessionLogFor returns the log that should contain a game-page session. If
+// the user has never logged the game it creates a minimal container log with
+// auto_created set so the log itself does not appear as a duplicate card.
+func (s *Store) SessionLogFor(ctx context.Context, userID, gameID int64) (*models.Log, error) {
+	latest, err := s.LatestLogFor(ctx, userID, gameID)
+	if err == nil {
+		return latest, nil
+	}
+	if err != ErrNotFound {
+		return nil, err
+	}
+	status := "played"
+	if st, err := s.StatusFor(ctx, userID, gameID); err == nil {
+		switch {
+		case st.Playing:
+			status = "playing"
+		case st.Backlog:
+			status = "backlog"
+		}
+	}
+	return s.CreateLog(ctx, LogInput{UserID: userID, GameID: gameID, Status: status, AutoCreated: true})
 }
 
 func (s *Store) LatestLogFor(ctx context.Context, userID, gameID int64) (*models.Log, error) {
@@ -608,10 +638,10 @@ func (s *Store) HasLikedLog(ctx context.Context, logID, userID int64) bool {
 func (s *Store) StatusFor(ctx context.Context, userID, gameID int64) (models.Status, error) {
 	st := models.Status{UserID: userID, GameID: gameID}
 	var playing, backlog, wishlist, liked int
-	var playedAt, playingAt, backlogAt, updated string
+	var playedAt, playingAt, backlogAt, wishlistAt, updated string
 	err := s.DB.QueryRowContext(ctx, `SELECT played,playing,backlog,wishlist,updated_at,
-		COALESCE(played_at,''),COALESCE(playing_at,''),COALESCE(backlog_at,'') FROM statuses WHERE user_id=? AND game_id=?`, userID, gameID).
-		Scan(&st.Played, &playing, &backlog, &wishlist, &updated, &playedAt, &playingAt, &backlogAt)
+		COALESCE(played_at,''),COALESCE(playing_at,''),COALESCE(backlog_at,''),COALESCE(wishlist_at,'') FROM statuses WHERE user_id=? AND game_id=?`, userID, gameID).
+		Scan(&st.Played, &playing, &backlog, &wishlist, &updated, &playedAt, &playingAt, &backlogAt, &wishlistAt)
 	if err != nil && err != sql.ErrNoRows {
 		return st, err
 	}
@@ -625,6 +655,7 @@ func (s *Store) StatusFor(ctx context.Context, userID, gameID int64) (models.Sta
 		st.PlayedAt = parseTime(playedAt)
 		st.PlayingAt = parseTime(playingAt)
 		st.BacklogAt = parseTime(backlogAt)
+		st.WishlistAt = parseTime(wishlistAt)
 	}
 	return st, nil
 }
@@ -663,6 +694,18 @@ func (s *Store) SetStatusFlag(ctx context.Context, userID, gameID int64, flag st
 				WHEN statuses.backlog=0 THEN excluded.updated_at ELSE statuses.backlog_at END,
 			updated_at=excluded.updated_at`
 		args = []any{userID, gameID, b2i(on), backlogAt, now}
+	}
+	if flag == "wishlist" {
+		var wishlistAt any
+		if on {
+			wishlistAt = now
+		}
+		query = `INSERT INTO statuses(user_id,game_id,wishlist,wishlist_at,updated_at) VALUES(?,?,?,?,?)
+			ON CONFLICT(user_id,game_id) DO UPDATE SET wishlist=excluded.wishlist,
+			wishlist_at=CASE WHEN excluded.wishlist=0 THEN NULL
+				WHEN statuses.wishlist=0 THEN excluded.updated_at ELSE statuses.wishlist_at END,
+			updated_at=excluded.updated_at`
+		args = []any{userID, gameID, b2i(on), wishlistAt, now}
 	}
 	_, err := s.DB.ExecContext(ctx, query, args...)
 	if err != nil {
@@ -757,7 +800,7 @@ func (s *Store) ToggleGameLike(ctx context.Context, userID, gameID int64) (bool,
 func (s *Store) SetStatuses(ctx context.Context, userID, gameID int64, played, playing, backlog, wishlist, liked bool) error {
 	now := Now()
 	playedCount := 0
-	var playedAt, playingAt, backlogAt any
+	var playedAt, playingAt, backlogAt, wishlistAt any
 	if played {
 		playedCount = 1
 		playedAt = now
@@ -768,8 +811,11 @@ func (s *Store) SetStatuses(ctx context.Context, userID, gameID int64, played, p
 	if backlog {
 		backlogAt = now
 	}
-	_, err := s.DB.ExecContext(ctx, `INSERT INTO statuses(user_id,game_id,played,playing,backlog,wishlist,played_at,playing_at,backlog_at,updated_at)
-		VALUES(?,?,?,?,?,?,?,?,?,?)
+	if wishlist {
+		wishlistAt = now
+	}
+	_, err := s.DB.ExecContext(ctx, `INSERT INTO statuses(user_id,game_id,played,playing,backlog,wishlist,played_at,playing_at,backlog_at,wishlist_at,updated_at)
+		VALUES(?,?,?,?,?,?,?,?,?,?,?)
 		ON CONFLICT(user_id,game_id) DO UPDATE SET
 		played=CASE WHEN excluded.played>0 THEN MAX(statuses.played,1) ELSE statuses.played END,
 		played_at=CASE WHEN excluded.played>0 AND statuses.played=0 THEN excluded.played_at ELSE statuses.played_at END,
@@ -779,8 +825,11 @@ func (s *Store) SetStatuses(ctx context.Context, userID, gameID int64, played, p
 		backlog=excluded.backlog,
 		backlog_at=CASE WHEN excluded.backlog=0 THEN NULL
 			WHEN statuses.backlog=0 THEN excluded.backlog_at ELSE statuses.backlog_at END,
-		wishlist=excluded.wishlist,updated_at=excluded.updated_at`,
-		userID, gameID, playedCount, b2i(playing), b2i(backlog), b2i(wishlist), playedAt, playingAt, backlogAt, now)
+		wishlist=excluded.wishlist,
+		wishlist_at=CASE WHEN excluded.wishlist=0 THEN NULL
+			WHEN statuses.wishlist=0 THEN excluded.wishlist_at ELSE statuses.wishlist_at END,
+		updated_at=excluded.updated_at`,
+		userID, gameID, playedCount, b2i(playing), b2i(backlog), b2i(wishlist), playedAt, playingAt, backlogAt, wishlistAt, now)
 	if err != nil {
 		return err
 	}

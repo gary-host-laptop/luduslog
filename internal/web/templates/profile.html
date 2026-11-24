@@ -66,11 +66,9 @@
 <div class="tabs">
   <a href="/users/{{.Profile.Username}}" class="{{if eq .Tab "overview"}}on{{end}}">Overview</a>
   <a href="/users/{{.Profile.Username}}?tab=reviews" class="{{if eq .Tab "reviews"}}on{{end}}">Reviews</a>
-  <a href="/users/{{.Profile.Username}}?tab=logs" class="{{if eq .Tab "logs"}}on{{end}}">Journal</a>
   <a href="/users/{{.Profile.Username}}?tab=lists" class="{{if eq .Tab "lists"}}on{{end}}">Lists</a>
-  <a href="/users/{{.Profile.Username}}?tab=activity" class="{{if eq .Tab "activity"}}on{{end}}">Activity</a>
-  <a href="/users/{{.Profile.Username}}/stats">Stats</a>
   <a href="/users/{{.Profile.Username}}?tab=trophies" class="{{if eq .Tab "trophies"}}on{{end}}">Trophies</a>
+  <a href="/users/{{.Profile.Username}}/stats">Stats</a>
 </div>
 
 {{if eq .Tab "trophies"}}
@@ -153,45 +151,19 @@
   </section>
   {{end}}
   </div>
-  {{if .Reviews}}
   <section class="section">
-    <div class="section-head"><h2>Recent reviews</h2><a class="more" href="?tab=reviews">All reviews →</a></div>
-    {{range .Reviews}}{{template "log_row" .}}{{end}}
-  </section>{{end}}
+    <div class="section-head"><div><h2>Activity</h2><span class="muted">What {{.Profile.Username}} has been doing</span></div></div>
+    {{template "timeline_stream" .Stream}}
+  </section>
 {{else if eq .Tab "reviews"}}
   <section class="section" style="margin-top:0">
   {{range .Reviews}}{{template "log_row" .}}{{else}}<div class="empty">No reviews yet.</div>{{end}}
   {{if gt .Pages 1}}<nav class="pager">{{if gt .PageNum 1}}<a href="?tab=reviews&page={{dec .PageNum}}">← Prev</a>{{end}}<span class="on">{{.PageNum}} / {{.Pages}}</span>{{if lt .PageNum .Pages}}<a href="?tab=reviews&page={{inc .PageNum}}">Next →</a>{{end}}</nav>{{end}}
   </section>
-{{else if eq .Tab "logs"}}
-  <section class="section" style="margin-top:0">
-  {{if and (eq .JournalView "calendar") .Calendar}}
-  <div class="card journal-calendar mb2">
-    <div class="row between"><a class="btn btn-sm" href="?tab=logs&month={{.Calendar.Prev}}">← {{.Calendar.Prev}}</a><strong>{{.Calendar.Month}}</strong><a class="btn btn-sm" href="?tab=logs&month={{.Calendar.Next}}">{{.Calendar.Next}} →</a></div>
-    <div class="calendar-grid mt1">
-      <span class="calendar-head">Mon</span><span class="calendar-head">Tue</span><span class="calendar-head">Wed</span><span class="calendar-head">Thu</span><span class="calendar-head">Fri</span><span class="calendar-head">Sat</span><span class="calendar-head">Sun</span>
-      {{range .Calendar.Weeks}}{{range .}}
-      <span class="calendar-day{{if .Played}} played{{end}}{{if not .InMonth}} out{{end}}"{{if .Played}} title="Played this day"{{end}}>{{if .InMonth}}{{.Day}}{{end}}</span>
-      {{end}}{{end}}
-    </div>
-    <div class="field-hint">Highlighted days have play sessions{{if .IsMe}}. <a href="/settings?tab=preferences">Change journal view</a>{{end}}.</div>
-  </div>
-  {{end}}
-  {{if eq .JournalView "activity"}}
-    <div class="card">{{range .Activity}}<div class="feed-item"><div class="grow"><strong>{{.Type}}</strong> {{if .Game}}<a href="/games/{{.Game.Slug}}">{{.Game.Title}}</a>{{end}}</div><span class="feed-time">{{timeago .CreatedAt}}</span></div>{{else}}<div class="muted">No activity to show.</div>{{end}}</div>
-  {{else}}
-    {{range .Logs}}{{template "log_row" .}}{{else}}<div class="empty">No journal entries yet.</div>{{end}}
-    {{if gt .Pages 1}}<nav class="pager">{{if gt .PageNum 1}}<a href="?tab=logs&page={{dec .PageNum}}">← Prev</a>{{end}}<span class="on">{{.PageNum}} / {{.Pages}}</span>{{if lt .PageNum .Pages}}<a href="?tab=logs&page={{inc .PageNum}}">Next →</a>{{end}}</nav>{{end}}
-  {{end}}
-  </section>
 {{else if eq .Tab "lists"}}
   <section class="section" style="margin-top:0">
   <div class="section-head"><h2>Lists</h2>{{if .IsMe}}<a class="btn btn-sm btn-primary" href="/lists/new">New list</a>{{end}}</div>
   <div class="grid grid-2">{{range .Lists}}<a class="list-card" href="/users/{{$.Profile.Username}}/lists/{{.Slug}}">{{if .CoverGames}}<div class="list-covers">{{range .CoverGames}}<img src="{{cover .}}" alt="" loading="lazy">{{end}}</div>{{end}}<div><h3>{{.Title}}</h3><div class="muted">{{.EntryCount}} {{plural .EntryCount "game" "games"}} · {{privacyLabel .Privacy}}</div></div></a>{{else}}<div class="empty">No lists yet.</div>{{end}}</div>
-  </section>
-{{else if eq .Tab "activity"}}
-  <section class="section" style="margin-top:0">
-    <div class="card">{{range .Activity}}<div class="feed-item"><div class="grow"><strong>{{.Type}}</strong> {{if .Game}}<a href="/games/{{.Game.Slug}}">{{.Game.Title}}</a>{{end}}</div><span class="feed-time">{{timeago .CreatedAt}}</span></div>{{else}}<div class="muted">No activity to show.</div>{{end}}</div>
   </section>
 {{end}}
 {{end}}

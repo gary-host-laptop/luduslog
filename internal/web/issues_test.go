@@ -544,21 +544,24 @@ func TestSessionEditingDaysAndPrivacy(t *testing.T) {
 		t.Fatalf("friends note hidden: %+v", got)
 	}
 
-	// The profile journal honours the calendar view and play days.
-	if err := st.UpdateProfile(ctx, alice.ID, store.ProfileUpdate{JournalView: "calendar"}); err != nil {
+	// The legacy Journal URL redirects into Activity.
+	legacy, err := noRedirect.Get(ts.URL + "/users/alice?tab=logs")
+	if err != nil {
 		t.Fatal(err)
 	}
-	_, page := getBody(t, http.DefaultClient, ts.URL+"/users/alice?tab=logs&month=2026-02")
+	legacy.Body.Close()
+	if legacy.StatusCode != http.StatusFound || legacy.Header.Get("Location") != "/users/alice?kind=logs" {
+		t.Fatalf("legacy journal redirect = %d %q", legacy.StatusCode, legacy.Header.Get("Location"))
+	}
+
+	// Overview keeps the calendar as a toggle and still marks play days.
+	_, page := getBody(t, http.DefaultClient, ts.URL+"/users/alice?view=calendar&month=2026-02")
 	if !strings.Contains(page, "calendar-day played") || !strings.Contains(page, "calendar-grid") {
-		t.Error("calendar journal mode did not mark play days")
+		t.Error("activity calendar did not mark play days")
 	}
-	if err := st.UpdateProfile(ctx, alice.ID, store.ProfileUpdate{JournalView: "activity"}); err != nil {
-		t.Fatal(err)
-	}
-	st.AddActivity(ctx, alice.ID, "log", &game.ID, &log.ID, nil, "", "public")
-	_, activityPage := getBody(t, http.DefaultClient, ts.URL+"/users/alice?tab=logs")
-	if !strings.Contains(activityPage, "Session Game") || strings.Contains(activityPage, "calendar-grid") {
-		t.Error("activity journal mode did not render the activity feed")
+	_, activityPage := getBody(t, client, ts.URL+"/users/alice?kind=sessions")
+	if !strings.Contains(activityPage, "Session Game") || !strings.Contains(activityPage, "friend note") || strings.Contains(activityPage, "calendar-grid") {
+		t.Error("session filter did not render the activity stream")
 	}
 }
 
@@ -659,7 +662,7 @@ func TestMentionLinksAndPrivacy(t *testing.T) {
 
 	// Hidden activity stays out of the public feed.
 	st.UpdateProfile(ctx, bob.ID, store.ProfileUpdate{HideActivity: true})
-	st.AddActivity(ctx, bob.ID, "log", &game.ID, &log.ID, nil, "", "public")
+	st.AddActivity(ctx, bob.ID, "liked", &game.ID, nil, nil, "", "public")
 	feed, err := st.ActivityFeed(ctx, alice.ID, 0, 30, 0, true)
 	if err != nil {
 		t.Fatal(err)

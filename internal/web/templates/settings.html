@@ -192,6 +192,19 @@
         <div><label for="comment_privacy">Who can comment</label><select id="comment_privacy" name="comment_privacy"><option value="everyone" {{if eq .User.CommentPrivacy "everyone"}}selected{{end}}>Everyone</option><option value="friends" {{if eq .User.CommentPrivacy "friends"}}selected{{end}}>Friends</option><option value="none" {{if eq .User.CommentPrivacy "none"}}selected{{end}}>Nobody</option></select></div>
         <div><label for="note_privacy">Default session note privacy</label><select id="note_privacy" name="note_privacy"><option value="everyone" {{if eq .User.NotePrivacy "everyone"}}selected{{end}}>Everyone</option><option value="friends" {{if eq .User.NotePrivacy "friends"}}selected{{end}}>Friends</option><option value="none" {{if eq .User.NotePrivacy "none"}}selected{{end}}>Private</option></select></div>
       </div>
+      <div class="activity-visibility">
+        <h3>Activity visibility</h3>
+        <p class="field-hint">These settings only affect the activity stream on your profile and the home feed. Your follower and following lists are still governed by “Hide followers/following” above. Hiding likes does not remove them from game like counts. Profile privacy and “Hide my activity” still override these choices.</p>
+        <div class="activity-visibility-grid">
+          {{range $kind := slice "review" "log" "session" "list" "rating" "like" "shelf" "follow"}}
+          <div><label for="activity-{{$kind}}">{{kindLabel $kind}}</label><select id="activity-{{$kind}}" name="activity_{{$kind}}">
+            <option value="everyone" {{if eq (index $.ActivityVisibility $kind) "everyone"}}selected{{end}}>Everyone</option>
+            <option value="followers" {{if eq (index $.ActivityVisibility $kind) "followers"}}selected{{end}}>Followers</option>
+            <option value="private" {{if eq (index $.ActivityVisibility $kind) "private"}}selected{{end}}>Private</option>
+          </select></div>
+          {{end}}
+        </div>
+      </div>
       <div><button class="btn btn-primary" type="submit">Save privacy</button></div>
     </form>
     {{else if eq .Tab "preferences"}}
@@ -214,7 +227,6 @@
       </div>
       <div class="form-row">
         <div><label for="timezone">Timezone</label><input id="timezone" type="text" name="timezone" value="{{.User.Timezone}}" placeholder="Europe/London"></div>
-        <div><label for="journal_view">Journal view</label><select id="journal_view" name="journal_view"><option value="calendar" {{if eq .User.JournalView "calendar"}}selected{{end}}>Calendar</option><option value="activity" {{if eq .User.JournalView "activity"}}selected{{end}}>Activity</option><option value="list" {{if eq .User.JournalView "list"}}selected{{end}}>List</option></select></div>
       </div>
       <label class="check"><input type="checkbox" name="infinite_scroll" value="1" {{if .User.InfiniteScroll}}checked{{end}}> Infinite scroll (htmx)</label>
       <label class="check"><input type="checkbox" name="fade_played" value="1" {{if .User.FadePlayed}}checked{{end}}> Fade played games in lists</label>

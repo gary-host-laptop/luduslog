@@ -197,12 +197,13 @@ func TestUserGameLogPage(t *testing.T) {
 		t.Error("review entry does not link to the review page")
 	}
 
-	// Journal rows link to the new page; review rows keep the review target.
-	_, journal := getBody(t, http.DefaultClient, ts.URL+"/users/owner?tab=logs")
+	// Journal and review rows share the Overview timeline.
+	_, journal := getBody(t, http.DefaultClient, ts.URL+"/users/owner?kind=logs")
 	if !strings.Contains(journal, `href="/users/owner/logs/journal-game"`) || !strings.Contains(journal, "View log →") {
 		t.Error("journal-only row does not link to the user-game log page")
 	}
-	if !strings.Contains(journal, `href="/users/owner/reviews/`+itoa(reviewLog.ID)+`"`) || !strings.Contains(journal, "Read more →") {
+	_, timeline := getBody(t, http.DefaultClient, ts.URL+"/users/owner")
+	if !strings.Contains(timeline, `href="/users/owner/reviews/`+itoa(reviewLog.ID)+`"`) || !strings.Contains(timeline, "Read more →") {
 		t.Error("review row no longer links to the review page")
 	}
 	if strings.Contains(journal, `/users/owner/reviews/`+itoa(journalLog.ID)) {

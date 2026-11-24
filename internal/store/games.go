@@ -1171,23 +1171,78 @@ func (s *Store) SleeperHits(ctx context.Context, limit int) ([]models.Game, erro
 	return s.relatedGames(ctx, `SELECT `+gameCols+` FROM games g WHERE g.avg_rating>=4.0 AND g.rating_count>=2 AND g.plays<100 AND g.parent_id IS NULL ORDER BY g.weighted DESC, g.plays ASC LIMIT ?`, limit)
 }
 
-func (s *Store) RecentlyAnticipated(ctx context.Context, limit int) ([]models.Game, error) {
-	return s.relatedGames(ctx, `SELECT `+gameCols+` FROM games g WHERE g.wishlists>0 AND g.parent_id IS NULL ORDER BY g.wishlists DESC, g.release_date LIMIT ?`, limit)
+func railDays(days, fallback int) int {
+	if days <= 0 {
+		return fallback
+	}
+	if days > 365 {
+		return 365
+	}
+	return days
 }
 
-func (s *Store) ComingSoon(ctx context.Context, days int, wishlistOf int64) ([]models.Game, error) {
-	start := "date('now')"
-	end := fmt.Sprintf("date('now','+%d day')", days)
-	extra := ""
-	args := []any{}
-	if wishlistOf > 0 {
-		extra = " AND EXISTS(SELECT 1 FROM statuses st WHERE st.game_id=g.id AND st.user_id=? AND st.wishlist=1)"
-		args = append(args, wishlistOf)
+// RecentlyAnticipated ranks upcoming games by wishlist adds inside the recent
+// window, then tops the rail up with the most-wishlisted upcoming games. The
+// fallback keeps the section useful on a new instance with little recent data.
+func (s *Store) RecentlyAnticipated(ctx context.Context, limit, days int, allowAdult bool) ([]models.Game, error) {
+	if limit <= 0 {
+		return nil, nil
 	}
-	args = append(args, days)
-	_ = start
-	_ = end
-	return s.relatedGames(ctx, `SELECT `+gameCols+` FROM games g WHERE g.release_date>date('now') AND g.release_date<=date('now','+'||?||' day') AND g.parent_id IS NULL`+extra+` ORDER BY g.release_date, g.title`, args...)
+	days = railDays(days, 30)
+	recent, err := s.relatedGames(ctx, `SELECT `+gameCols+` FROM games g
+		WHERE g.parent_id IS NULL
+		AND g.release_date IS NOT NULL AND g.release_date<>''
+		AND g.release_date>date('now')
+		AND g.wishlists>0
+		AND (? OR g.adult=0)
+		AND EXISTS(SELECT 1 FROM statuses st WHERE st.game_id=g.id AND st.wishlist=1
+			AND st.wishlist_at IS NOT NULL AND st.wishlist_at>=date('now','-'||?||' day'))
+		ORDER BY (SELECT COUNT(*) FROM statuses st WHERE st.game_id=g.id AND st.wishlist=1
+			AND st.wishlist_at IS NOT NULL AND st.wishlist_at>=date('now','-'||?||' day')) DESC,
+			g.wishlists DESC, g.release_date, g.title
+		LIMIT ?`, b2i(allowAdult), days, days, limit)
+	if err != nil || len(recent) >= limit {
+		return recent, err
+	}
+
+	exclude := ""
+	args := []any{b2i(allowAdult)}
+	if len(recent) > 0 {
+		placeholders := make([]string, len(recent))
+		for i, g := range recent {
+			placeholders[i] = "?"
+			args = append(args, g.ID)
+		}
+		exclude = ` AND g.id NOT IN (` + strings.Join(placeholders, ",") + `)`
+	}
+	args = append(args, limit-len(recent))
+	fallback, err := s.relatedGames(ctx, `SELECT `+gameCols+` FROM games g
+		WHERE g.parent_id IS NULL
+		AND g.release_date IS NOT NULL AND g.release_date<>''
+		AND g.release_date>date('now')
+		AND g.wishlists>0
+		AND (? OR g.adult=0)`+exclude+`
+		ORDER BY g.wishlists DESC, g.release_date, g.title
+		LIMIT ?`, args...)
+	if err != nil {
+		return recent, err
+	}
+	return append(recent, fallback...), nil
+}
+
+// ComingSoon returns unreleased main games in the next days, soonest first.
+// Dates are compared against SQLite's UTC date('now'), matching the games
+// index's upcoming filter. Releases dated today are included so the rail can
+// label them "Today"; editions and games without a date are excluded.
+func (s *Store) ComingSoon(ctx context.Context, days int, allowAdult bool) ([]models.Game, error) {
+	days = railDays(days, 60)
+	return s.relatedGames(ctx, `SELECT `+gameCols+` FROM games g
+		WHERE g.release_date IS NOT NULL AND g.release_date<>''
+		AND g.release_date>=date('now')
+		AND g.release_date<=date('now','+'||?||' day')
+		AND g.parent_id IS NULL
+		AND (? OR g.adult=0)
+		ORDER BY g.release_date, g.title`, days, b2i(allowAdult))
 }
 
 func (s *Store) Top100(ctx context.Context, limit int) ([]models.Game, error) {

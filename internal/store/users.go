@@ -337,14 +337,26 @@ func (s *Store) Follow(ctx context.Context, follower, followee int64) error {
 	if manual == 1 {
 		approved = 0
 	}
-	_, err := s.DB.ExecContext(ctx, `INSERT INTO follows(follower_id,followee_id,approved,created_at) VALUES(?,?,?,?)
+	res, err := s.DB.ExecContext(ctx, `INSERT INTO follows(follower_id,followee_id,approved,created_at) VALUES(?,?,?,?)
 		ON CONFLICT(follower_id,followee_id) DO NOTHING`, follower, followee, approved, Now())
-	return err
+	if err != nil {
+		return err
+	}
+	if n, _ := res.RowsAffected(); n > 0 && approved == 1 {
+		s.addFollowActivity(ctx, follower, followee)
+	}
+	return nil
 }
 
 func (s *Store) ApproveFollow(ctx context.Context, follower, followee int64) error {
-	_, err := s.DB.ExecContext(ctx, `UPDATE follows SET approved=1 WHERE follower_id=? AND followee_id=?`, follower, followee)
-	return err
+	res, err := s.DB.ExecContext(ctx, `UPDATE follows SET approved=1 WHERE follower_id=? AND followee_id=? AND approved=0`, follower, followee)
+	if err != nil {
+		return err
+	}
+	if n, _ := res.RowsAffected(); n > 0 {
+		s.addFollowActivity(ctx, follower, followee)
+	}
+	return nil
 }
 
 func (s *Store) Unfollow(ctx context.Context, follower, followee int64) error {

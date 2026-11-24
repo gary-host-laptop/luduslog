@@ -9,6 +9,7 @@ func (s *Server) routes() {
 
 	// Discovery
 	m.HandleFunc("GET /{$}", s.home)
+	m.HandleFunc("GET /feed", s.requireUser(s.feedPage))
 	m.HandleFunc("GET /games", s.gamesIndex)
 	m.HandleFunc("GET /games/new", s.catalogEditor(s.newGameForm))
 	m.HandleFunc("POST /games/new", s.catalogEditor(s.newGameSubmit))
@@ -59,6 +60,7 @@ func (s *Server) routes() {
 	m.HandleFunc("POST /logs/{id}/edit", s.requireUser(s.logEdit))
 	m.HandleFunc("POST /logs/{id}/delete", s.requireUser(s.logDelete))
 	m.HandleFunc("POST /logs/{id}/like", s.requireUser(s.likeLog))
+	m.HandleFunc("POST /games/{slug}/sessions", s.requireUser(s.gameSessionCreate))
 	m.HandleFunc("GET /logs/{id}/sessions", s.requireUser(s.sessionList))
 	m.HandleFunc("POST /logs/{id}/sessions", s.requireUser(s.sessionCreate))
 	m.HandleFunc("POST /sessions/{id}/edit", s.requireUser(s.sessionUpdate))

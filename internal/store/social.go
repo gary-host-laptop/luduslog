@@ -244,8 +244,26 @@ func (s *Store) AddActivity(ctx context.Context, userID int64, kind string, game
 	if visibility == "" {
 		visibility = "public"
 	}
+	if kind == "rated" && gameID != nil {
+		if _, err := s.DB.ExecContext(ctx, `DELETE FROM activities WHERE user_id=? AND type='rated' AND game_id=?`, userID, *gameID); err != nil {
+			return err
+		}
+	}
 	_, err := s.DB.ExecContext(ctx, `INSERT INTO activities(user_id,type,game_id,log_id,list_id,target_name,visibility,created_at)
 		VALUES(?,?,?,?,?,?,?,?)`, userID, kind, gameID, logID, listID, targetName, visibility, Now())
+	return err
+}
+
+// RemoveActivity removes a content event that no longer applies, such as an
+// unlike or a deleted container.
+func (s *Store) RemoveActivity(ctx context.Context, userID int64, kind string, gameID int64) error {
+	_, err := s.DB.ExecContext(ctx, `DELETE FROM activities WHERE user_id=? AND type=? AND game_id=?`, userID, kind, gameID)
+	return err
+}
+
+func (s *Store) addFollowActivity(ctx context.Context, followerID, followeeID int64) error {
+	_, err := s.DB.ExecContext(ctx, `INSERT INTO activities(user_id,type,target_user,visibility,created_at)
+		VALUES(?,?,?,?,?)`, followerID, "follow", followeeID, "public", Now())
 	return err
 }
 
@@ -261,7 +279,7 @@ func (s *Store) ActivityFeed(ctx context.Context, viewerID int64, profileID int6
 	if len(userIDs) == 0 {
 		return nil, nil
 	}
-	where := `a.user_id IN (` + placeholders(len(userIDs)) + `)`
+	where := `a.user_id IN (` + placeholders(len(userIDs)) + `) AND a.type NOT IN ('log','joined')`
 	args := int64Args(userIDs)
 	if profileID > 0 {
 		// A hidden profile activity feed stays visible to its owner only.

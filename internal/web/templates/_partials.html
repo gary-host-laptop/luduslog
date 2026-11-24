@@ -14,6 +14,20 @@
 </a>
 {{end}}
 
+{{define "coming_soon_card"}}
+<a class="game-card coming-soon-card" href="/games/{{.Game.Slug}}">
+  <div class="cover-wrap">
+    <img class="game-cover" loading="lazy" src="{{cover .Game}}" alt="Cover of {{.Game.Title}}">
+    {{if .Wishlisted}}<span class="cover-badge wishlisted-badge">Wishlisted</span>{{end}}
+  </div>
+  <div class="game-title">{{.Game.Title}}</div>
+  <div class="release-meta">
+    <span class="release-date">{{releaseDay .Game.ReleaseDate}}</span>
+    {{with releaseLabel .Game.ReleaseDate}}<span class="release-badge">{{.}}</span>{{end}}
+  </div>
+</a>
+{{end}}
+
 {{define "game_grid"}}
 <div class="grid grid-cards">
   {{range .}}{{template "game_card" .}}{{end}}
@@ -50,6 +64,97 @@
     {{if .Review}}{{template "review_actions" .}}{{else if and .User .Game}}<div class="log-actions"><a href="/users/{{.User.Username}}/logs/{{.Game.Slug}}">View log →</a></div>{{end}}
   </div>
 </article>
+{{end}}
+
+{{define "timeline_item"}}
+<article class="timeline-item timeline-{{.Kind}}">
+  {{if .User}}<a class="timeline-avatar" href="/users/{{.User.Username}}"><img class="avatar avatar-sm" src="{{avatar .User}}" alt=""></a>{{end}}
+  <div class="timeline-body">
+    <div class="timeline-head">
+      {{if .User}}<a href="/users/{{.User.Username}}"><strong>{{.User.Username}}</strong></a>{{else}}<span class="muted">Someone</span>{{end}}
+      {{if eq .Kind "review"}} wrote a review{{else if eq .Kind "log"}} logged a game{{else if eq .Kind "session"}} played a session{{else if eq .Kind "follow"}} {{with .TargetUser}}<a href="/users/{{.Username}}">@{{.Username}}</a>{{end}}{{end}}
+      <span class="feed-time">{{timeago .At}}</span>
+    </div>
+
+    {{if eq .Kind "review"}}{{with .Log}}
+    <div class="timeline-card timeline-review">
+      {{if .Game}}<a href="/games/{{.Game.Slug}}"><img class="game-cover" loading="lazy" src="{{cover .Game}}" alt=""></a>{{end}}
+      <div class="timeline-card-body">
+        <h3><a href="{{reviewPath .}}">{{if .Name}}{{.Name}}{{else}}{{if .Game}}{{.Game.Title}}{{else}}Review{{end}}{{end}}</a></h3>
+        <div class="log-head">{{if .Rating}}{{stars .Rating 5}}{{end}}{{if .Game}}<a href="/games/{{.Game.Slug}}">{{.Game.Title}}</a>{{end}}{{if .Spoiler}}<span class="pill">Spoilers</span>{{end}}</div>
+        {{template "review_preview" .}}
+        {{template "review_actions" .}}
+      </div>
+    </div>
+    {{end}}{{else if eq .Kind "log"}}{{with .Log}}
+    <div class="timeline-card timeline-compact">
+      {{if .Game}}<a href="/games/{{.Game.Slug}}"><img class="game-cover" loading="lazy" src="{{cover .Game}}" alt=""></a>{{end}}
+      <div class="timeline-card-body">
+        <h3>{{if .Game}}<a href="/games/{{.Game.Slug}}">{{.Game.Title}}</a>{{end}}</h3>
+        <div class="log-head">{{if .Rating}}{{stars .Rating 5}}{{end}}<span class="pill">{{.Status}}</span>{{if .Playtime}}<span>{{hours .Playtime}}</span>{{end}}<span>{{date .CreatedAt}}</span></div>
+        {{if and .User .Game}}<div class="log-actions"><a href="/users/{{.User.Username}}/logs/{{.Game.Slug}}">View log →</a></div>{{end}}
+      </div>
+    </div>
+    {{end}}{{else if eq .Kind "session"}}{{with .Session}}
+    <div class="timeline-card timeline-session">
+      {{if $.Game}}<a href="/games/{{$.Game.Slug}}"><img class="game-cover" loading="lazy" src="{{cover $.Game}}" alt=""></a>{{end}}
+      <div class="timeline-card-body">
+        <h3>{{if $.Game}}<a href="/games/{{$.Game.Slug}}">{{$.Game.Title}}</a>{{end}}</h3>
+        <div class="log-head">
+          {{if .StartedOn}}<span>{{.StartedOn}}{{if .EndedOn}} → {{.EndedOn}}{{end}}</span>{{end}}
+          {{if .Playtime}}<span>{{hours .Playtime}}</span>{{end}}
+          <span>{{notePrivacyLabel .NotePrivacy}}</span>
+        </div>
+        {{if .Note}}<div class="prose mt1">{{md .Note}}</div>{{end}}
+        {{if .Days}}<div class="pill-row">{{range .Days}}<span class="pill">{{.}}</span>{{end}}</div>{{end}}
+        {{if .Tags}}<div class="pill-row">{{range .Tags}}<span class="pill">#{{.}}</span>{{end}}</div>{{end}}
+      </div>
+    </div>
+    {{end}}{{else if eq .Kind "shelf"}}{{$action := shelfAction .TargetName}}
+    <div class="timeline-copy timeline-shelf">{{$action.Verb}} {{if .Game}}<a href="/games/{{.Game.Slug}}">{{.Game.Title}}</a>{{end}} {{$action.Detail}}</div>
+    {{else if eq .Kind "like"}}
+    <div class="timeline-copy">liked {{if .Game}}<a href="/games/{{.Game.Slug}}">{{.Game.Title}}</a>{{end}}</div>
+    {{else if eq .Kind "rating"}}{{$rating := atof .TargetName}}
+    <div class="timeline-copy">rated {{if .Game}}<a href="/games/{{.Game.Slug}}">{{.Game.Title}}</a>{{end}}{{if $rating}} {{stars $rating 5}}{{end}}</div>
+    {{else if eq .Kind "list"}}
+    <div class="timeline-copy">added {{if .Game}}<a href="/games/{{.Game.Slug}}">{{.Game.Title}}</a>{{end}}{{if .List}} to <a href="/users/{{.List.User.Username}}/lists/{{.List.Slug}}">{{.List.Title}}</a>{{end}}</div>
+    {{else if eq .Kind "follow"}}
+    <div class="timeline-copy">started following {{with .TargetUser}}<a href="/users/{{.Username}}">@{{.Username}}</a>{{end}}</div>
+    {{end}}
+  </div>
+</article>
+{{end}}
+
+{{define "timeline_stream"}}
+<div class="activity-toolbar">
+  <nav class="timeline-filters" aria-label="Activity filters">
+    <a href="{{.BasePath}}" class="{{if eq .Kind "all"}}on{{end}}">All</a>
+    <a href="{{.BasePath}}?kind=reviews" class="{{if eq .Kind "reviews"}}on{{end}}">Reviews</a>
+    <a href="{{.BasePath}}?kind=logs" class="{{if eq .Kind "logs"}}on{{end}}">Logs</a>
+    <a href="{{.BasePath}}?kind=sessions" class="{{if eq .Kind "sessions"}}on{{end}}">Sessions</a>
+    <a href="{{.BasePath}}?kind=shelves" class="{{if eq .Kind "shelves"}}on{{end}}">Shelves</a>
+    <a href="{{.BasePath}}?kind=lists" class="{{if eq .Kind "lists"}}on{{end}}">Lists</a>
+    <a href="{{.BasePath}}?kind=social" class="{{if eq .Kind "social"}}on{{end}}">Social</a>
+  </nav>
+  {{if .ShowCalendar}}{{if .CalendarView}}<a class="btn btn-sm" href="{{.BasePath}}?kind={{.Kind}}">Stream</a>{{else}}<a class="btn btn-sm" href="{{.BasePath}}?view=calendar">Calendar</a>{{end}}{{end}}
+</div>
+{{if .CalendarView}}
+<div class="card journal-calendar mb2">
+  <div class="row between"><a class="btn btn-sm" href="{{.BasePath}}?view=calendar&month={{.Calendar.Prev}}">← {{.Calendar.Prev}}</a><strong>{{.Calendar.Month}}</strong><a class="btn btn-sm" href="{{.BasePath}}?view=calendar&month={{.Calendar.Next}}">{{.Calendar.Next}} →</a></div>
+  <div class="calendar-grid mt1">
+    <span class="calendar-head">Mon</span><span class="calendar-head">Tue</span><span class="calendar-head">Wed</span><span class="calendar-head">Thu</span><span class="calendar-head">Fri</span><span class="calendar-head">Sat</span><span class="calendar-head">Sun</span>
+    {{range .Calendar.Weeks}}{{range .}}
+    <span class="calendar-day{{if .Played}} played{{end}}{{if not .InMonth}} out{{end}}"{{if .Played}} title="Played this day"{{end}}>{{if .InMonth}}{{.Day}}{{end}}</span>
+    {{end}}{{end}}
+  </div>
+  <div class="field-hint">Highlighted days have play sessions.</div>
+</div>
+{{else}}
+<div class="timeline">
+  {{range .Items}}{{template "timeline_item" .}}{{else}}<div class="empty">No activity to show.</div>{{end}}
+</div>
+{{if .Next}}<nav class="pager"><a href="{{.BasePath}}?kind={{.Kind}}&cursor={{query .Next}}">Older →</a></nav>{{end}}
+{{end}}
 {{end}}
 
 {{define "like_button"}}

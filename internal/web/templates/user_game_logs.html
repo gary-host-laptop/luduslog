@@ -20,7 +20,7 @@
       </div>
       <a href="/games/{{.Game.Slug}}"><img class="game-cover user-log-cover" src="{{cover .Game}}" alt="Cover of {{.Game.Title}}"></a>
     </div>
-    {{if .IsMe}}<a class="btn btn-sm" href="/users/{{.Profile.Username}}?tab=logs">Your journal</a>{{end}}
+    {{if .IsMe}}<a class="btn btn-sm" href="/users/{{.Profile.Username}}?kind=logs">Your logs</a>{{end}}
   </div>
   <div class="pill-row">
     {{if gt .Status.Played 0}}<span class="pill"><i class="ph-light ph-check-circle icon" aria-hidden="true"></i> Played {{.Status.Played}}×</span>{{end}}

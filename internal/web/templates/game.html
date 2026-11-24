@@ -41,6 +41,24 @@
         <a class="btn btn-primary btn-block" href="/games/{{.Game.Slug}}/log"><i class="ph-light ph-notebook icon" aria-hidden="true"></i>{{if .UserLog}}Edit your log{{else}}Log this game{{end}}</a>
         {{if .UserLog}}<a class="btn btn-sm btn-block" href="/logs/{{.UserLog.ID}}/sessions"><i class="ph-light ph-clock-counter-clockwise icon" aria-hidden="true"></i>Play sessions</a>{{end}}
       </div>
+      <details class="game-session-entry">
+        <summary class="btn btn-sm btn-block"><i class="ph-light ph-clock-counter-clockwise icon" aria-hidden="true"></i>Log a play session</summary>
+        <form class="stack mt1" method="post" action="/games/{{.Game.Slug}}/sessions">
+          <input type="hidden" name="_csrf" value="{{.CSRF}}">
+          <div><label for="game-session-note">What happened?</label><textarea id="game-session-note" name="note" rows="3" placeholder="Beat the third boss, found the hidden path…"></textarea></div>
+          <div class="form-row">
+            <div><label for="game-session-playtime">Hours</label><input id="game-session-playtime" type="number" step="0.1" min="0" name="playtime" placeholder="1.5"></div>
+            <div><label for="game-session-privacy">Note privacy</label><select id="game-session-privacy" name="privacy">
+              <option value="everyone" {{if eq .User.NotePrivacy "everyone"}}selected{{end}}>Everyone</option>
+              <option value="friends" {{if or (eq .User.NotePrivacy "friends") (eq .User.NotePrivacy "")}}selected{{end}}>Friends</option>
+              <option value="none" {{if eq .User.NotePrivacy "none"}}selected{{end}}>Private</option>
+            </select></div>
+          </div>
+          <div><label>Days played</label><input type="date" name="days"><input type="date" name="days"><input type="date" name="days"><div class="field-hint">Add one date per day. Hours above are the total for the session.</div></div>
+          <div><label for="game-session-tags">Tags <span class="muted">(comma separated)</span></label><input id="game-session-tags" type="text" name="tags" placeholder="boss, co-op, stream"></div>
+          <button class="btn btn-sm btn-primary" type="submit">Add session</button>
+        </form>
+      </details>
       <div class="status-bar">
         <a class="played-pill" href="/games/{{.Game.Slug}}/log" title="Edit your log to change the played count" aria-label="Played {{.Status.Played}} times. Edit your log to change the count."><i class="ph-light ph-check-circle icon" aria-hidden="true"></i><span>Played</span><strong>{{.Status.Played}}</strong></a>
         <form method="post" action="/games/{{.Game.Slug}}/status"><input type="hidden" name="_csrf" value="{{.CSRF}}"><input type="hidden" name="flag" value="playing"><input type="hidden" name="on" value="{{if .Status.Playing}}0{{else}}1{{end}}"><button class="{{if .Status.Playing}}on{{end}}" type="submit"><i class="ph-light ph-play icon" aria-hidden="true"></i>Playing</button></form>

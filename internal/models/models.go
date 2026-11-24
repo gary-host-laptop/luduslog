@@ -194,6 +194,7 @@ type Log struct {
 	PrimaryRating bool
 	Language      string
 	Draft         bool
+	AutoCreated   bool
 	CreatedAt     time.Time
 	UpdatedAt     time.Time
 	Likes         int
@@ -230,17 +231,18 @@ type LibraryEntry struct {
 }
 
 type Status struct {
-	UserID    int64
-	GameID    int64
-	Played    int
-	Playing   bool
-	Backlog   bool
-	Wishlist  bool
-	Liked     bool
-	PlayedAt  time.Time
-	PlayingAt time.Time
-	BacklogAt time.Time
-	UpdatedAt time.Time
+	UserID     int64
+	GameID     int64
+	Played     int
+	Playing    bool
+	Backlog    bool
+	Wishlist   bool
+	Liked      bool
+	PlayedAt   time.Time
+	PlayingAt  time.Time
+	BacklogAt  time.Time
+	WishlistAt time.Time
+	UpdatedAt  time.Time
 }
 
 type List struct {
@@ -337,6 +339,26 @@ type Activity struct {
 	TargetName string
 	Visibility string
 	CreatedAt  time.Time
+}
+
+// TimelineItem is one card in the unified activity stream. Content comes from
+// logs and play sessions; social rows come from activities.
+type TimelineItem struct {
+	Key          string
+	Kind         string // review | log | session | shelf | like | rating | list | follow
+	At           time.Time
+	User         *User
+	UserID       int64
+	Game         *Game
+	GameID       *int64
+	Log          *Log
+	Session      *Session
+	List         *List
+	ListID       *int64
+	TargetName   string
+	TargetUser   *User
+	TargetUserID *int64
+	Visibility   string
 }
 
 type RemoteNote struct {

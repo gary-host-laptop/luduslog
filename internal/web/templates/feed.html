@@ -1,0 +1,11 @@
+{{define "content"}}
+<section class="section" style="margin-top:0">
+  <div class="section-head">
+    <div>
+      <h2>Feed</h2>
+      <span class="muted">Activity from you and the people you follow</span>
+    </div>
+  </div>
+  {{template "timeline_stream" .Stream}}
+</section>
+{{end}}

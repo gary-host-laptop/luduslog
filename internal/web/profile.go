@@ -2,6 +2,7 @@ package web
 
 import (
 	"net/http"
+	"net/url"
 	"strconv"
 	"strings"
 	"time"
@@ -36,9 +37,7 @@ type profileData struct {
 	Following         []*models.User
 	CountFollowers    int
 	CountFollowing    int
-	Activity          []models.Activity
-	JournalView       string
-	Calendar          *journalCalendar
+	Stream            timelineStream
 	PageNum           int
 	Pages             int
 	Total             int
@@ -101,6 +100,15 @@ func buildJournalCalendar(days []store.PlayDay, at time.Time) *journalCalendar {
 	return cal
 }
 
+func timelineFilter(raw string) string {
+	switch raw {
+	case "reviews", "logs", "sessions", "shelves", "lists", "social":
+		return raw
+	default:
+		return "all"
+	}
+}
+
 func (s *Server) profile(w http.ResponseWriter, r *http.Request) {
 	name := r.PathValue("name")
 	p, err := s.st.UserByUsername(r.Context(), name)
@@ -145,6 +153,23 @@ func (s *Server) profile(w http.ResponseWriter, r *http.Request) {
 	if tab == "" {
 		tab = "overview"
 	}
+	if tab == "activity" || tab == "logs" {
+		query := url.Values{}
+		for key, values := range r.URL.Query() {
+			if key != "tab" {
+				query[key] = values
+			}
+		}
+		if tab == "logs" {
+			query.Set("kind", "logs")
+		}
+		target := "/users/" + p.Username
+		if encoded := query.Encode(); encoded != "" {
+			target += "?" + encoded
+		}
+		http.Redirect(w, r, target, http.StatusFound)
+		return
+	}
 	page := atoi(r.URL.Query().Get("page"))
 	if page < 1 {
 		page = 1
@@ -177,10 +202,6 @@ func (s *Server) profile(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 		data.Favorites = s.st.FavoriteGames(r.Context(), p.ID, 5)
-		data.JournalView = p.JournalView
-		if data.JournalView == "" {
-			data.JournalView = "calendar"
-		}
 		if tab == "trophies" {
 			data.Trophies, _ = s.st.BadgeCatalogue(r.Context(), p.ID)
 			for _, trophy := range data.Trophies {
@@ -192,24 +213,9 @@ func (s *Server) profile(w http.ResponseWriter, r *http.Request) {
 		switch tab {
 		case "reviews":
 			data.Reviews, data.Total, _ = s.st.UserLogs(r.Context(), p.ID, true, 15, (page-1)*15)
-		case "logs":
-			data.Logs, data.Total, _ = s.st.UserLogs(r.Context(), p.ID, false, 15, (page-1)*15)
-			switch data.JournalView {
-			case "calendar":
-				at := time.Now()
-				if m, err := time.Parse("2006-01", r.URL.Query().Get("month")); err == nil {
-					at = m
-				}
-				days, _ := s.st.PlayCalendar(r.Context(), p.ID, 1000)
-				data.Calendar = buildJournalCalendar(days, at)
-			case "activity":
-				data.Activity, _ = s.st.UserActivities(r.Context(), p.ID, 50, 0)
-			}
 		case "lists":
 			data.Lists, _ = s.st.VisibleListsFor(r.Context(), p.ID, viewerID)
 			data.Total = len(data.Lists)
-		case "activity":
-			data.Activity, _ = s.st.UserActivities(r.Context(), p.ID, 30, 0)
 		default:
 			data.Widgets = s.overviewWidgets(r, p, viewer, data.Favorites)
 			shelves := []struct {
@@ -224,7 +230,7 @@ func (s *Server) profile(w http.ResponseWriter, r *http.Request) {
 				games, _ := s.st.ShelfGames(r.Context(), p.ID, shelf.key, 3)
 				data.Shelves = append(data.Shelves, shelfSection{Label: shelf.label, Count: shelf.count, Games: games})
 			}
-			data.Reviews, _, _ = s.st.UserLogs(r.Context(), p.ID, true, 2, 0)
+			data.Stream = s.timelineStream(r, viewerID, []int64{p.ID}, "/users/"+p.Username, true, 15)
 		}
 		if data.Total > 0 {
 			data.Pages = (data.Total + 14) / 15

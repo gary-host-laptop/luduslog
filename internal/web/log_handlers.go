@@ -30,7 +30,11 @@ func (s *Server) setStatus(w http.ResponseWriter, r *http.Request) {
 		s.serverError(w, r, err)
 		return
 	}
-	s.st.AddActivity(r.Context(), u.ID, "status", &g.ID, nil, nil, flag, "public")
+	target := flag + ":0"
+	if on {
+		target = flag + ":1"
+	}
+	s.st.AddActivity(r.Context(), u.ID, "status", &g.ID, nil, nil, target, "public")
 	s.redirect(w, r, "/games/"+g.Slug)
 }
 
@@ -48,6 +52,8 @@ func (s *Server) likeGame(w http.ResponseWriter, r *http.Request) {
 	}
 	if liked {
 		s.st.AddActivity(r.Context(), u.ID, "liked", &g.ID, nil, nil, "", "public")
+	} else {
+		s.st.RemoveActivity(r.Context(), u.ID, "liked", g.ID)
 	}
 	if s.isHTMX(r) {
 		likes, _ := s.st.GameLikes(r.Context(), g.ID, 0)
@@ -87,9 +93,10 @@ func (s *Server) rateGame(w http.ResponseWriter, r *http.Request) {
 			s.serverError(w, r, err)
 			return
 		}
-		s.st.AddActivity(r.Context(), u.ID, "rated", &g.ID, nil, nil, "", "public")
+		s.st.AddActivity(r.Context(), u.ID, "rated", &g.ID, nil, nil, strconv.FormatFloat(rating, 'f', -1, 64), "public")
 		s.flash(w, r, "success", "Rating saved.")
 	} else {
+		s.st.RemoveActivity(r.Context(), u.ID, "rated", g.ID)
 		s.flash(w, r, "success", "Rating cleared.")
 	}
 	s.redirect(w, r, "/games/"+g.Slug)
@@ -273,7 +280,6 @@ func (s *Server) logSubmit(w http.ResponseWriter, r *http.Request) {
 	}
 	if !in.Draft {
 		s.syncLogLibrary(r.Context(), u.ID, g.ID, in)
-		s.st.AddActivity(r.Context(), u.ID, "log", &g.ID, &l.ID, nil, "", "public")
 		s.st.CheckBadges(r.Context(), u.ID)
 		if in.Review != "" {
 			s.notifyMentions(r, u, "log", l.ID, in.Review, "/users/"+u.Username+"/reviews/"+itoa(l.ID))
@@ -474,6 +480,36 @@ func (s *Server) sessionCreate(w http.ResponseWriter, r *http.Request) {
 	}
 	s.flash(w, r, "success", "Session added.")
 	s.redirect(w, r, "/logs/"+itoa(id)+"/sessions")
+}
+
+// gameSessionCreate logs a session straight from a game page, creating the
+// minimal container log first when the user has never logged that game.
+func (s *Server) gameSessionCreate(w http.ResponseWriter, r *http.Request) {
+	g, err := s.st.GameBySlug(r.Context(), r.PathValue("slug"))
+	if err != nil {
+		s.notFound(w, r)
+		return
+	}
+	u := currentUser(r)
+	l, err := s.st.SessionLogFor(r.Context(), u.ID, g.ID)
+	if err != nil {
+		s.serverError(w, r, err)
+		return
+	}
+	_, err = s.st.CreateSession(r.Context(), store.SessionInput{
+		LogID:       l.ID,
+		Note:        strings.TrimSpace(r.FormValue("note")),
+		NotePrivacy: store.NormalizeNotePrivacy(r.FormValue("privacy")),
+		Playtime:    atof(r.FormValue("playtime")),
+		Days:        sessionDays(r),
+		Tags:        sessionTags(r),
+	})
+	if err != nil {
+		s.serverError(w, r, err)
+		return
+	}
+	s.flash(w, r, "success", "Session added.")
+	s.redirect(w, r, "/logs/"+itoa(l.ID)+"/sessions")
 }
 
 func (s *Server) sessionDelete(w http.ResponseWriter, r *http.Request) {

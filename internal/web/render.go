@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"html/template"
 	"math"
+	"net/url"
 	"path"
 	"strconv"
 	"strings"
@@ -37,15 +38,26 @@ func templateFuncs(s *Server) template.FuncMap {
 		"date":            dateFmt,
 		"dateSlash":       dateSlash,
 		"dateLong":        dateLong,
+		"releaseDay":      releaseDay,
+		"releaseLabel":    releaseLabel,
 		"releaseDate":     releaseDate,
-		"sameTitle":       sameTitle,
-		"altNames":        displayAltNames,
-		"year":            func(t time.Time) int { return t.Year() },
-		"add":             func(a, b int) int { return a + b },
-		"sub":             func(a, b int) int { return a - b },
-		"inc":             func(a int) int { return a + 1 },
-		"dec":             func(a int) int { return a - 1 },
-		"mul":             func(a, b float64) float64 { return a * b },
+		"atof": func(s string) float64 {
+			f, _ := strconv.ParseFloat(s, 64)
+			return f
+		},
+		"query":       url.QueryEscape,
+		"queryEscape": url.QueryEscape,
+		"shelfAction": shelfAction,
+		"kindLabel":   activityKindLabel,
+		"slice":       func(values ...string) []string { return values },
+		"sameTitle":   sameTitle,
+		"altNames":    displayAltNames,
+		"year":        func(t time.Time) int { return t.Year() },
+		"add":         func(a, b int) int { return a + b },
+		"sub":         func(a, b int) int { return a - b },
+		"inc":         func(a int) int { return a + 1 },
+		"dec":         func(a int) int { return a - 1 },
+		"mul":         func(a, b float64) float64 { return a * b },
 		"div": func(a, b float64) float64 {
 			if b == 0 {
 				return 0
@@ -326,6 +338,36 @@ func releaseDate(s string) string {
 	return s
 }
 
+func releaseDay(s string) string {
+	t, err := time.Parse("2006-01-02", s)
+	if err != nil {
+		return ""
+	}
+	return t.Format("Jan 2")
+}
+
+// releaseLabel describes how far away a release is in UTC, matching the
+// date('now') window used by the Coming soon rail.
+func releaseLabel(s string) string {
+	t, err := time.Parse("2006-01-02", s)
+	if err != nil {
+		return ""
+	}
+	now := time.Now().UTC()
+	today := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, time.UTC)
+	days := int(t.Sub(today).Hours() / 24)
+	switch {
+	case days < 0:
+		return ""
+	case days == 0:
+		return "Today"
+	case days == 1:
+		return "Tomorrow"
+	default:
+		return fmt.Sprintf("In %d days", days)
+	}
+}
+
 func sameTitle(a, b string) bool {
 	return strings.EqualFold(strings.TrimSpace(a), strings.TrimSpace(b))
 }
@@ -459,6 +501,60 @@ func ancestorTab(category string) string {
 		return "Edition of"
 	default:
 		return "Version of"
+	}
+}
+
+func activityKindLabel(kind string) string {
+	switch kind {
+	case "review":
+		return "Reviews"
+	case "log":
+		return "Journal logs"
+	case "session":
+		return "Play sessions"
+	case "list":
+		return "Lists"
+	case "rating":
+		return "Ratings"
+	case "like":
+		return "Likes"
+	case "shelf":
+		return "Shelf changes"
+	case "follow":
+		return "Follows"
+	default:
+		return kind
+	}
+}
+
+type shelfActionInfo struct {
+	Verb   string
+	Detail string
+}
+
+// shelfAction turns the stored flag and on/off marker into readable copy. Rows
+// written before the marker existed fall back to a generic shelf update.
+func shelfAction(raw string) shelfActionInfo {
+	parts := strings.SplitN(raw, ":", 2)
+	shelf := parts[0]
+	on := true
+	if len(parts) == 2 {
+		on = parts[1] != "0"
+	}
+	name := map[string]string{"playing": "Playing", "backlog": "Backlog", "wishlist": "Wishlist"}[shelf]
+	switch shelf {
+	case "playing":
+		if on {
+			return shelfActionInfo{Verb: "started playing"}
+		}
+		return shelfActionInfo{Verb: "stopped playing"}
+	case "backlog", "wishlist":
+		if on {
+			return shelfActionInfo{Verb: "added", Detail: "to " + name}
+		}
+		return shelfActionInfo{Verb: "removed", Detail: "from " + name}
+	default:
+		return shelfActionInfo{Verb: "changed their shelf for"}
 	}
 }
 
