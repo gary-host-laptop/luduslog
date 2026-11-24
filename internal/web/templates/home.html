@@ -47,8 +47,8 @@
   {{range .Reviews}}
     <article class="review-card">
       <div class="log-head">{{if .User}}<a href="/users/{{.User.Username}}">{{.User.Username}}</a>{{end}} {{stars .Rating 5}} <span>{{timeago .CreatedAt}}</span></div>
-      {{if .Name}}<h3 class="mt1">{{if .Review}}<a href="{{reviewPath .}}">{{.Name}}</a>{{else}}{{.Name}}{{end}}</h3>{{end}}
-      {{if .Game}}<div class="muted"><a href="/games/{{.Game.Slug}}">{{.Game.Title}}</a></div>{{end}}
+      <h3 class="mt1">{{if .Review}}<a href="{{reviewPath .}}">{{if .Name}}{{.Name}}{{else}}{{.Game.Title}}{{end}}</a>{{else if .Name}}{{.Name}}{{end}}</h3>
+      {{if and .Game .Name}}<div class="muted"><a href="/games/{{.Game.Slug}}">{{.Game.Title}}</a></div>{{end}}
       {{template "review_preview" .}}
       {{template "review_actions" .}}
     </article>
@@ -63,8 +63,8 @@
   <div class="grid grid-2">
   {{range .Lists}}
     <a class="list-card" href="{{if .User}}/users/{{.User.Username}}/lists/{{.Slug}}{{else}}/lists{{end}}">
-      <div class="list-thumbs">{{range .Entries}}<img src="{{cover .Game}}" alt="">{{end}}</div>
-      <div><h3>{{.Title}}</h3><div class="muted">{{if .User}}{{.User.Username}}{{end}} · {{.Likes}} likes</div></div>
+      {{if .CoverGames}}<div class="list-covers">{{range .CoverGames}}<img src="{{cover .}}" alt="" loading="lazy">{{end}}</div>{{end}}
+      <div><h3>{{.Title}}</h3><div class="muted">{{if .User}}{{.User.Username}}{{end}} · {{.Likes}} likes · {{.EntryCount}} {{plural .EntryCount "game" "games"}}</div></div>
     </a>
   {{end}}
   </div>

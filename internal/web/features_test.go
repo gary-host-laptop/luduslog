@@ -465,6 +465,9 @@ func TestFavouriteGamesWeb(t *testing.T) {
 	if got := st.FavoriteGames(ctx, alice.ID, 10); len(got) != 5 {
 		t.Fatalf("favourites = %d, want 5", len(got))
 	}
+	if err := st.SetOverviewWidgets(ctx, alice.ID, "favourites", "", nil, nil); err != nil {
+		t.Fatal(err)
+	}
 
 	_, profile := getBody(t, client, ts.URL+"/users/alice")
 	if !strings.Contains(profile, "Favourite games") || !strings.Contains(profile, "Fave 1") {
@@ -500,59 +503,456 @@ func TestFavouriteGamesWeb(t *testing.T) {
 	}
 }
 
-func TestProfileOverviewRecentlyPlayed(t *testing.T) {
+func TestProfileOverviewShelves(t *testing.T) {
 	ts, st := testServer(t)
 	ctx := context.Background()
-	alice, _ := st.CreateUser(ctx, "recently", "recently@example.test", "hash", false)
-	playing, _ := st.SaveGame(ctx, &models.Game{IGDBID: -701, Slug: "playing-now", Title: "Playing Now", ReleaseStatus: "released"})
-	played, _ := st.SaveGame(ctx, &models.Game{IGDBID: -702, Slug: "finished-game", Title: "Finished Game", ReleaseStatus: "released"})
-	backlog, _ := st.SaveGame(ctx, &models.Game{IGDBID: -703, Slug: "backlog-only", Title: "Backlog Only", ReleaseStatus: "released"})
-
-	if err := st.SetStatusFlag(ctx, alice.ID, playing.ID, "playing", true); err != nil {
-		t.Fatal(err)
+	alice, _ := st.CreateUser(ctx, "shelfweb", "shelfweb@example.test", "hash", false)
+	shelves := []struct {
+		label, key, column string
+	}{
+		{"Played", "played", "played_at"},
+		{"Playing", "playing", "playing_at"},
+		{"Backlog", "backlog", "backlog_at"},
 	}
-	if err := st.SetPlayedCount(ctx, alice.ID, played.ID, 1); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := st.CreateLog(ctx, store.LogInput{UserID: alice.ID, GameID: played.ID, Rating: 8, Status: "played"}); err != nil {
-		t.Fatal(err)
-	}
-	if err := st.SetStatusFlag(ctx, alice.ID, backlog.ID, "backlog", true); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := st.DB.ExecContext(ctx, `UPDATE statuses SET playing_at=?,updated_at=? WHERE user_id=? AND game_id=?`,
-		"2026-11-20T12:00:00Z", "2026-11-20T12:00:00Z", alice.ID, playing.ID); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := st.DB.ExecContext(ctx, `UPDATE statuses SET played_at=?,updated_at=? WHERE user_id=? AND game_id=?`,
-		"2026-11-21T12:00:00Z", "2026-11-21T12:00:00Z", alice.ID, played.ID); err != nil {
-		t.Fatal(err)
-	}
-
-	_, body := getBody(t, http.DefaultClient, ts.URL+"/users/recently")
-	start := strings.Index(body, "<h2>Recently played</h2>")
-	if start < 0 {
-		t.Fatal("profile overview is missing Recently played")
-	}
-	end := strings.Index(body[start:], "</section>")
-	if end < 0 {
-		t.Fatal("Recently played section was not closed")
-	}
-	section := body[start : start+end]
-	for _, want := range []string{"Playing Now", "Finished Game", "Playing", "Played", "November 20, 2026", "November 21, 2026", "8.0 / 10"} {
-		if !strings.Contains(section, want) {
-			t.Errorf("Recently played section missing %q", want)
+	for sIndex, shelf := range shelves {
+		for i := 1; i <= 4; i++ {
+			game, _ := st.SaveGame(ctx, &models.Game{
+				IGDBID: int64(-700 - sIndex*10 - i),
+				Slug:   strings.ToLower(shelf.label) + "-shelf-" + strconv.Itoa(i),
+				Title:  shelf.label + " " + strconv.Itoa(i), ReleaseStatus: "released",
+			})
+			if shelf.key == "played" {
+				if err := st.SetPlayedCount(ctx, alice.ID, game.ID, 1); err != nil {
+					t.Fatal(err)
+				}
+			} else if err := st.SetStatusFlag(ctx, alice.ID, game.ID, shelf.key, true); err != nil {
+				t.Fatal(err)
+			}
+			eventAt := "2026-0" + strconv.Itoa(sIndex+1) + "-0" + strconv.Itoa(i) + "T12:00:00Z"
+			if _, err := st.DB.ExecContext(ctx, `UPDATE statuses SET `+shelf.column+`=?,updated_at=? WHERE user_id=? AND game_id=?`,
+				eventAt, eventAt, alice.ID, game.ID); err != nil {
+				t.Fatal(err)
+			}
 		}
 	}
-	if strings.Contains(section, "Backlog Only") {
-		t.Error("backlog-only game appeared in Recently played")
+	wishlist, _ := st.SaveGame(ctx, &models.Game{IGDBID: -799, Slug: "shelf-wishlist", Title: "Shelf Wishlist", ReleaseStatus: "released"})
+	if err := st.SetStatusFlag(ctx, alice.ID, wishlist.ID, "wishlist", true); err != nil {
+		t.Fatal(err)
 	}
-	if strings.Index(section, "Finished Game") > strings.Index(section, "Playing Now") {
-		t.Error("Recently played games are not ordered newest first")
+
+	_, body := getBody(t, http.DefaultClient, ts.URL+"/users/shelfweb")
+	for _, shelf := range shelves {
+		start := strings.Index(body, "<h2>"+shelf.label+"</h2>")
+		if start < 0 {
+			t.Fatalf("profile overview is missing the %s shelf", shelf.label)
+		}
+		end := strings.Index(body[start:], "</section>")
+		if end < 0 {
+			t.Fatalf("%s shelf section was not closed", shelf.label)
+		}
+		section := body[start : start+end]
+		if !strings.Contains(section, "4 games") {
+			t.Errorf("%s shelf missing its total count", shelf.label)
+		}
+		for i := 4; i >= 2; i-- {
+			if !strings.Contains(section, shelf.label+" "+strconv.Itoa(i)) {
+				t.Errorf("%s shelf missing its latest game %d", shelf.label, i)
+			}
+		}
+		if strings.Contains(section, shelf.label+" 1") {
+			t.Errorf("%s shelf included a fourth game", shelf.label)
+		}
+		if i4, i3 := strings.Index(section, shelf.label+" 4"), strings.Index(section, shelf.label+" 3"); i4 < 0 || i4 > i3 {
+			t.Errorf("%s shelf games are not ordered newest first", shelf.label)
+		}
+	}
+	headerStart := strings.Index(body, `class="profile-stats`)
+	if headerStart < 0 {
+		t.Fatal("profile stats block missing")
+	}
+	headerEnd := strings.Index(body[headerStart:], "</div>")
+	if headerEnd < 0 {
+		t.Fatal("profile stats block was not closed")
+	}
+	header := body[headerStart : headerStart+headerEnd]
+	for _, removed := range []string{"played", "backlog", "wishlist", "this year", "reviews"} {
+		if strings.Contains(header, removed) {
+			t.Errorf("profile header still contains the %s counter", removed)
+		}
+	}
+	for _, want := range []string{"profile-playtime", "playtime", "followers", "following"} {
+		if !strings.Contains(header, want) {
+			t.Errorf("profile header missing %q", want)
+		}
 	}
 	for _, removed := range []string{"<h2>Journal</h2>", "<h2>Lists</h2>", "<h2>Friends</h2>"} {
 		if strings.Contains(body, removed) {
 			t.Fatalf("profile overview still contains %s", removed)
+		}
+	}
+}
+
+func TestProfileStatsWeb(t *testing.T) {
+	ts, st := testServer(t)
+	ctx := context.Background()
+	alice, _ := st.CreateUser(ctx, "statsalice", "statsalice@example.test", "hash", false)
+	played, _ := st.SaveGame(ctx, &models.Game{IGDBID: -741, Slug: "stats-played", Title: "Stats Played", ReleaseStatus: "released"})
+	old, _ := st.SaveGame(ctx, &models.Game{IGDBID: -742, Slug: "stats-old", Title: "Stats Old", ReleaseStatus: "released"})
+	backlog, _ := st.SaveGame(ctx, &models.Game{IGDBID: -743, Slug: "stats-backlog-web", Title: "Stats Backlog Web", ReleaseStatus: "released"})
+	wishlist, _ := st.SaveGame(ctx, &models.Game{IGDBID: -744, Slug: "stats-wishlist-web", Title: "Stats Wishlist Web", ReleaseStatus: "released"})
+	st.SetPlayedCount(ctx, alice.ID, played.ID, 1)
+	if _, err := st.CreateLog(ctx, store.LogInput{UserID: alice.ID, GameID: played.ID, Status: "played"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.CreateLog(ctx, store.LogInput{UserID: alice.ID, GameID: played.ID, Status: "played"}); err != nil {
+		t.Fatal(err)
+	}
+	oldLog, _ := st.CreateLog(ctx, store.LogInput{UserID: alice.ID, GameID: old.ID, Status: "played"})
+	st.DB.ExecContext(ctx, `UPDATE logs SET created_at=? WHERE id=?`, strconv.Itoa(time.Now().UTC().Year()-1)+"-04-01T12:00:00Z", oldLog.ID)
+	st.SetStatusFlag(ctx, alice.ID, backlog.ID, "backlog", true)
+	st.SetStatusFlag(ctx, alice.ID, wishlist.ID, "wishlist", true)
+
+	code, body := getBody(t, http.DefaultClient, ts.URL+"/users/statsalice")
+	if code != http.StatusOK {
+		t.Fatalf("profile = %d", code)
+	}
+	for _, want := range []string{"playtime", "<h2>Played</h2>", "<h2>Backlog</h2>"} {
+		if !strings.Contains(body, want) {
+			t.Errorf("profile stats missing %q", want)
+		}
+	}
+	if strings.Contains(body, "wishlist") || strings.Contains(body, "<strong>1</strong> backlog") {
+		t.Error("profile still shows removed shelf counters")
+	}
+	_, stats := getBody(t, http.DefaultClient, ts.URL+"/users/statsalice/stats")
+	if !strings.Contains(stats, "1 games played this year") {
+		t.Error("stats page did not use the distinct year count")
+	}
+
+	st.UpdateProfile(ctx, alice.ID, store.ProfileUpdate{PrivateProfile: true})
+	_, private := getBody(t, http.DefaultClient, ts.URL+"/users/statsalice")
+	if strings.Contains(private, "this year") || strings.Contains(private, "playtime") {
+		t.Error("private profile leaked stats")
+	}
+	if code, _ := getBody(t, http.DefaultClient, ts.URL+"/users/statsalice/stats"); code != http.StatusNotFound {
+		t.Fatalf("private stats page = %d, want 404", code)
+	}
+}
+
+func TestProfileYearlyGoalWeb(t *testing.T) {
+	ts, st := testServer(t)
+	ctx := context.Background()
+	alice, _ := st.CreateUser(ctx, "goalalice", "goalalice@example.test", "hash", false)
+	game, _ := st.SaveGame(ctx, &models.Game{IGDBID: -745, Slug: "yearly-goal-game", Title: "Yearly Goal Game", ReleaseStatus: "released"})
+	if _, err := st.CreateLog(ctx, store.LogInput{UserID: alice.ID, GameID: game.ID, Status: "played"}); err != nil {
+		t.Fatal(err)
+	}
+	client, sess := authedClient(t, ts, st, alice)
+	plain := noRedirectClient(client)
+
+	if got := postStatus(t, plain, ts.URL+"/settings/preferences", url.Values{"_csrf": {sess.CSRF}, "yearly_goal": {"4"}}); got != http.StatusSeeOther {
+		t.Fatalf("save yearly goal = %d", got)
+	}
+	if updated, _ := st.UserByID(ctx, alice.ID); updated.YearlyGoal != 4 {
+		t.Fatalf("yearly goal = %d, want 4", updated.YearlyGoal)
+	}
+	_, settings := getBody(t, client, ts.URL+"/settings?tab=preferences")
+	if !strings.Contains(settings, `id="yearly_goal" type="number" name="yearly_goal" min="0" max="10000" value="4"`) {
+		t.Error("preferences did not render the saved yearly goal")
+	}
+
+	code, body := getBody(t, http.DefaultClient, ts.URL+"/users/goalalice")
+	if code != http.StatusOK {
+		t.Fatalf("profile = %d", code)
+	}
+	for _, want := range []string{
+		`<h2 id="yearly-goal-title">Yearly goal</h2>`,
+		"1 of 4 games",
+		`<strong class="yearly-goal-percent">25%</strong>`,
+		`style="width:25%"`,
+	} {
+		if !strings.Contains(body, want) {
+			t.Errorf("profile goal missing %q", want)
+		}
+	}
+	goalAt, shelvesAt := strings.Index(body, `class="yearly-goal"`), strings.Index(body, `class="shelf-groups"`)
+	if goalAt < 0 || shelvesAt < 0 || goalAt > shelvesAt {
+		t.Error("yearly goal is not rendered above the shelf sections")
+	}
+
+	if got := postStatus(t, plain, ts.URL+"/settings/preferences", url.Values{"_csrf": {sess.CSRF}, "yearly_goal": {"many"}}); got != http.StatusSeeOther {
+		t.Fatalf("invalid yearly goal = %d", got)
+	}
+	if updated, _ := st.UserByID(ctx, alice.ID); updated.YearlyGoal != 4 {
+		t.Fatalf("invalid yearly goal overwrote the saved value: %d", updated.YearlyGoal)
+	}
+}
+
+func TestProfilePolishAndInlineTrophies(t *testing.T) {
+	ts, st := testServer(t)
+	ctx := context.Background()
+	alice, _ := st.CreateUser(ctx, "polishalice", "polishalice@example.test", "hash", false)
+	game, _ := st.SaveGame(ctx, &models.Game{IGDBID: -711, Slug: "polish-game", Title: "Polish Game", ReleaseStatus: "released"})
+	log, _ := st.CreateLog(ctx, store.LogInput{UserID: alice.ID, GameID: game.ID, Rating: 9, Review: "A polished review", Status: "played"})
+	oldTime := time.Now().UTC().Add(-25 * time.Hour)
+	if _, err := st.DB.ExecContext(ctx, `UPDATE users SET created_at=?,timezone='Europe/London' WHERE id=?`, oldTime.Format(time.RFC3339), alice.ID); err != nil {
+		t.Fatal(err)
+	}
+	st.CheckBadges(ctx, alice.ID)
+	if err := st.SetFeaturedBadge(ctx, alice.ID, "n00b"); err != nil {
+		t.Fatal(err)
+	}
+	client, _ := authedClient(t, ts, st, alice)
+
+	_, body := getBody(t, client, ts.URL+"/users/polishalice")
+	for _, want := range []string{"Joined " + oldTime.Format("2006/01/02"), `class="profile-trophy-card"`, `class="byline-author"`} {
+		if !strings.Contains(body, want) {
+			t.Errorf("profile missing %q", want)
+		}
+	}
+	for _, unwanted := range []string{"Europe/London", "Edit profile", `class="profile-actions"`, `<span class="tabs-label">Trophy</span>`} {
+		if strings.Contains(body, unwanted) {
+			t.Errorf("profile still contains %q", unwanted)
+		}
+	}
+	_, trophyTab := getBody(t, client, ts.URL+"/users/polishalice?tab=trophies")
+	if !strings.Contains(trophyTab, `href="/users/polishalice?tab=trophies" class="on"`) {
+		t.Error("trophies tab link is not active on the trophies tab")
+	}
+
+	code, inline := getBody(t, client, ts.URL+"/users/polishalice/trophies")
+	if code != http.StatusOK || !strings.Contains(inline, "3 of 11 earned") || !strings.Contains(inline, `class="trophy-card`) {
+		t.Fatalf("legacy trophies route did not render inline (%d)", code)
+	}
+	if strings.Contains(inline, "Trophies of polishalice") {
+		t.Error("legacy trophies page still renders separately")
+	}
+	_, review := getBody(t, client, ts.URL+"/users/polishalice/reviews/"+itoa(log.ID))
+	if !strings.Contains(review, `review-author byline-author`) {
+		t.Error("review page byline lacks shared alignment class")
+	}
+}
+
+func TestOverviewWidgetsWeb(t *testing.T) {
+	ts, st := testServer(t)
+	ctx := context.Background()
+	alice, _ := st.CreateUser(ctx, "widgetalice", "widgetalice@example.test", "hash", false)
+	bob, _ := st.CreateUser(ctx, "widgetbob", "widgetbob@example.test", "hash", false)
+	game, _ := st.SaveGame(ctx, &models.Game{IGDBID: -721, Slug: "widget-game", Title: "Widget Game", ReleaseStatus: "released"})
+	if err := st.AddFavoriteGame(ctx, alice.ID, game.ID); err != nil {
+		t.Fatal(err)
+	}
+	review, _ := st.CreateLog(ctx, store.LogInput{UserID: alice.ID, GameID: game.ID, Name: "Featured thoughts", Rating: 9, Review: "Featured body text shown as a compact excerpt.", Playtime: 24.5, Status: "played"})
+	bobReview, _ := st.CreateLog(ctx, store.LogInput{UserID: bob.ID, GameID: game.ID, Name: "Bob thoughts", Rating: 7, Review: "Bob body", Status: "played"})
+	list, _ := st.CreateList(ctx, store.ListInput{UserID: alice.ID, Title: "Widget List", Privacy: "public"})
+	st.AddListEntry(ctx, list.ID, game.ID, "")
+	private, _ := st.CreateList(ctx, store.ListInput{UserID: alice.ID, Title: "Private Widget List", Description: "Games saved for a rainy weekend.", Privacy: "private"})
+
+	client, sess := authedClient(t, ts, st, alice)
+	plain := noRedirectClient(client)
+	_, body := getBody(t, client, ts.URL+"/users/widgetalice")
+	if strings.Contains(body, `class="overview-widgets"`) || strings.Contains(body, "<h2>Favourite games</h2>") {
+		t.Error("default Overview rendered a widget row")
+	}
+	_, settings := getBody(t, client, ts.URL+"/settings")
+	for _, want := range []string{`id="overview-widgets"`, `action="/settings/overview-widgets"`, `name="overview_widget_1"`, `name="featured_review_id"`, "Widget List"} {
+		if !strings.Contains(settings, want) {
+			t.Errorf("widget settings missing %q", want)
+		}
+	}
+
+	if got := postStatus(t, plain, ts.URL+"/settings/overview-widgets", url.Values{
+		"_csrf": {sess.CSRF}, "overview_widget_1": {"favourites"}, "overview_widget_2": {"review"}, "featured_review_id": {itoa(review.ID)},
+	}); got != http.StatusSeeOther {
+		t.Fatalf("save widgets = %d", got)
+	}
+	_, body = getBody(t, client, ts.URL+"/users/widgetalice")
+	favPos := strings.Index(body, "<h2>Favourite games</h2>")
+	reviewPos := strings.Index(body, "<h2>Highlighted review</h2>")
+	widgetsBody := body
+	for _, marker := range []string{"<h2>Played</h2>", "<h2>Playing</h2>", "<h2>Backlog</h2>", "<h2>Recent reviews</h2>"} {
+		if i := strings.Index(widgetsBody, marker); i >= 0 {
+			widgetsBody = widgetsBody[:i]
+		}
+	}
+	if favPos < 0 || reviewPos < 0 || favPos > reviewPos || !strings.Contains(widgetsBody, `class="overview-widgets"`) {
+		t.Error("ordered favourite/review widgets did not render")
+	}
+	if !strings.Contains(widgetsBody, "Featured thoughts") || !strings.Contains(widgetsBody, "24.5h") || !strings.Contains(widgetsBody, "played") {
+		t.Error("highlighted review is missing its title or playtime")
+	}
+	if !strings.Contains(widgetsBody, "Featured body text shown as a compact excerpt.") {
+		t.Error("highlighted review is missing its body excerpt")
+	}
+	if strings.Contains(widgetsBody, "Read review") {
+		t.Error("highlighted review still renders an action row")
+	}
+
+	// Duplicate and foreign content are rejected without changing the stored config.
+	for _, tc := range []struct{ w1, w2, reviewID string }{
+		{"favourites", "favourites", ""},
+		{"review", "", itoa(bobReview.ID)},
+		{"nonsense", "", ""},
+	} {
+		if got := postStatus(t, plain, ts.URL+"/settings/overview-widgets", url.Values{
+			"_csrf": {sess.CSRF}, "overview_widget_1": {tc.w1}, "overview_widget_2": {tc.w2}, "featured_review_id": {tc.reviewID},
+		}); got != http.StatusSeeOther {
+			t.Fatalf("invalid widget post = %d", got)
+		}
+	}
+	updated, _ := st.UserByID(ctx, alice.ID)
+	if updated.OverviewWidget1 != "favourites" || updated.OverviewWidget2 != "review" {
+		t.Fatalf("invalid widget post changed config: %+v", updated)
+	}
+
+	// Adult highlighted reviews stay hidden until the viewer opts in.
+	adultGame, _ := st.SaveGame(ctx, &models.Game{IGDBID: -722, Slug: "widget-adult", Title: "Widget Adult", Adult: true, ReleaseStatus: "released"})
+	adultReview, _ := st.CreateLog(ctx, store.LogInput{UserID: alice.ID, GameID: adultGame.ID, Name: "Adult thoughts", Review: "Adult body", Status: "played"})
+	if got := postStatus(t, plain, ts.URL+"/settings/overview-widgets", url.Values{
+		"_csrf": {sess.CSRF}, "overview_widget_1": {"review"}, "featured_review_id": {itoa(adultReview.ID)},
+	}); got != http.StatusSeeOther {
+		t.Fatalf("save adult review widget = %d", got)
+	}
+	_, adultHidden := getBody(t, client, ts.URL+"/users/widgetalice")
+	if strings.Contains(adultHidden, "<h2>Highlighted review</h2>") {
+		t.Error("adult highlighted review bypassed the age gate")
+	}
+	st.DB.ExecContext(ctx, `UPDATE users SET adult_optin=1 WHERE id=?`, alice.ID)
+	_, adultVisible := getBody(t, client, ts.URL+"/users/widgetalice")
+	if !strings.Contains(adultVisible, "<h2>Highlighted review</h2>") || !strings.Contains(adultVisible, "Adult thoughts") {
+		t.Error("opted-in owner cannot see their adult highlighted review")
+	}
+	st.DB.ExecContext(ctx, `UPDATE users SET adult_optin=0 WHERE id=?`, alice.ID)
+
+	adultList, _ := st.CreateList(ctx, store.ListInput{UserID: alice.ID, Title: "Adult Widget List", Privacy: "public"})
+	st.AddListEntry(ctx, adultList.ID, adultGame.ID, "")
+	if got := postStatus(t, plain, ts.URL+"/settings/overview-widgets", url.Values{
+		"_csrf": {sess.CSRF}, "overview_widget_1": {"list"}, "featured_list_id": {itoa(adultList.ID)},
+	}); got != http.StatusSeeOther {
+		t.Fatalf("save adult list widget = %d", got)
+	}
+	_, adultListHidden := getBody(t, client, ts.URL+"/users/widgetalice")
+	if strings.Contains(adultListHidden, "Adult Widget List") || strings.Contains(adultListHidden, `class="overview-widgets"`) {
+		t.Error("adult highlighted list bypassed the age gate")
+	}
+	st.DB.ExecContext(ctx, `UPDATE users SET adult_optin=1 WHERE id=?`, alice.ID)
+	_, adultListVisible := getBody(t, client, ts.URL+"/users/widgetalice")
+	if !strings.Contains(adultListVisible, "Adult Widget List") {
+		t.Error("opted-in owner cannot see their adult highlighted list")
+	}
+	if !strings.Contains(adultListVisible, `class="list-card list-card-widget"`) {
+		t.Error("highlighted list widget did not use the enlarged list card")
+	}
+	st.DB.ExecContext(ctx, `UPDATE users SET adult_optin=0 WHERE id=?`, alice.ID)
+
+	// A private list is visible to its owner but omitted for a stranger.
+	if got := postStatus(t, plain, ts.URL+"/settings/overview-widgets", url.Values{
+		"_csrf": {sess.CSRF}, "overview_widget_1": {"list"}, "featured_list_id": {itoa(private.ID)},
+	}); got != http.StatusSeeOther {
+		t.Fatalf("save private list widget = %d", got)
+	}
+	_, ownerBody := getBody(t, client, ts.URL+"/users/widgetalice")
+	if !strings.Contains(ownerBody, "Private Widget List") || !strings.Contains(ownerBody, "Games saved for a rainy weekend.") {
+		t.Error("owner cannot see a selected private list and its description")
+	}
+	bobClient, _ := authedClient(t, ts, st, bob)
+	_, strangerBody := getBody(t, bobClient, ts.URL+"/users/widgetalice")
+	if strings.Contains(strangerBody, `class="overview-widgets"`) || strings.Contains(strangerBody, "Private Widget List") {
+		t.Error("private list widget leaked to a stranger")
+	}
+
+	// Deleted selections disappear cleanly.
+	if err := st.DeleteList(ctx, private.ID, alice.ID); err != nil {
+		t.Fatal(err)
+	}
+	_, deletedBody := getBody(t, client, ts.URL+"/users/widgetalice")
+	if strings.Contains(deletedBody, `class="overview-widgets"`) || strings.Contains(deletedBody, "Private Widget List") {
+		t.Error("deleted list widget still rendered")
+	}
+
+	if got := postStatus(t, plain, ts.URL+"/settings/overview-widgets", url.Values{
+		"_csrf": {sess.CSRF}, "overview_widget_1": {""}, "overview_widget_2": {""},
+	}); got != http.StatusSeeOther {
+		t.Fatalf("clear widgets = %d", got)
+	}
+	updated, _ = st.UserByID(ctx, alice.ID)
+	if updated.OverviewWidget1 != "" || updated.OverviewWidget2 != "" || updated.FeaturedReviewID != nil || updated.FeaturedListID != nil {
+		t.Fatalf("widgets not cleared: %+v", updated)
+	}
+}
+
+func TestListCoverCardsWeb(t *testing.T) {
+	ts, st := testServer(t)
+	ctx := context.Background()
+	alice, _ := st.CreateUser(ctx, "coverweb", "coverweb@example.test", "hash", false)
+	list, _ := st.CreateList(ctx, store.ListInput{UserID: alice.ID, Title: "Stack Web", Privacy: "public"})
+	for i := 0; i < 6; i++ {
+		game, _ := st.SaveGame(ctx, &models.Game{IGDBID: int64(-731 - i), Slug: "stack-game-" + strconv.Itoa(i), Title: "Stack Game " + strconv.Itoa(i), ReleaseStatus: "released"})
+		st.AddListEntry(ctx, list.ID, game.ID, "")
+		st.DB.ExecContext(ctx, `UPDATE list_entries SET added_at=? WHERE list_id=? AND game_id=?`, "2026-02-0"+strconv.Itoa(i+1)+"T12:00:00Z", list.ID, game.ID)
+	}
+	for _, path := range []string{
+		"/users/coverweb?tab=lists",
+		"/lists",
+		"/",
+		"/search?q=Stack&tab=lists",
+		"/games/stack-game-0",
+	} {
+		code, body := getBody(t, http.DefaultClient, ts.URL+path)
+		if code != http.StatusOK || !strings.Contains(body, "Stack Web") {
+			t.Fatalf("%s missing list card (%d)", path, code)
+		}
+		start := strings.Index(body, `href="/users/coverweb/lists/stack-web"`)
+		if start < 0 {
+			t.Fatalf("%s missing the list card link", path)
+		}
+		start = strings.LastIndex(body[:start], "<a ")
+		if start < 0 {
+			t.Fatalf("%s missing the list card anchor", path)
+		}
+		card := body[start:]
+		if end := strings.Index(card, "</a>"); end >= 0 {
+			card = card[:end]
+		}
+		if !strings.Contains(card, `class="list-covers"`) {
+			t.Errorf("%s missing overlapping list covers", path)
+		}
+		if got := strings.Count(card, "<img "); got != 5 {
+			t.Errorf("%s rendered %d covers, want 5", path, got)
+		}
+		if !strings.Contains(card, "6 games") {
+			t.Errorf("%s missing correct list count", path)
+		}
+		if path == "/games/stack-game-0" && !strings.Contains(card, `class="list-card list-card-compact"`) {
+			t.Error("game-page list card did not use the compact cover size")
+		}
+	}
+}
+
+func TestListCoverStackCSS(t *testing.T) {
+	css, err := os.ReadFile("static/style.css")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{
+		".list-card { --cover-w: 56px; --cover-h: 75px;",
+		".list-card-compact { --cover-w: 48px; --cover-h: 64px; }",
+		".list-card-widget { --cover-w: calc((100cqi - 4 * .7rem) / 5); }",
+		".list-card-widget .list-covers img { height: auto; aspect-ratio: 3 / 4; }",
+		".overview-widget .fav-grid { grid-template-columns: repeat(5, minmax(0, 1fr)); }",
+		".overview-widget .list-card { flex: 1; width: 100%; padding: 0; border: 0; background: none; align-items: flex-start; }",
+		".overview-review-head { display: flex; flex: 1; align-items: flex-start; gap: .75rem; }",
+		".overview-review-head .game-cover { width: calc((100cqi - 4 * .7rem) / 5); flex: none; }",
+		".overview-review-copy { display: flex; flex: 1; flex-direction: column; align-self: stretch; min-width: 0; }",
+		".overview-review-excerpt { flex: 1; min-width: 0; overflow: hidden; color: var(--muted); font-size: .85rem; line-height: 1.4; overflow-wrap: anywhere; display: -webkit-box; -webkit-line-clamp: 6; -webkit-box-orient: vertical; }",
+		".overview-review-stat { flex: none; align-self: flex-end; margin-top: auto;",
+		".overview-review-stat strong { color: var(--text); font-size: 1.5rem; }",
+		"margin-left: calc(-0.5 * var(--cover-w))",
+		".list-covers img:nth-child(1) { z-index: 5; }",
+		".list-covers img:nth-child(5) { z-index: 1; }",
+	} {
+		if !strings.Contains(string(css), want) {
+			t.Errorf("list cover CSS missing %q", want)
 		}
 	}
 }
@@ -733,9 +1133,12 @@ func TestReviewListingControls(t *testing.T) {
 		t.Fatalf("global reviews = %d", code)
 	}
 	for _, want := range []string{
-		`href="/reviews?tab=all&amp;sort=rating"`,
-		`href="/reviews?tab=friends&amp;sort=popular"`,
-		`href="/reviews?tab=following&amp;sort=rating"`,
+		`href="/reviews?tab=all&amp;sort=rating&amp;dir=desc"`,
+		`href="/reviews?tab=friends&amp;sort=rating&amp;dir=desc"`,
+		`href="/reviews?tab=following&amp;sort=rating&amp;dir=desc"`,
+		`href="/reviews?tab=friends&amp;sort=popularity&amp;dir=desc"`,
+		`href="/reviews?tab=friends&amp;sort=rating&amp;dir=asc"`,
+		`class="sort-btn on"`,
 		"reviewbob",
 	} {
 		if !strings.Contains(body, want) {
@@ -751,8 +1154,9 @@ func TestReviewListingControls(t *testing.T) {
 		t.Fatalf("game reviews = %d", code)
 	}
 	for _, want := range []string{
-		`href="/games/review-feed/reviews?tab=all&amp;sort=oldest"`,
-		`href="/games/review-feed/reviews?tab=following&amp;sort=popular"`,
+		`href="/games/review-feed/reviews?tab=all&amp;sort=date&amp;dir=asc"`,
+		`href="/games/review-feed/reviews?tab=following&amp;sort=date&amp;dir=asc"`,
+		`href="/games/review-feed/reviews?tab=following&amp;sort=date&amp;dir=desc"`,
 		"reviewbob",
 		"page=2",
 	} {
@@ -764,6 +1168,19 @@ func TestReviewListingControls(t *testing.T) {
 	code, body = getBody(t, client, ts.URL+"/games/review-feed/reviews?tab=following&sort=oldest&page=2")
 	if code != http.StatusOK || !strings.Contains(body, "reviewcarol") {
 		t.Fatalf("game reviews page 2 = %d: %s", code, body[:min(len(body), 500)])
+	}
+	if strings.Contains(body, "tabs-sort") || !strings.Contains(body, `tabs tabs-reviews`) || !strings.Contains(body, `class="review-sort"`) {
+		t.Fatal("review sorting is not merged into the tab row")
+	}
+
+	// Defaults: global date descending, per-game popularity descending.
+	_, globalDefault := getBody(t, client, ts.URL+"/reviews")
+	if !strings.Contains(globalDefault, "sort=date&amp;dir=desc") {
+		t.Error("global reviews did not default to date descending")
+	}
+	_, gameDefault := getBody(t, client, ts.URL+"/games/review-feed/reviews")
+	if !strings.Contains(gameDefault, "sort=popularity&amp;dir=desc") {
+		t.Error("game reviews did not default to popularity descending")
 	}
 
 	_, profile := getBody(t, client, ts.URL+"/users/reviewalice?tab=reviews")
@@ -817,7 +1234,7 @@ func TestTrophyHighlightWeb(t *testing.T) {
 		t.Fatalf("featured trophy = %q, want n00b", updated.FeaturedBadge)
 	}
 	_, body := getBody(t, client, ts.URL+"/users/trophyalice")
-	for _, want := range []string{`href="/users/trophyalice/trophies"`, `class="profile-trophy-card"`, "<strong>n00b</strong>", "Earned"} {
+	for _, want := range []string{`href="/users/trophyalice?tab=trophies"`, `class="profile-trophy-card"`, "<strong>n00b</strong>", "Earned"} {
 		if !strings.Contains(body, want) {
 			t.Errorf("profile missing %q", want)
 		}

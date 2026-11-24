@@ -276,6 +276,14 @@ func (s *Store) LatestLogFor(ctx context.Context, userID, gameID int64) (*models
 	return l, nil
 }
 
+// PlaytimeForGame returns the total logged playtime for one user and game.
+func (s *Store) PlaytimeForGame(ctx context.Context, userID, gameID int64) (float64, error) {
+	var hours float64
+	err := s.DB.QueryRowContext(ctx, `SELECT COALESCE(SUM(playtime),0) FROM logs
+		WHERE user_id=? AND game_id=? AND deleted_at IS NULL`, userID, gameID).Scan(&hours)
+	return hours, err
+}
+
 // UserGameLogs returns every log a user made for one game, newest first.
 // Drafts are included only when includeDrafts is set (the owner's view).
 func (s *Store) UserGameLogs(ctx context.Context, userID, gameID int64, includeDrafts bool) ([]*models.Log, error) {
@@ -339,29 +347,43 @@ func (s *Store) LogsForGame(ctx context.Context, gameID, viewerID int64, limit, 
 	return out, total, nil
 }
 
-func reviewOrder(sortKey string) string {
+func reviewOrder(sortKey, direction string) string {
+	dir := "DESC"
+	if direction == "asc" {
+		dir = "ASC"
+	}
 	switch sortKey {
 	case "rating":
-		return "l.rating DESC, l.updated_at DESC, l.id DESC"
-	case "likes":
-		return "(SELECT COUNT(*) FROM log_likes ll WHERE ll.log_id=l.id) DESC, l.updated_at DESC, l.id DESC"
-	case "oldest":
-		return "l.created_at ASC, l.id ASC"
-	case "new":
-		return "l.updated_at DESC, l.id DESC"
+		return "l.rating " + dir + ", l.created_at " + dir + ", l.id " + dir
+	case "popularity":
+		return "(SELECT COUNT(*) FROM log_likes ll WHERE ll.log_id=l.id) " + dir + ", l.created_at " + dir + ", l.id " + dir
 	default:
-		return "l.updated_at DESC, l.id DESC"
+		return "l.created_at " + dir + ", l.id " + dir
+	}
+}
+
+func legacyReviewSort(sortKey string) (string, string) {
+	switch sortKey {
+	case "likes", "popular":
+		return "popularity", "desc"
+	case "rating":
+		return "rating", "desc"
+	case "oldest":
+		return "date", "asc"
+	default:
+		return "date", "desc"
 	}
 }
 
 // ReviewsForGame lists only reviews (not bare logs).
 func (s *Store) ReviewsForGame(ctx context.Context, gameID int64, sortKey string, limit, offset int) ([]*models.Log, int, error) {
 	var total int
+	key, dir := legacyReviewSort(sortKey)
 	s.DB.QueryRowContext(ctx, `SELECT COUNT(*) FROM logs l JOIN users u ON u.id=l.user_id
 		WHERE l.game_id=? AND l.review<>'' AND l.draft=0 AND l.deleted_at IS NULL AND u.private_profile=0`, gameID).Scan(&total)
 	rows, err := s.DB.QueryContext(ctx, `SELECT `+logCols+` FROM logs l JOIN users u ON u.id=l.user_id
 		WHERE l.game_id=? AND l.review<>'' AND l.draft=0 AND l.deleted_at IS NULL AND u.private_profile=0
-		ORDER BY `+reviewOrder(sortKey)+` LIMIT ? OFFSET ?`, gameID, limit, offset)
+		ORDER BY `+reviewOrder(key, dir)+` LIMIT ? OFFSET ?`, gameID, limit, offset)
 	if err != nil {
 		return nil, 0, err
 	}
@@ -388,6 +410,12 @@ func (s *Store) ReviewsForGame(ctx context.Context, gameID int64, sortKey string
 // ReviewsFeed lists public reviews, optionally scoped to a game and to the
 // viewer's friends or approved followees.
 func (s *Store) ReviewsFeed(ctx context.Context, viewerID int64, tab string, gameID int64, sortKey string, limit, offset int) ([]*models.Log, int, error) {
+	key, dir := legacyReviewSort(sortKey)
+	return s.ReviewsFeedSorted(ctx, viewerID, tab, gameID, key, dir, limit, offset)
+}
+
+// ReviewsFeedSorted applies the public sort keys and explicit direction.
+func (s *Store) ReviewsFeedSorted(ctx context.Context, viewerID int64, tab string, gameID int64, sortKey, direction string, limit, offset int) ([]*models.Log, int, error) {
 	conds := []string{"l.review<>''", "l.draft=0", "l.deleted_at IS NULL", "u.private_profile=0", "u.deactivated_at IS NULL"}
 	args := []any{}
 	if gameID > 0 {
@@ -416,7 +444,7 @@ func (s *Store) ReviewsFeed(ctx context.Context, viewerID int64, tab string, gam
 	var total int
 	s.DB.QueryRowContext(ctx, `SELECT COUNT(*) FROM logs l JOIN users u ON u.id=l.user_id`+where, args...).Scan(&total)
 	rows, err := s.DB.QueryContext(ctx, `SELECT `+logCols+` FROM logs l JOIN users u ON u.id=l.user_id`+where+`
-		ORDER BY `+reviewOrder(sortKey)+` LIMIT ? OFFSET ?`, append(args, limit, offset)...)
+		ORDER BY `+reviewOrder(sortKey, direction)+` LIMIT ? OFFSET ?`, append(args, limit, offset)...)
 	if err != nil {
 		return nil, 0, err
 	}
@@ -580,10 +608,10 @@ func (s *Store) HasLikedLog(ctx context.Context, logID, userID int64) bool {
 func (s *Store) StatusFor(ctx context.Context, userID, gameID int64) (models.Status, error) {
 	st := models.Status{UserID: userID, GameID: gameID}
 	var playing, backlog, wishlist, liked int
-	var playedAt, playingAt, updated string
+	var playedAt, playingAt, backlogAt, updated string
 	err := s.DB.QueryRowContext(ctx, `SELECT played,playing,backlog,wishlist,updated_at,
-		COALESCE(played_at,''),COALESCE(playing_at,'') FROM statuses WHERE user_id=? AND game_id=?`, userID, gameID).
-		Scan(&st.Played, &playing, &backlog, &wishlist, &updated, &playedAt, &playingAt)
+		COALESCE(played_at,''),COALESCE(playing_at,''),COALESCE(backlog_at,'') FROM statuses WHERE user_id=? AND game_id=?`, userID, gameID).
+		Scan(&st.Played, &playing, &backlog, &wishlist, &updated, &playedAt, &playingAt, &backlogAt)
 	if err != nil && err != sql.ErrNoRows {
 		return st, err
 	}
@@ -596,6 +624,7 @@ func (s *Store) StatusFor(ctx context.Context, userID, gameID int64) (models.Sta
 		st.UpdatedAt = parseTime(updated)
 		st.PlayedAt = parseTime(playedAt)
 		st.PlayingAt = parseTime(playingAt)
+		st.BacklogAt = parseTime(backlogAt)
 	}
 	return st, nil
 }
@@ -622,6 +651,18 @@ func (s *Store) SetStatusFlag(ctx context.Context, userID, gameID int64, flag st
 				WHEN statuses.playing=0 THEN excluded.updated_at ELSE statuses.playing_at END,
 			updated_at=excluded.updated_at`
 		args = []any{userID, gameID, b2i(on), playingAt, now}
+	}
+	if flag == "backlog" {
+		var backlogAt any
+		if on {
+			backlogAt = now
+		}
+		query = `INSERT INTO statuses(user_id,game_id,backlog,backlog_at,updated_at) VALUES(?,?,?,?,?)
+			ON CONFLICT(user_id,game_id) DO UPDATE SET backlog=excluded.backlog,
+			backlog_at=CASE WHEN excluded.backlog=0 THEN NULL
+				WHEN statuses.backlog=0 THEN excluded.updated_at ELSE statuses.backlog_at END,
+			updated_at=excluded.updated_at`
+		args = []any{userID, gameID, b2i(on), backlogAt, now}
 	}
 	_, err := s.DB.ExecContext(ctx, query, args...)
 	if err != nil {
@@ -716,7 +757,7 @@ func (s *Store) ToggleGameLike(ctx context.Context, userID, gameID int64) (bool,
 func (s *Store) SetStatuses(ctx context.Context, userID, gameID int64, played, playing, backlog, wishlist, liked bool) error {
 	now := Now()
 	playedCount := 0
-	var playedAt, playingAt any
+	var playedAt, playingAt, backlogAt any
 	if played {
 		playedCount = 1
 		playedAt = now
@@ -724,16 +765,22 @@ func (s *Store) SetStatuses(ctx context.Context, userID, gameID int64, played, p
 	if playing {
 		playingAt = now
 	}
-	_, err := s.DB.ExecContext(ctx, `INSERT INTO statuses(user_id,game_id,played,playing,backlog,wishlist,played_at,playing_at,updated_at)
-		VALUES(?,?,?,?,?,?,?,?,?)
+	if backlog {
+		backlogAt = now
+	}
+	_, err := s.DB.ExecContext(ctx, `INSERT INTO statuses(user_id,game_id,played,playing,backlog,wishlist,played_at,playing_at,backlog_at,updated_at)
+		VALUES(?,?,?,?,?,?,?,?,?,?)
 		ON CONFLICT(user_id,game_id) DO UPDATE SET
 		played=CASE WHEN excluded.played>0 THEN MAX(statuses.played,1) ELSE statuses.played END,
 		played_at=CASE WHEN excluded.played>0 AND statuses.played=0 THEN excluded.played_at ELSE statuses.played_at END,
 		playing=excluded.playing,
 		playing_at=CASE WHEN excluded.playing=0 THEN NULL
 			WHEN statuses.playing=0 THEN excluded.playing_at ELSE statuses.playing_at END,
-		backlog=excluded.backlog,wishlist=excluded.wishlist,updated_at=excluded.updated_at`,
-		userID, gameID, playedCount, b2i(playing), b2i(backlog), b2i(wishlist), playedAt, playingAt, now)
+		backlog=excluded.backlog,
+		backlog_at=CASE WHEN excluded.backlog=0 THEN NULL
+			WHEN statuses.backlog=0 THEN excluded.backlog_at ELSE statuses.backlog_at END,
+		wishlist=excluded.wishlist,updated_at=excluded.updated_at`,
+		userID, gameID, playedCount, b2i(playing), b2i(backlog), b2i(wishlist), playedAt, playingAt, backlogAt, now)
 	if err != nil {
 		return err
 	}
@@ -854,6 +901,58 @@ func (s *Store) RecentlyPlayedGames(ctx context.Context, userID int64, limit int
 		}
 		entry.Game = game
 		entry.EventAt = parseTime(eventAt)
+		out = append(out, entry)
+	}
+	return out, rows.Err()
+}
+
+// ShelfGame is one game on a profile shelf and when it arrived there.
+type ShelfGame struct {
+	Game    *models.Game
+	Rating  float64
+	AddedAt time.Time
+}
+
+// ShelfGames returns the most recently added games for one shelf.
+func (s *Store) ShelfGames(ctx context.Context, userID int64, shelf string, limit int) ([]ShelfGame, error) {
+	if limit <= 0 {
+		limit = 3
+	}
+	var condition, eventAt string
+	switch shelf {
+	case "played":
+		condition = "st.played>0"
+		eventAt = "COALESCE(st.played_at,st.updated_at)"
+	case "playing":
+		condition = "st.playing=1"
+		eventAt = "COALESCE(st.playing_at,st.updated_at)"
+	case "backlog":
+		condition = "st.backlog=1"
+		eventAt = "COALESCE(st.backlog_at,st.updated_at)"
+	default:
+		return nil, ErrNotFound
+	}
+	rows, err := s.DB.QueryContext(ctx, `SELECT `+gameCols+`,`+eventAt+`,
+		COALESCE((SELECT l.rating FROM logs l WHERE l.user_id=st.user_id AND l.game_id=st.game_id
+			AND l.primary_rating=1 AND l.rating>0 AND l.deleted_at IS NULL
+			ORDER BY l.updated_at DESC LIMIT 1),0)
+		FROM statuses st JOIN games g ON g.id=st.game_id
+		WHERE st.user_id=? AND `+condition+`
+		ORDER BY `+eventAt+` DESC, g.id DESC LIMIT ?`, userID, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []ShelfGame
+	for rows.Next() {
+		var entry ShelfGame
+		var addedAt string
+		game, err := scanGameWith(rows, &addedAt, &entry.Rating)
+		if err != nil {
+			return nil, err
+		}
+		entry.Game = game
+		entry.AddedAt = parseTime(addedAt)
 		out = append(out, entry)
 	}
 	return out, rows.Err()

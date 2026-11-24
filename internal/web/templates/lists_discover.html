@@ -7,10 +7,10 @@
 <div class="grid grid-2">
 {{range .Lists}}
   <a class="list-card" href="/users/{{.User.Username}}/lists/{{.Slug}}">
-    <div class="list-thumbs">{{range .Entries}}<img src="{{cover .Game}}" alt="">{{end}}</div>
+    {{if .CoverGames}}<div class="list-covers">{{range .CoverGames}}<img src="{{cover .}}" alt="" loading="lazy">{{end}}</div>{{end}}
     <div>
       <h3>{{.Title}}</h3>
-      <div class="muted">{{.User.Username}} · {{.Likes}} likes · {{len .Entries}} games</div>
+      <div class="muted">{{.User.Username}} · {{.Likes}} likes · {{.EntryCount}} {{plural .EntryCount "game" "games"}}</div>
       {{if .Description}}<div class="muted mt1">{{truncate .Description 110}}</div>{{end}}
       {{if .Tags}}<div class="pill-row">{{range .Tags}}<span class="pill">{{.}}</span>{{end}}</div>{{end}}
     </div>

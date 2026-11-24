@@ -359,6 +359,7 @@ type reviewsData struct {
 	Total     int
 	Tab       string
 	Sort      string
+	Dir       string
 	PageNum   int
 	Pages     int
 	Base      string
@@ -376,23 +377,30 @@ func reviewTab(raw string) string {
 	}
 }
 
-func reviewSort(raw string) (string, string) {
-	switch raw {
-	case "popular":
-		return "popular", "likes"
-	case "rating":
-		return "rating", "rating"
+// reviewSort maps both the current sort keys and legacy URLs to a public key
+// plus a store sort key and direction.
+func reviewSort(rawSort, rawDir, defaultSort string) (key, dir, storeKey string) {
+	key, dir = defaultSort, "desc"
+	switch rawSort {
+	case "popularity", "date", "rating":
+		key = rawSort
+	case "popular", "likes":
+		key, dir = "popularity", "desc"
 	case "oldest":
-		return "oldest", "oldest"
-	default:
-		return "newest", "new"
+		key, dir = "date", "asc"
+	case "newest", "new":
+		key, dir = "date", "desc"
 	}
+	if rawDir == "asc" || rawDir == "desc" {
+		dir = rawDir
+	}
+	return key, dir, key
 }
 
 func (s *Server) reviewsPage(w http.ResponseWriter, r *http.Request) {
 	u := currentUser(r)
 	tab := reviewTab(r.URL.Query().Get("tab"))
-	sortKey, storeSort := reviewSort(r.URL.Query().Get("sort"))
+	sortKey, dir, storeSort := reviewSort(r.URL.Query().Get("sort"), r.URL.Query().Get("dir"), "date")
 	page := atoi(r.URL.Query().Get("page"))
 	if page < 1 {
 		page = 1
@@ -401,18 +409,19 @@ func (s *Server) reviewsPage(w http.ResponseWriter, r *http.Request) {
 	if u != nil {
 		viewer = u.ID
 	}
-	reviews, total, err := s.st.ReviewsFeed(r.Context(), viewer, tab, 0, storeSort, 30, (page-1)*30)
+	reviews, total, err := s.st.ReviewsFeedSorted(r.Context(), viewer, tab, 0, storeSort, dir, 30, (page-1)*30)
 	if err != nil {
 		s.serverError(w, r, err)
 		return
 	}
-	base := url.Values{"tab": {tab}, "sort": {sortKey}}
+	base := url.Values{"tab": {tab}, "sort": {sortKey}, "dir": {dir}}
 	data := reviewsData{
 		Page:      s.page(r, "Reviews"),
 		Reviews:   reviews,
 		Total:     total,
 		Tab:       tab,
 		Sort:      sortKey,
+		Dir:       dir,
 		PageNum:   page,
 		Pages:     (total + 29) / 30,
 		Base:      "/reviews",
@@ -441,13 +450,7 @@ func (s *Server) gameReviews(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	tab := reviewTab(r.URL.Query().Get("tab"))
-	sortParam := r.URL.Query().Get("sort")
-	switch sortParam {
-	case "popular", "newest", "rating", "oldest":
-	default:
-		sortParam = "popular"
-	}
-	sortKey, storeSort := reviewSort(sortParam)
+	sortKey, dir, storeSort := reviewSort(r.URL.Query().Get("sort"), r.URL.Query().Get("dir"), "popularity")
 	page := atoi(r.URL.Query().Get("page"))
 	if page < 1 {
 		page = 1
@@ -456,18 +459,19 @@ func (s *Server) gameReviews(w http.ResponseWriter, r *http.Request) {
 	if u != nil {
 		viewer = u.ID
 	}
-	reviews, total, err := s.st.ReviewsFeed(r.Context(), viewer, tab, g.ID, storeSort, 20, (page-1)*20)
+	reviews, total, err := s.st.ReviewsFeedSorted(r.Context(), viewer, tab, g.ID, storeSort, dir, 20, (page-1)*20)
 	if err != nil {
 		s.serverError(w, r, err)
 		return
 	}
-	base := url.Values{"tab": {tab}, "sort": {sortKey}}
+	base := url.Values{"tab": {tab}, "sort": {sortKey}, "dir": {dir}}
 	data := reviewsData{
 		Page:      s.page(r, "Reviews of "+g.Title),
 		Reviews:   reviews,
 		Total:     total,
 		Tab:       tab,
 		Sort:      sortKey,
+		Dir:       dir,
 		Game:      g,
 		PageNum:   page,
 		Pages:     (total + 19) / 20,

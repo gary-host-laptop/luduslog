@@ -177,6 +177,7 @@ func logInputFrom(r *http.Request, u *models.User, gameID int64) store.LogInput 
 	in := store.LogInput{
 		UserID:       u.ID,
 		GameID:       gameID,
+		Name:         strings.TrimSpace(r.FormValue("name")),
 		Rating:       atof(r.FormValue("rating")),
 		Review:       strings.TrimSpace(r.FormValue("review")),
 		Spoiler:      r.FormValue("spoiler") == "1",
@@ -295,8 +296,11 @@ func (s *Server) logEdit(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	in := logInputFrom(r, u, l.GameID)
-	// Older forms and API clients do not send the manual timing fields; an
-	// absent field must not wipe stored values.
+	// Older forms and API clients may not send the title or manual timing
+	// fields; an absent field must not wipe stored values.
+	if _, ok := r.Form["name"]; !ok {
+		in.Name = l.Name
+	}
 	if _, ok := r.Form["time_to_finish"]; !ok {
 		in.TimeToFinish = l.TimeToFinish
 	}

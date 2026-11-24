@@ -396,7 +396,7 @@ func TestGameMediaAndReviewsRoute(t *testing.T) {
 	}
 
 	status, reviewsBody := getBody(t, http.DefaultClient, ts.URL+"/games/celeste/reviews?sort=rating")
-	if status != 200 || !strings.Contains(reviewsBody, "Highest rated") || !strings.Contains(reviewsBody, "sort=rating") {
+	if status != 200 || !strings.Contains(reviewsBody, ">Rating<") || !strings.Contains(reviewsBody, "sort=rating") {
 		t.Fatalf("game reviews = %d: %s", status, reviewsBody[:min(len(reviewsBody), 500)])
 	}
 	if !strings.Contains(reviewsBody, "Back to Celeste") {

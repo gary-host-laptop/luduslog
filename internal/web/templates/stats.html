@@ -29,7 +29,7 @@
     <p>{{if .Stats.TopGenre}}Favourite genre: <strong>{{.Stats.TopGenre}}</strong> ({{.Stats.TopGenreCount}} games).{{else}}Not enough games for a favourite genre yet.{{end}}</p>
     {{if .Stats.TopPlatform}}<p>Most played on: <strong>{{.Stats.TopPlatform}}</strong>.</p>{{end}}
     {{if .Stats.LongestGame}}<p>Longest game: <strong>{{.Stats.LongestGame}}</strong> at {{hours .Stats.LongestHours}}.</p>{{end}}
-    <p>{{.Stats.ThisYear}} games finished this year.</p>
+    <p>{{.Stats.ThisYear}} games played this year.</p>
   </section>
 </div>
 
@@ -42,7 +42,7 @@
 
 {{if .Badges}}
 <section class="section">
-  <div class="section-head"><h2>Trophies</h2><a class="more" href="/users/{{.Profile.Username}}/trophies">All trophies →</a></div>
+  <div class="section-head"><h2>Trophies</h2><a class="more" href="/users/{{.Profile.Username}}?tab=trophies">All trophies →</a></div>
   <div class="grid grid-3">
     {{range .Badges}}{{if .EarnedAt}}<div class="card"><strong>{{.Title}}</strong><div class="muted">{{.Desc}}</div><div class="muted mt1">Earned {{.EarnedAt.Format "Jan 2, 2006"}}</div></div>{{end}}{{end}}
   </div>

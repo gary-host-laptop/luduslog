@@ -18,19 +18,21 @@ import (
 
 type settingsData struct {
 	Page
-	Tab            string
-	Error          string
-	Links          []models.SocialLink
-	Blocks         []*models.User
-	Folders        []models.Folder
-	FolderLists    map[int64][]*models.List
-	MyLists        []*models.List
-	Sessions       []models.Session
-	Favorites      []models.Game
-	FavoriteSearch []models.Game
-	FavoriteQuery  string
-	Badges         []models.Badge
-	SoleAdmin      bool
+	Tab             string
+	Error           string
+	Links           []models.SocialLink
+	Blocks          []*models.User
+	Folders         []models.Folder
+	FolderLists     map[int64][]*models.List
+	MyLists         []*models.List
+	Sessions        []models.Session
+	Favorites       []models.Game
+	FavoriteSearch  []models.Game
+	FavoriteQuery   string
+	FeaturedReviews []*models.Log
+	FeaturedLists   []*models.List
+	Badges          []models.Badge
+	SoleAdmin       bool
 }
 
 func (s *Server) settingsPage(w http.ResponseWriter, r *http.Request) {
@@ -59,6 +61,8 @@ func (s *Server) settingsPage(w http.ResponseWriter, r *http.Request) {
 		s.st.CheckBadges(r.Context(), u.ID)
 		data.Badges, _ = s.st.BadgesFor(r.Context(), u.ID)
 		data.Favorites = s.st.FavoriteGames(r.Context(), u.ID, 5)
+		data.FeaturedReviews, _ = s.st.PublishedReviewsForUser(r.Context(), u.ID, 100)
+		data.FeaturedLists, _ = s.st.ListsForUser(r.Context(), u.ID, true, 100, 0)
 		data.FavoriteQuery = strings.TrimSpace(r.URL.Query().Get("q"))
 		if data.FavoriteQuery != "" {
 			results, _, _ := s.st.SearchGames(r.Context(), data.FavoriteQuery, 8, 0, u.AdultOptIn)
@@ -166,6 +170,61 @@ func (s *Server) settingsProfile(w http.ResponseWriter, r *http.Request) {
 	s.redirect(w, r, "/settings")
 }
 
+func (s *Server) settingsOverviewWidgets(w http.ResponseWriter, r *http.Request) {
+	u := currentUser(r)
+	w1 := strings.ToLower(strings.TrimSpace(r.FormValue("overview_widget_1")))
+	w2 := strings.ToLower(strings.TrimSpace(r.FormValue("overview_widget_2")))
+	allowed := map[string]bool{"": true, "favourites": true, "review": true, "list": true}
+	if !allowed[w1] || !allowed[w2] {
+		s.flash(w, r, "error", "Choose a valid Overview widget for each slot.")
+		s.redirect(w, r, "/settings#overview-widgets")
+		return
+	}
+	if w1 != "" && w1 == w2 {
+		s.flash(w, r, "error", "Choose two different Overview widgets.")
+		s.redirect(w, r, "/settings#overview-widgets")
+		return
+	}
+
+	var reviewID, listID *int64
+	if w1 == "review" || w2 == "review" {
+		id, err := strconv.ParseInt(strings.TrimSpace(r.FormValue("featured_review_id")), 10, 64)
+		if err != nil || id <= 0 {
+			s.flash(w, r, "error", "Choose a published review to feature.")
+			s.redirect(w, r, "/settings#overview-widgets")
+			return
+		}
+		review, err := s.st.LogByID(r.Context(), id)
+		if err != nil || review.UserID != u.ID || review.Review == "" || review.Draft {
+			s.flash(w, r, "error", "Choose one of your published reviews.")
+			s.redirect(w, r, "/settings#overview-widgets")
+			return
+		}
+		reviewID = &id
+	}
+	if w1 == "list" || w2 == "list" {
+		id, err := strconv.ParseInt(strings.TrimSpace(r.FormValue("featured_list_id")), 10, 64)
+		if err != nil || id <= 0 {
+			s.flash(w, r, "error", "Choose a list to feature.")
+			s.redirect(w, r, "/settings#overview-widgets")
+			return
+		}
+		list, err := s.st.ListByID(r.Context(), id, false)
+		if err != nil || list.UserID != u.ID {
+			s.flash(w, r, "error", "Choose one of your visible lists.")
+			s.redirect(w, r, "/settings#overview-widgets")
+			return
+		}
+		listID = &id
+	}
+	if err := s.st.SetOverviewWidgets(r.Context(), u.ID, w1, w2, reviewID, listID); err != nil {
+		s.serverError(w, r, err)
+		return
+	}
+	s.flash(w, r, "success", "Overview widgets saved.")
+	s.redirect(w, r, "/settings#overview-widgets")
+}
+
 func (s *Server) settingsTrophy(w http.ResponseWriter, r *http.Request) {
 	u := currentUser(r)
 	key := strings.TrimSpace(r.FormValue("badge"))
@@ -234,6 +293,16 @@ func (s *Server) settingsPreferences(w http.ResponseWriter, r *http.Request) {
 	if cover != "any" && cover != "mine" && cover != "none" {
 		cover = "any"
 	}
+	yearlyGoal := 0
+	if raw := strings.TrimSpace(r.FormValue("yearly_goal")); raw != "" {
+		n, err := strconv.Atoi(raw)
+		if err != nil || n < 0 || n > 10000 {
+			s.flash(w, r, "error", "Yearly goal must be a whole number between 0 and 10000.")
+			s.redirect(w, r, "/settings?tab=preferences")
+			return
+		}
+		yearlyGoal = n
+	}
 	err := s.st.UpdateProfile(r.Context(), u.ID, store.ProfileUpdate{
 		Bio: u.Bio, SocialLinks: s.st.SocialLinksFor(r.Context(), u.ID), Avatar: u.Avatar, Header: u.Header,
 		PrivateProfile: u.PrivateProfile, HideActivity: u.HideActivity,
@@ -246,6 +315,10 @@ func (s *Server) settingsPreferences(w http.ResponseWriter, r *http.Request) {
 		Federation: u.Federation, FedStatuses: u.FedStatuses, FedReviews: u.FedReviews, FedLists: u.FedLists,
 	})
 	if err != nil {
+		s.serverError(w, r, err)
+		return
+	}
+	if err := s.st.SetYearlyGoal(r.Context(), u.ID, yearlyGoal); err != nil {
 		s.serverError(w, r, err)
 		return
 	}

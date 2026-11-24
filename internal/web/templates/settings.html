@@ -37,6 +37,50 @@
       <label class="check"><input type="checkbox" name="manually_approves" value="1" {{if .User.ManuallyApproves}}checked{{end}}> Manually approve follow requests</label>
       <div><button class="btn btn-primary" type="submit">Save profile</button></div>
     </form>
+    <div class="card stack" id="overview-widgets">
+      <h2>Overview widgets</h2>
+      <p class="muted">Choose up to two widgets for the top of your profile Overview. Empty slots render nothing. Your yearly goal (when set), Played, Playing, Backlog and Recent reviews stay fixed below this row.</p>
+      <form class="stack" method="post" action="/settings/overview-widgets">
+        <input type="hidden" name="_csrf" value="{{.CSRF}}">
+        <div class="form-row">
+          <div>
+            <label for="overview_widget_1">Widget slot 1</label>
+            <select id="overview_widget_1" name="overview_widget_1">
+              <option value="" {{if eq .User.OverviewWidget1 ""}}selected{{end}}>None</option>
+              <option value="favourites" {{if eq .User.OverviewWidget1 "favourites"}}selected{{end}}>Favourite games</option>
+              <option value="review" {{if eq .User.OverviewWidget1 "review"}}selected{{end}}>Highlighted review</option>
+              <option value="list" {{if eq .User.OverviewWidget1 "list"}}selected{{end}}>Highlighted list</option>
+            </select>
+          </div>
+          <div>
+            <label for="overview_widget_2">Widget slot 2</label>
+            <select id="overview_widget_2" name="overview_widget_2">
+              <option value="" {{if eq .User.OverviewWidget2 ""}}selected{{end}}>None</option>
+              <option value="favourites" {{if eq .User.OverviewWidget2 "favourites"}}selected{{end}}>Favourite games</option>
+              <option value="review" {{if eq .User.OverviewWidget2 "review"}}selected{{end}}>Highlighted review</option>
+              <option value="list" {{if eq .User.OverviewWidget2 "list"}}selected{{end}}>Highlighted list</option>
+            </select>
+          </div>
+        </div>
+        <div class="form-row">
+          <div>
+            <label for="featured_review_id">Highlighted review</label>
+            <select id="featured_review_id" name="featured_review_id">
+              <option value="">No review</option>
+              {{range .FeaturedReviews}}<option value="{{.ID}}" {{if and $.User.FeaturedReviewID (eq (derefInt $.User.FeaturedReviewID) .ID)}}selected{{end}}>{{if .Name}}{{.Name}}{{else}}{{.Game.Title}}{{end}}{{if and .Name .Game}} — {{.Game.Title}}{{end}}</option>{{end}}
+            </select>
+          </div>
+          <div>
+            <label for="featured_list_id">Highlighted list</label>
+            <select id="featured_list_id" name="featured_list_id">
+              <option value="">No list</option>
+              {{range .FeaturedLists}}<option value="{{.ID}}" {{if and $.User.FeaturedListID (eq (derefInt $.User.FeaturedListID) .ID)}}selected{{end}}>{{.Title}}{{if .EntryCount}} ({{.EntryCount}} {{plural .EntryCount "game" "games"}}){{end}}</option>{{end}}
+            </select>
+          </div>
+        </div>
+        <div><button class="btn btn-primary" type="submit">Save widgets</button></div>
+      </form>
+    </div>
     <div class="card stack" id="trophy">
       <h2>Highlighted trophy</h2>
       <p class="muted">Choose one earned trophy to show on your profile. Selecting “No trophy” clears it.</p>
@@ -154,6 +198,11 @@
     <form class="card stack" method="post" action="/settings/preferences">
       <input type="hidden" name="_csrf" value="{{.CSRF}}">
       <h2>Preferences</h2>
+      <div>
+        <label for="yearly_goal">Yearly goal <span class="muted">(games played)</span></label>
+        <input id="yearly_goal" type="number" name="yearly_goal" min="0" max="10000" value="{{.User.YearlyGoal}}">
+        <div class="field-hint">Set a target for games played this year. Use 0 to hide the goal from your profile.</div>
+      </div>
       <div class="form-row">
         <div><label for="star_scale">Rating scale</label><select id="star_scale" name="star_scale"><option value="5" {{if eq .User.StarScale 5}}selected{{end}}>5 stars</option><option value="10" {{if eq .User.StarScale 10}}selected{{end}}>10 points</option></select></div>
         <div><label for="theme">Theme</label><select id="theme" name="theme"><option value="system" {{if eq .User.Theme "system"}}selected{{end}}>Match system</option><option value="dark" {{if eq .User.Theme "dark"}}selected{{end}}>Dark</option><option value="light" {{if eq .User.Theme "light"}}selected{{end}}>Light</option></select></div>

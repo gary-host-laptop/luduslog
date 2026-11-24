@@ -55,6 +55,71 @@ func (s *Store) hydrateList(ctx context.Context, l *models.List, withEntries boo
 	}
 }
 
+// ListCoverGames loads up to limit newest additions for each list in one
+// windowed query. Games are returned newest first with deterministic ties.
+func (s *Store) ListCoverGames(ctx context.Context, listIDs []int64, limit int) (map[int64][]models.Game, error) {
+	out := make(map[int64][]models.Game, len(listIDs))
+	if len(listIDs) == 0 || limit <= 0 {
+		return out, nil
+	}
+	seen := make(map[int64]bool, len(listIDs))
+	ids := make([]int64, 0, len(listIDs))
+	for _, id := range listIDs {
+		if id > 0 && !seen[id] {
+			seen[id] = true
+			ids = append(ids, id)
+		}
+	}
+	if len(ids) == 0 {
+		return out, nil
+	}
+	args := make([]any, len(ids), len(ids)+1)
+	for i, id := range ids {
+		args[i] = id
+	}
+	args = append(args, limit)
+	rows, err := s.DB.QueryContext(ctx, `SELECT `+gameCols+`, le.list_id FROM (
+		SELECT list_id, game_id, ROW_NUMBER() OVER (PARTITION BY list_id ORDER BY added_at DESC, game_id DESC) AS rn
+		FROM list_entries WHERE list_id IN (`+placeholders(len(ids))+`)
+	) le JOIN games g ON g.id=le.game_id
+		WHERE le.rn<=? ORDER BY le.list_id, le.rn`, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var listID int64
+		g, err := scanGameWith(rows, &listID)
+		if err != nil {
+			return nil, err
+		}
+		out[listID] = append(out[listID], *g)
+	}
+	return out, rows.Err()
+}
+
+// ListHasAdultGames reports whether a list includes age-restricted entries.
+func (s *Store) ListHasAdultGames(ctx context.Context, listID int64) bool {
+	var n int
+	s.DB.QueryRowContext(ctx, `SELECT COUNT(*) FROM list_entries le JOIN games g ON g.id=le.game_id
+		WHERE le.list_id=? AND g.adult=1`, listID).Scan(&n)
+	return n > 0
+}
+
+func (s *Store) loadListCovers(ctx context.Context, lists []*models.List) {
+	ids := make([]int64, 0, len(lists))
+	for _, l := range lists {
+		ids = append(ids, l.ID)
+	}
+	covers, err := s.ListCoverGames(ctx, ids, 5)
+	if err != nil {
+		return
+	}
+	for _, l := range lists {
+		l.CoverGames = covers[l.ID]
+	}
+}
+
 func (s *Store) ListByID(ctx context.Context, id int64, withEntries bool) (*models.List, error) {
 	l, err := scanList(s.DB.QueryRowContext(ctx, `SELECT `+listCols+` FROM lists l WHERE l.id=? AND l.deleted_at IS NULL`, id))
 	if err == sql.ErrNoRows {
@@ -155,6 +220,7 @@ func (s *Store) VisibleListsFor(ctx context.Context, ownerID, viewerID int64) ([
 	for _, l := range out {
 		s.hydrateList(ctx, l, false)
 	}
+	s.loadListCovers(ctx, out)
 	return out, nil
 }
 
@@ -315,6 +381,11 @@ func (s *Store) SearchLists(ctx context.Context, q string, limit, offset int) ([
 	for i := range out {
 		s.hydrateList(ctx, &out[i], false)
 	}
+	ptrs := make([]*models.List, len(out))
+	for i := range out {
+		ptrs[i] = &out[i]
+	}
+	s.loadListCovers(ctx, ptrs)
 	return out, total, nil
 }
 
@@ -340,6 +411,7 @@ func (s *Store) PopularLists(ctx context.Context, limit int) ([]*models.List, er
 	for _, l := range out {
 		s.hydrateList(ctx, l, false)
 	}
+	s.loadListCovers(ctx, out)
 	return out, nil
 }
 
@@ -365,6 +437,7 @@ func (s *Store) ListsContainingGame(ctx context.Context, gameID int64, limit int
 	for _, l := range out {
 		s.hydrateList(ctx, l, false)
 	}
+	s.loadListCovers(ctx, out)
 	return out, nil
 }
 

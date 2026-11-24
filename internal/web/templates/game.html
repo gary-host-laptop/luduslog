@@ -343,7 +343,7 @@
   {{if .Reviews}}
     {{range .Reviews}}<div class="review-card mb1">
       <div class="log-head">{{if .User}}<a href="/users/{{.User.Username}}">{{.User.Username}}</a>{{end}} {{stars .Rating 5}} {{timeago .CreatedAt}}</div>
-      {{if .Name}}<h3 class="mt1"><a href="{{reviewPath .}}">{{.Name}}</a></h3>{{end}}
+      <h3 class="mt1"><a href="{{reviewPath .}}">{{if .Name}}{{.Name}}{{else}}{{.Game.Title}}{{end}}</a></h3>
       {{template "review_preview" .}}
       {{template "review_actions" .}}
     </div>{{end}}
@@ -354,7 +354,7 @@
 <section class="section">
   <div class="section-head"><h2>Appears in lists</h2></div>
   <div class="grid grid-3">
-  {{range .Lists}}<a class="list-card" href="/users/{{.User.Username}}/lists/{{.Slug}}"><div><h3>{{.Title}}</h3><div class="muted">{{.User.Username}}</div></div></a>{{end}}
+  {{range .Lists}}<a class="list-card list-card-compact" href="/users/{{.User.Username}}/lists/{{.Slug}}">{{if .CoverGames}}<div class="list-covers">{{range .CoverGames}}<img src="{{cover .}}" alt="" loading="lazy">{{end}}</div>{{end}}<div><h3>{{.Title}}</h3><div class="muted">{{.User.Username}} · {{.EntryCount}} {{plural .EntryCount "game" "games"}}</div></div></a>{{end}}
   </div>
 </section>
 {{end}}

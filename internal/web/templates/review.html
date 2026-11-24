@@ -2,7 +2,7 @@
 {{with .Log}}
 <article class="card">
   <div class="log-head">
-    <a class="review-author" href="/users/{{.User.Username}}"><img class="avatar avatar-md" src="{{avatar .User}}" alt=""> <strong>{{.User.Username}}</strong></a>
+    <a class="review-author byline-author" href="/users/{{.User.Username}}"><img class="avatar avatar-md" src="{{avatar .User}}" alt=""> <strong>{{.User.Username}}</strong></a>
     <span>{{timeago .CreatedAt}}</span>
     {{if .Spoiler}}<span class="pill">Spoilers</span>{{end}}
     <span class="review-like">

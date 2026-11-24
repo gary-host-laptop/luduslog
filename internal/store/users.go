@@ -14,7 +14,8 @@ import (
 const userCols = `id,username,email,email_verified,approved,password_hash,bio,avatar,header,role,created_at,
 deactivated_at,last_username_change,private_profile,hide_activity,manually_approves,hide_social_graph,adult_optin,
 star_scale,cover_mode,time_display,infinite_scroll,theme,high_contrast,timezone,fade_played,journal_view,
-comment_privacy,note_privacy,catalog_editor,featured_badge,federation,fed_statuses,fed_reviews,fed_lists,remote_actor,social_links`
+comment_privacy,note_privacy,catalog_editor,featured_badge,federation,fed_statuses,fed_reviews,fed_lists,remote_actor,
+overview_widget_1,overview_widget_2,featured_review_id,featured_list_id,social_links,yearly_goal`
 
 type scanner interface{ Scan(dest ...any) error }
 
@@ -22,11 +23,13 @@ func scanUser(row scanner) (*models.User, error) {
 	var u models.User
 	var createdAt, social string
 	var deact, lastChange sql.NullString
+	var featuredReview, featuredList sql.NullInt64
 	var emailVerified, approved, private, hideAct, manual, hideGraph, adult, scroll, hc, fade, catalog, fed, fedS, fedR, fedL int
 	err := row.Scan(&u.ID, &u.Username, &u.Email, &emailVerified, &approved, &u.PasswordHash, &u.Bio, &u.Avatar, &u.Header,
 		&u.Role, &createdAt, &deact, &lastChange, &private, &hideAct, &manual, &hideGraph, &adult,
 		&u.StarScale, &u.CoverMode, &u.TimeDisplay, &scroll, &u.Theme, &hc, &u.Timezone, &fade, &u.JournalView,
-		&u.CommentPrivacy, &u.NotePrivacy, &catalog, &u.FeaturedBadge, &fed, &fedS, &fedR, &fedL, &u.RemoteActor, &social)
+		&u.CommentPrivacy, &u.NotePrivacy, &catalog, &u.FeaturedBadge, &fed, &fedS, &fedR, &fedL, &u.RemoteActor,
+		&u.OverviewWidget1, &u.OverviewWidget2, &featuredReview, &featuredList, &social, &u.YearlyGoal)
 	if err != nil {
 		return nil, err
 	}
@@ -48,6 +51,12 @@ func scanUser(row scanner) (*models.User, error) {
 	u.FedStatuses = fedS == 1
 	u.FedReviews = fedR == 1
 	u.FedLists = fedL == 1
+	if featuredReview.Valid {
+		u.FeaturedReviewID = &featuredReview.Int64
+	}
+	if featuredList.Valid {
+		u.FeaturedListID = &featuredList.Int64
+	}
 	u.CreatedAt = parseTime(createdAt)
 	u.DeactivatedAt = parseNullTime(deact)
 	u.LastUsernameChange = parseNullTime(lastChange)
@@ -162,6 +171,11 @@ func (s *Store) UpdateProfile(ctx context.Context, id int64, p ProfileUpdate) er
 		b2i(p.HideSocialGraph), b2i(p.AdultOptIn), p.StarScale, p.CoverMode, p.TimeDisplay, b2i(p.InfiniteScroll),
 		p.Theme, b2i(p.HighContrast), p.Timezone, b2i(p.FadePlayed), p.JournalView, p.CommentPrivacy, p.NotePrivacy,
 		b2i(p.Federation), b2i(p.FedStatuses), b2i(p.FedReviews), b2i(p.FedLists), id)
+	return err
+}
+
+func (s *Store) SetYearlyGoal(ctx context.Context, id int64, goal int) error {
+	_, err := s.DB.ExecContext(ctx, `UPDATE users SET yearly_goal=? WHERE id=?`, goal, id)
 	return err
 }
 
@@ -537,6 +551,48 @@ func (s *Store) SetCatalogEditor(ctx context.Context, id int64, enabled bool) er
 func (s *Store) SetFeaturedBadge(ctx context.Context, id int64, key string) error {
 	_, err := s.DB.ExecContext(ctx, `UPDATE users SET featured_badge=? WHERE id=?`, key, id)
 	return err
+}
+
+// SetOverviewWidgets stores the ordered Overview slot configuration.
+func (s *Store) SetOverviewWidgets(ctx context.Context, id int64, widget1, widget2 string, reviewID, listID *int64) error {
+	var review, list any
+	if reviewID != nil && *reviewID > 0 {
+		review = *reviewID
+	}
+	if listID != nil && *listID > 0 {
+		list = *listID
+	}
+	_, err := s.DB.ExecContext(ctx, `UPDATE users SET overview_widget_1=?,overview_widget_2=?,
+		featured_review_id=?,featured_list_id=? WHERE id=?`, widget1, widget2, review, list, id)
+	return err
+}
+
+// PublishedReviewsForUser lists reviews that can be featured on a profile.
+func (s *Store) PublishedReviewsForUser(ctx context.Context, userID int64, limit int) ([]*models.Log, error) {
+	rows, err := s.DB.QueryContext(ctx, `SELECT `+logCols+` FROM logs l
+		WHERE l.user_id=? AND l.review<>'' AND l.draft=0 AND l.deleted_at IS NULL
+		ORDER BY l.updated_at DESC, l.id DESC LIMIT ?`, userID, limit)
+	if err != nil {
+		return nil, err
+	}
+	var out []*models.Log
+	for rows.Next() {
+		l, err := scanLog(rows)
+		if err != nil {
+			rows.Close()
+			return nil, err
+		}
+		out = append(out, l)
+	}
+	err = rows.Err()
+	rows.Close()
+	if err != nil {
+		return nil, err
+	}
+	for _, l := range out {
+		s.hydrateLog(ctx, l)
+	}
+	return out, nil
 }
 
 func (s *Store) AdminCount(ctx context.Context) int {

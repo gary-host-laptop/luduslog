@@ -95,6 +95,7 @@ func (s *Server) routes() {
 	m.HandleFunc("POST /library/remove", s.requireUser(s.libraryRemove))
 	m.HandleFunc("GET /settings", s.requireUser(s.settingsPage))
 	m.HandleFunc("POST /settings/profile", s.requireUser(s.settingsProfile))
+	m.HandleFunc("POST /settings/overview-widgets", s.requireUser(s.settingsOverviewWidgets))
 	m.HandleFunc("POST /settings/trophy", s.requireUser(s.settingsTrophy))
 	m.HandleFunc("POST /settings/account", s.requireUser(s.settingsAccount))
 	m.HandleFunc("POST /settings/privacy", s.requireUser(s.settingsPrivacy))

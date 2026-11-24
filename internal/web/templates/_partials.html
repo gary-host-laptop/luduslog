@@ -37,7 +37,7 @@
   {{if .Game}}<a href="/games/{{.Game.Slug}}"><img class="game-cover" loading="lazy" src="{{cover .Game}}" alt=""></a>{{end}}
   <div class="log-body">
     <div class="log-head">
-      {{if .User}}<a href="/users/{{.User.Username}}"><img class="avatar avatar-sm" src="{{avatar .User}}" alt=""> {{.User.Username}}</a>{{end}}
+      {{if .User}}<a class="byline-author" href="/users/{{.User.Username}}"><img class="avatar avatar-sm" src="{{avatar .User}}" alt=""> {{.User.Username}}</a>{{end}}
       {{if .Rating}}<span>{{stars .Rating 5}}</span>{{end}}
       <span>{{timeago .CreatedAt}}</span>
       {{if .Draft}}<span class="draft-badge">Draft</span>{{end}}

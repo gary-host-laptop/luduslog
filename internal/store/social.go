@@ -386,7 +386,7 @@ func (s *Store) StatsFor(ctx context.Context, userID int64) (*UserStats, error) 
 	s.DB.QueryRowContext(ctx, `SELECT p.name, COUNT(*) n FROM logs l JOIN platforms p ON p.id=l.platform_id
 		WHERE l.user_id=? AND l.deleted_at IS NULL GROUP BY p.name ORDER BY n DESC LIMIT 1`, userID).Scan(&topPlatform, &topN)
 	st.TopPlatform = topPlatform.String
-	s.DB.QueryRowContext(ctx, `SELECT COUNT(*) FROM logs WHERE user_id=? AND deleted_at IS NULL AND substr(COALESCE(finished_at,started_at,created_at),1,4)=?`, userID, time.Now().UTC().Format("2006")).Scan(&st.ThisYear)
+	s.DB.QueryRowContext(ctx, `SELECT COUNT(DISTINCT game_id) FROM logs WHERE user_id=? AND deleted_at IS NULL AND substr(COALESCE(finished_at,started_at,created_at),1,4)=?`, userID, time.Now().UTC().Format("2006")).Scan(&st.ThisYear)
 	rows, _ := s.DB.QueryContext(ctx, `SELECT CAST(rating AS INTEGER),COUNT(*) FROM logs WHERE user_id=? AND rating>0 AND primary_rating=1 AND deleted_at IS NULL GROUP BY 1`, userID)
 	if rows != nil {
 		for rows.Next() {

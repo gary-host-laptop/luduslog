@@ -55,6 +55,11 @@
   </div>
   <div><label for="storefront">Storefront</label><input id="storefront" type="text" name="storefront" value="{{if .Log}}{{.Log.Storefront}}{{end}}" placeholder="Steam, Itch, retail…"></div>
   <div>
+    <label for="name">Title <span class="muted">(optional)</span></label>
+    <input id="name" type="text" name="name" maxlength="200" value="{{if .Log}}{{.Log.Name}}{{end}}" placeholder="Give this review a title">
+    <div class="field-hint">Shown on the review and in the highlighted review widget.</div>
+  </div>
+  <div>
     <label for="review">Review or journal <span class="muted">(Markdown)</span></label>
     <textarea id="review" name="review" rows="10" placeholder="What did you think?">{{if .Log}}{{.Log.Review}}{{end}}</textarea>
     <div class="field-hint">Leave empty to keep this as a private log entry. Markdown: **bold**, *italic*, lists, quotes, links.Choosing an ownership here also adds or updates your library entry for this game.</div>

@@ -1,7 +1,6 @@
 package web
 
 import (
-	"errors"
 	"net/http"
 	"strconv"
 	"strings"
@@ -13,32 +12,50 @@ import (
 
 type profileData struct {
 	Page
-	Profile        *models.User
-	Tab            string
-	Logs           []*models.Log
-	Reviews        []*models.Log
-	RecentlyPlayed []store.RecentlyPlayed
-	Lists          []*models.List
-	Favorites      []models.Game
-	Stats          *store.UserStats
-	FeaturedBadge  *models.Badge
-	Links          []models.SocialLink
-	IsMe           bool
-	IsFollowing    bool
-	Pending        bool
-	FollowsYou     bool
-	Private        bool
-	Blocked        bool
-	Followers      []*models.User
-	Following      []*models.User
-	CountFollowers int
-	CountFollowing int
-	Activity       []models.Activity
-	JournalView    string
-	Calendar       *journalCalendar
-	PageNum        int
-	Pages          int
-	Total          int
+	Profile           *models.User
+	Tab               string
+	Logs              []*models.Log
+	Reviews           []*models.Log
+	Shelves           []shelfSection
+	Widgets           []overviewWidget
+	Lists             []*models.List
+	Favorites         []models.Game
+	Stats             *store.UserStats
+	YearlyGoalPercent int
+	FeaturedBadge     *models.Badge
+	Trophies          []models.Badge
+	Earned            int
+	Links             []models.SocialLink
+	IsMe              bool
+	IsFollowing       bool
+	Pending           bool
+	FollowsYou        bool
+	Private           bool
+	Blocked           bool
+	Followers         []*models.User
+	Following         []*models.User
+	CountFollowers    int
+	CountFollowing    int
+	Activity          []models.Activity
+	JournalView       string
+	Calendar          *journalCalendar
+	PageNum           int
+	Pages             int
+	Total             int
+}
+
+type shelfSection struct {
+	Label string
+	Count int
+	Games []store.ShelfGame
+}
+
+type overviewWidget struct {
+	Kind      string
+	Favorites []models.Game
+	Review    *models.Log
+	Playtime  float64
+	List      *models.List
 }
 
 type calendarDay struct {
@@ -153,10 +170,24 @@ func (s *Server) profile(w http.ResponseWriter, r *http.Request) {
 	}
 	if canView {
 		data.Stats, _ = s.st.StatsFor(r.Context(), p.ID)
+		if data.Stats != nil && p.YearlyGoal > 0 {
+			data.YearlyGoalPercent = data.Stats.ThisYear * 100 / p.YearlyGoal
+			if data.YearlyGoalPercent > 100 {
+				data.YearlyGoalPercent = 100
+			}
+		}
 		data.Favorites = s.st.FavoriteGames(r.Context(), p.ID, 5)
 		data.JournalView = p.JournalView
 		if data.JournalView == "" {
 			data.JournalView = "calendar"
+		}
+		if tab == "trophies" {
+			data.Trophies, _ = s.st.BadgeCatalogue(r.Context(), p.ID)
+			for _, trophy := range data.Trophies {
+				if trophy.EarnedAt != nil {
+					data.Earned++
+				}
+			}
 		}
 		switch tab {
 		case "reviews":
@@ -180,7 +211,19 @@ func (s *Server) profile(w http.ResponseWriter, r *http.Request) {
 		case "activity":
 			data.Activity, _ = s.st.UserActivities(r.Context(), p.ID, 30, 0)
 		default:
-			data.RecentlyPlayed, _ = s.st.RecentlyPlayedGames(r.Context(), p.ID, 6)
+			data.Widgets = s.overviewWidgets(r, p, viewer, data.Favorites)
+			shelves := []struct {
+				key, label string
+				count      int
+			}{
+				{"played", "Played", data.Stats.GamesPlayed},
+				{"playing", "Playing", data.Stats.GamesPlaying},
+				{"backlog", "Backlog", data.Stats.GamesBacklog},
+			}
+			for _, shelf := range shelves {
+				games, _ := s.st.ShelfGames(r.Context(), p.ID, shelf.key, 3)
+				data.Shelves = append(data.Shelves, shelfSection{Label: shelf.label, Count: shelf.count, Games: games})
+			}
 			data.Reviews, _, _ = s.st.UserLogs(r.Context(), p.ID, true, 2, 0)
 		}
 		if data.Total > 0 {
@@ -270,6 +313,66 @@ func (s *Server) userGameLogsPage(w http.ResponseWriter, r *http.Request) {
 		IsMe:     isMe,
 	}
 	s.render(w, r, "user_game_logs", data)
+}
+
+// overviewWidgets resolves the configured slots in order and silently drops
+// content that was deleted, lost visibility, or is adult-gated for the viewer.
+func (s *Server) overviewWidgets(r *http.Request, p *models.User, viewer *models.User, favorites []models.Game) []overviewWidget {
+	var out []overviewWidget
+	for _, kind := range []string{p.OverviewWidget1, p.OverviewWidget2} {
+		switch kind {
+		case "favourites":
+			if len(favorites) > 0 {
+				out = append(out, overviewWidget{Kind: "favourites", Favorites: favorites})
+			}
+		case "review":
+			if p.FeaturedReviewID == nil {
+				continue
+			}
+			review, err := s.st.LogByID(r.Context(), *p.FeaturedReviewID)
+			if err != nil || review.UserID != p.ID || review.Review == "" || review.Draft || review.Game == nil {
+				continue
+			}
+			if review.Game.Adult && (viewer == nil || !viewer.AdultOptIn) {
+				continue
+			}
+			playtime, _ := s.st.PlaytimeForGame(r.Context(), p.ID, review.GameID)
+			out = append(out, overviewWidget{Kind: "review", Review: review, Playtime: playtime})
+		case "list":
+			if p.FeaturedListID == nil {
+				continue
+			}
+			list, err := s.st.ListByID(r.Context(), *p.FeaturedListID, false)
+			if err != nil || list.UserID != p.ID || !s.listVisibleTo(r, list, p, viewer) {
+				continue
+			}
+			if (viewer == nil || !viewer.AdultOptIn) && s.st.ListHasAdultGames(r.Context(), list.ID) {
+				continue
+			}
+			covers, _ := s.st.ListCoverGames(r.Context(), []int64{list.ID}, 5)
+			list.CoverGames = covers[list.ID]
+			out = append(out, overviewWidget{Kind: "list", List: list})
+		}
+	}
+	return out
+}
+
+func (s *Server) listVisibleTo(r *http.Request, list *models.List, owner *models.User, viewer *models.User) bool {
+	if viewer != nil && viewer.ID == owner.ID {
+		return true
+	}
+	switch list.Privacy {
+	case "private":
+		return false
+	case "personal":
+		if viewer == nil {
+			return false
+		}
+		following, approved := s.st.IsFollowing(r.Context(), viewer.ID, owner.ID)
+		return following && approved
+	default:
+		return true
+	}
 }
 
 func featuredBadge(badges []models.Badge, key string) *models.Badge {
@@ -480,53 +583,8 @@ func (s *Server) unblockUser(w http.ResponseWriter, r *http.Request) {
 	s.redirect(w, r, "/users/"+target.Username)
 }
 
-type trophiesData struct {
-	Page
-	Profile  *models.User
-	Trophies []models.Badge
-	Featured string
-	Earned   int
-}
-
 func (s *Server) trophiesPage(w http.ResponseWriter, r *http.Request) {
-	p, err := s.st.UserByUsername(r.Context(), r.PathValue("name"))
-	if errors.Is(err, store.ErrNotFound) {
-		s.notFound(w, r)
-		return
-	}
-	if err != nil {
-		s.serverError(w, r, err)
-		return
-	}
-	viewer := currentUser(r)
-	isMe := viewer != nil && viewer.ID == p.ID
-	approved := false
-	if viewer != nil && !isMe {
-		_, approved = s.st.IsFollowing(r.Context(), viewer.ID, p.ID)
-	}
-	if p.PrivateProfile && !isMe && !approved {
-		s.notFound(w, r)
-		return
-	}
-	s.st.CheckBadges(r.Context(), p.ID)
-	trophies, err := s.st.BadgeCatalogue(r.Context(), p.ID)
-	if err != nil {
-		s.serverError(w, r, err)
-		return
-	}
-	earned := 0
-	for _, t := range trophies {
-		if t.EarnedAt != nil {
-			earned++
-		}
-	}
-	s.render(w, r, "trophies", trophiesData{
-		Page:     s.page(r, "Trophies of "+p.Username),
-		Profile:  p,
-		Trophies: trophies,
-		Featured: p.FeaturedBadge,
-		Earned:   earned,
-	})
+	s.redirect(w, r, "/users/"+r.PathValue("name")+"?tab=trophies")
 }
 
 func (s *Server) statsPage(w http.ResponseWriter, r *http.Request) {

@@ -356,6 +356,52 @@ func TestSearchPaginationAndReviewFilters(t *testing.T) {
 	}
 }
 
+func TestListCoverGames(t *testing.T) {
+	ctx := context.Background()
+	st := testStore(t)
+	alice, _ := st.CreateUser(ctx, "coveralice", "coveralice@example.test", "hash", false)
+	list, _ := st.CreateList(ctx, ListInput{UserID: alice.ID, Title: "Cover Stack", Privacy: "public"})
+	empty, _ := st.CreateList(ctx, ListInput{UserID: alice.ID, Title: "Empty Stack", Privacy: "public"})
+	games := make([]*models.Game, 7)
+	for i := range games {
+		games[i], _ = st.SaveGame(ctx, &models.Game{IGDBID: int64(-900 - i), Slug: "cover-" + strconv.Itoa(i), Title: "Cover " + strconv.Itoa(i), ReleaseStatus: "released"})
+		if err := st.AddListEntry(ctx, list.ID, games[i].ID, ""); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := st.DB.ExecContext(ctx, `UPDATE list_entries SET added_at=? WHERE list_id=? AND game_id=?`,
+			"2026-01-0"+strconv.Itoa(i+1)+"T12:00:00Z", list.ID, games[i].ID); err != nil {
+			t.Fatal(err)
+		}
+	}
+	covers, err := st.ListCoverGames(ctx, []int64{list.ID, empty.ID}, 5)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(covers[list.ID]) != 5 {
+		t.Fatalf("covers = %d, want 5", len(covers[list.ID]))
+	}
+	for i, want := range []int{6, 5, 4, 3, 2} {
+		if covers[list.ID][i].ID != games[want].ID {
+			t.Fatalf("cover %d = %q, want %q", i, covers[list.ID][i].Title, games[want].Title)
+		}
+	}
+	if _, ok := covers[empty.ID]; ok {
+		t.Fatal("empty list received a cover stack")
+	}
+	lists, err := st.VisibleListsFor(ctx, alice.ID, alice.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, l := range lists {
+		if l.ID == list.ID && (l.EntryCount != 7 || len(l.CoverGames) != 5) {
+			t.Fatalf("visible list covers = %d, count = %d", len(l.CoverGames), l.EntryCount)
+		}
+		if l.ID == empty.ID && (l.EntryCount != 0 || len(l.CoverGames) != 0) {
+			t.Fatalf("empty list count = %d, covers = %d", l.EntryCount, len(l.CoverGames))
+		}
+	}
+}
+
 func ptr[T any](v T) *T { return &v }
 
 func TestGameReviewSorting(t *testing.T) {
@@ -485,6 +531,23 @@ func TestReviewsFeedAudienceAndSort(t *testing.T) {
 	oldest, _, err := st.ReviewsFeed(ctx, alice.ID, "all", g1.ID, "oldest", 20, 0)
 	if err != nil || len(oldest) != 2 || oldest[0].ID != bobReview.ID || oldest[1].ID != daveReview.ID {
 		t.Fatalf("oldest game feed = %v err=%v", ids(oldest), err)
+	}
+
+	// Date sorting follows publication time, not a later edit.
+	st.DB.ExecContext(ctx, `UPDATE logs SET created_at='2026-01-01T12:00:00Z',updated_at='2026-06-01T12:00:00Z' WHERE id=?`, bobReview.ID)
+	st.DB.ExecContext(ctx, `UPDATE logs SET created_at='2026-02-01T12:00:00Z',updated_at='2026-02-01T12:00:00Z' WHERE id=?`, carolReview.ID)
+	st.DB.ExecContext(ctx, `UPDATE logs SET created_at='2026-03-01T12:00:00Z',updated_at='2026-03-01T12:00:00Z' WHERE id=?`, daveReview.ID)
+	byDate, _, err := st.ReviewsFeedSorted(ctx, alice.ID, "all", 0, "date", "desc", 20, 0)
+	if err != nil || len(byDate) != 3 || byDate[0].ID != daveReview.ID || byDate[1].ID != carolReview.ID || byDate[2].ID != bobReview.ID {
+		t.Fatalf("date desc feed = %v err=%v", ids(byDate), err)
+	}
+	byRatingAsc, _, err := st.ReviewsFeedSorted(ctx, alice.ID, "all", 0, "rating", "asc", 20, 0)
+	if err != nil || len(byRatingAsc) != 3 || byRatingAsc[0].ID != bobReview.ID || byRatingAsc[1].ID != carolReview.ID || byRatingAsc[2].ID != daveReview.ID {
+		t.Fatalf("rating asc feed = %v err=%v", ids(byRatingAsc), err)
+	}
+	byPopularityAsc, _, err := st.ReviewsFeedSorted(ctx, alice.ID, "all", 0, "popularity", "asc", 20, 0)
+	if err != nil || len(byPopularityAsc) != 3 || byPopularityAsc[2].ID != daveReview.ID {
+		t.Fatalf("popularity asc feed = %v err=%v", ids(byPopularityAsc), err)
 	}
 }
 
@@ -666,6 +729,9 @@ func TestRecentlyPlayedGamesTracksShelfEvents(t *testing.T) {
 	if want := time.Date(2026, 1, 2, 12, 0, 0, 0, time.UTC); !oldStatus.PlayedAt.Equal(want) {
 		t.Fatalf("backlog edit changed played_at to %v", oldStatus.PlayedAt)
 	}
+	if oldStatus.BacklogAt.IsZero() {
+		t.Fatal("backlog edit did not record backlog_at")
+	}
 
 	entries, err := st.RecentlyPlayedGames(ctx, alice.ID, 6)
 	if err != nil {
@@ -730,12 +796,41 @@ func TestStatsAndPrivacy(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	// Logging the same game twice must still count it once this year.
+	if _, err := st.CreateLog(ctx, LogInput{UserID: alice.ID, GameID: game.ID, Status: "played", Playtime: 2}); err != nil {
+		t.Fatal(err)
+	}
+	lastYear, _ := st.SaveGame(ctx, &models.Game{IGDBID: -11, Slug: "last-year", Title: "Last Year", ReleaseStatus: "released"})
+	lastLog, err := st.CreateLog(ctx, LogInput{UserID: alice.ID, GameID: lastYear.ID, Status: "played"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.DB.ExecContext(ctx, `UPDATE logs SET created_at=? WHERE id=?`, strconv.Itoa(time.Now().UTC().Year()-1)+"-06-01T12:00:00Z", lastLog.ID); err != nil {
+		t.Fatal(err)
+	}
+	backlogGame, _ := st.SaveGame(ctx, &models.Game{IGDBID: -12, Slug: "stats-backlog", Title: "Stats Backlog", ReleaseStatus: "released"})
+	wishlistGame, _ := st.SaveGame(ctx, &models.Game{IGDBID: -13, Slug: "stats-wishlist", Title: "Stats Wishlist", ReleaseStatus: "released"})
+	if err := st.SetStatusFlag(ctx, alice.ID, backlogGame.ID, "backlog", true); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.SetStatusFlag(ctx, alice.ID, wishlistGame.ID, "wishlist", true); err != nil {
+		t.Fatal(err)
+	}
 	stats, err := st.StatsFor(ctx, alice.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if stats.GamesPlayed != 1 || stats.TotalHours != 4 {
+	if stats.GamesPlayed != 1 || stats.TotalHours != 6 {
 		t.Fatalf("unexpected stats: %+v", stats)
+	}
+	if stats.ThisYear != 1 || stats.GamesBacklog != 1 || stats.GamesWishlist != 1 {
+		t.Fatalf("unexpected year/shelf stats: %+v", stats)
+	}
+	if err := st.SetYearlyGoal(ctx, alice.ID, 12); err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := st.UserByID(ctx, alice.ID); got.YearlyGoal != 12 {
+		t.Fatalf("yearly goal = %d, want 12", got.YearlyGoal)
 	}
 	if err := st.RefreshGameStats(ctx, game.ID); err != nil {
 		t.Fatal(err)

@@ -5,20 +5,23 @@
     <img class="avatar avatar-lg" src="{{avatar .Profile}}" alt="">
     <div class="profile-id">
       <h1>{{.Profile.Username}} {{if ne .Profile.Role "user"}}<span class="pill">{{.Profile.RoleLabel}}</span>{{end}}</h1>
-      <div class="muted">Joined {{date .Profile.CreatedAt}}{{if .Profile.Timezone}} · {{.Profile.Timezone}}{{end}}</div>
-      {{if .Links}}<div class="pill-row">{{range .Links}}<a class="pill" href="{{.URL}}" rel="me nofollow ugc">{{.Site}}</a>{{end}}</div>{{end}}
-      <div class="profile-stats mt1">
-        <span><strong>{{.Stats.GamesPlayed}}</strong> played</span>
-        <span><strong>{{hours .Stats.TotalHours}}</strong> playtime</span>
-        <span><strong>{{.Stats.Reviews}}</strong> reviews</span>
-        <span><a href="/users/{{.Profile.Username}}/followers"><strong>{{.CountFollowers}}</strong> followers</a></span>
-        <span><a href="/users/{{.Profile.Username}}/following"><strong>{{.CountFollowing}}</strong> following</a></span>
+      <div class="muted">Joined {{dateSlash .Profile.CreatedAt}}</div>
+      {{if or .Links .Stats}}
+      <div class="profile-meta-row">
+        {{if .Links}}<div class="profile-links">{{range .Links}}<a class="pill" href="{{.URL}}" rel="me nofollow ugc">{{.Site}}</a>{{end}}</div>{{end}}
+        {{if .Stats}}
+        <div class="profile-stats">
+          <span class="profile-stat"><a href="/users/{{.Profile.Username}}/followers"><span class="profile-stat-label">Followers</span><strong>{{.CountFollowers}}</strong></a></span>
+          <span class="profile-stat"><a href="/users/{{.Profile.Username}}/following"><span class="profile-stat-label">Following</span><strong>{{.CountFollowing}}</strong></a></span>
+          <span class="profile-stat profile-playtime"><span class="profile-stat-label">Playtime</span><strong>{{hours .Stats.TotalHours}}</strong></span>
+        </div>
+        {{end}}
       </div>
+      {{end}}
     </div>
+    {{if not .IsMe}}
     <div class="profile-actions">
-      {{if .IsMe}}
-        <a class="btn" href="/settings">Edit profile</a>
-      {{else if .Page.User}}
+      {{if .Page.User}}
         {{if .IsFollowing}}
           <form method="post" action="/users/{{.Profile.Username}}/unfollow"><input type="hidden" name="_csrf" value="{{.CSRF}}"><button class="btn" type="submit">{{if .Pending}}Requested{{else}}Following{{end}}</button></form>
         {{else}}
@@ -30,6 +33,7 @@
         <a class="btn btn-primary" href="/login">Follow</a>
       {{end}}
     </div>
+    {{end}}
   </div>
   {{if .Private}}
     {{if .Profile.Bio}}<div class="profile-bio prose">{{md .Profile.Bio}}</div>{{end}}
@@ -39,9 +43,6 @@
       {{if .Profile.Bio}}{{md .Profile.Bio}}{{else}}<p class="muted">No bio yet.</p>{{end}}
     </div>
     <aside class="profile-trophy" aria-label="Highlighted trophy">
-      <div class="profile-trophy-head">
-        <span class="tabs-label">Trophy</span>
-      </div>
       {{if .FeaturedBadge}}
       <div class="profile-trophy-card">
         <i class="ph-fill ph-trophy icon" aria-hidden="true"></i>
@@ -69,27 +70,89 @@
   <a href="/users/{{.Profile.Username}}?tab=lists" class="{{if eq .Tab "lists"}}on{{end}}">Lists</a>
   <a href="/users/{{.Profile.Username}}?tab=activity" class="{{if eq .Tab "activity"}}on{{end}}">Activity</a>
   <a href="/users/{{.Profile.Username}}/stats">Stats</a>
-  <a href="/users/{{.Profile.Username}}/trophies">Trophies</a>
+  <a href="/users/{{.Profile.Username}}?tab=trophies" class="{{if eq .Tab "trophies"}}on{{end}}">Trophies</a>
 </div>
 
-{{if eq .Tab "overview"}}
-  {{if .Favorites}}
+{{if eq .Tab "trophies"}}
   <section class="section" style="margin-top:0">
-    <div class="section-head"><h2>Favourite games</h2></div>
-    <div class="fav-grid">{{range .Favorites}}<a href="/games/{{.Slug}}"><img class="game-cover" src="{{cover .}}" alt="{{.Title}}" title="{{.Title}}"></a>{{end}}</div>
-  </section>{{end}}
-  {{if .RecentlyPlayed}}
-  <section class="section">
-    <div class="section-head"><h2>Recently played</h2></div>
-    <div class="recent-grid">{{range .RecentlyPlayed}}
+    <div class="section-head"><div><h2>Trophies</h2><span class="muted">{{.Earned}} of {{len .Trophies}} earned</span></div></div>
+    <div class="grid grid-3">
+      {{range .Trophies}}
+      <article class="trophy-card{{if not .EarnedAt}} locked{{end}}">
+        <div class="trophy-icon"><i class="ph-fill ph-trophy icon" aria-hidden="true"></i></div>
+        <div>
+          <h2>{{.Title}}{{if eq $.Profile.FeaturedBadge .Key}} <span class="pill">Highlighted</span>{{end}}</h2>
+          <p class="muted">{{.Desc}}</p>
+          {{if .EarnedAt}}<div class="muted">Earned {{.EarnedAt.Format "Jan 2, 2006"}}</div>{{else}}<div class="muted">Locked</div>{{end}}
+        </div>
+      </article>
+      {{end}}
+    </div>
+  </section>
+{{else if eq .Tab "overview"}}
+  {{if .Widgets}}
+  <div class="overview-widgets">
+    {{range .Widgets}}
+    <section class="overview-widget">
+      {{if eq .Kind "favourites"}}
+        <div class="section-head"><h2>Favourite games</h2></div>
+        <div class="fav-grid">{{range .Favorites}}<a href="/games/{{.Slug}}"><img class="game-cover" src="{{cover .}}" alt="{{.Title}}" title="{{.Title}}"></a>{{end}}</div>
+      {{else if eq .Kind "review"}}{{$playtime := .Playtime}}{{with .Review}}
+        <div class="section-head"><h2>Highlighted review</h2></div>
+        <div class="overview-review-head">
+          {{if .Game}}<a href="/games/{{.Game.Slug}}"><img class="game-cover" src="{{cover .Game}}" alt=""></a>{{end}}
+          <div class="overview-review-copy">
+            <h3 class="mt0"><a href="{{reviewPath .}}">{{if .Name}}{{.Name}}{{else}}{{if .Game}}{{.Game.Title}}{{else}}Review{{end}}{{end}}</a></h3>
+            <div class="overview-review-main">
+              {{if .Review}}<div class="overview-review-excerpt">{{if .Spoiler}}Contains spoilers{{else}}{{truncate (plain .Review) 500}}{{end}}</div>{{end}}
+              <div class="overview-review-stat">{{if $playtime}}<strong>{{hours $playtime}}</strong><span>played</span>{{else}}<span>No playtime</span>{{end}}</div>
+            </div>
+          </div>
+        </div>
+      {{end}}{{else if eq .Kind "list"}}{{with .List}}
+        <div class="section-head"><h2>Highlighted list</h2></div>
+        <a class="list-card list-card-widget" href="/users/{{$.Profile.Username}}/lists/{{.Slug}}">
+          {{if .CoverGames}}<div class="list-covers">{{range .CoverGames}}<img src="{{cover .}}" alt="" loading="lazy">{{end}}</div>{{end}}
+          <div>
+            <h3>{{.Title}}</h3>
+            {{if .Description}}<div class="muted mt1">{{truncate .Description 110}}</div>{{end}}
+            <div class="muted">{{.EntryCount}} {{plural .EntryCount "game" "games"}} · {{privacyLabel .Privacy}}</div>
+          </div>
+        </a>
+      {{end}}{{end}}
+    </section>
+    {{end}}
+  </div>
+  {{end}}
+  {{if .Profile.YearlyGoal}}
+  <section class="yearly-goal" aria-labelledby="yearly-goal-title">
+    <div class="yearly-goal-head">
+      <h2 id="yearly-goal-title">Yearly goal</h2>
+      <span class="yearly-goal-count">{{.Stats.ThisYear}} of {{.Profile.YearlyGoal}} games</span>
+      <strong class="yearly-goal-percent">{{.YearlyGoalPercent}}%</strong>
+    </div>
+    <div class="goal-track" role="progressbar" aria-label="Yearly goal progress" aria-valuemin="0" aria-valuemax="100" aria-valuenow="{{.YearlyGoalPercent}}">
+      <span class="goal-fill" style="width:{{.YearlyGoalPercent}}%"></span>
+    </div>
+  </section>
+  {{end}}
+  <div class="shelf-groups">
+  {{range .Shelves}}
+  <section class="section shelf-section">
+    <div class="section-head"><h2>{{.Label}}</h2><span class="muted">{{.Count}} {{plural .Count "game" "games"}}</span></div>
+    {{if .Games}}
+    <div class="shelf-grid">{{range .Games}}
       <a class="recent-card" href="/games/{{.Game.Slug}}">
         <img class="game-cover" src="{{cover .Game}}" alt="{{.Game.Title}}">
         <div class="recent-title">{{.Game.Title}}</div>
-        <div class="recent-meta"><span class="pill">{{.Event}}</span><span>{{dateLong .EventAt}}</span></div>
+        <div class="recent-meta"><span>Added {{dateLong .AddedAt}}</span></div>
         {{if .Rating}}<div class="recent-rating">{{stars .Rating 5}} <span>{{rating .Rating 10}} / 10</span></div>{{end}}
       </a>
     {{end}}</div>
-  </section>{{end}}
+    {{else}}<div class="empty">No games on this shelf yet.</div>{{end}}
+  </section>
+  {{end}}
+  </div>
   {{if .Reviews}}
   <section class="section">
     <div class="section-head"><h2>Recent reviews</h2><a class="more" href="?tab=reviews">All reviews →</a></div>
@@ -124,7 +187,7 @@
 {{else if eq .Tab "lists"}}
   <section class="section" style="margin-top:0">
   <div class="section-head"><h2>Lists</h2>{{if .IsMe}}<a class="btn btn-sm btn-primary" href="/lists/new">New list</a>{{end}}</div>
-  <div class="grid grid-2">{{range .Lists}}<a class="list-card" href="/users/{{$.Profile.Username}}/lists/{{.Slug}}"><div class="list-thumbs">{{range .Entries}}<img src="{{cover .Game}}" alt="">{{end}}</div><div><h3>{{.Title}}</h3><div class="muted">{{len .Entries}} games · {{privacyLabel .Privacy}}</div></div></a>{{else}}<div class="empty">No lists yet.</div>{{end}}</div>
+  <div class="grid grid-2">{{range .Lists}}<a class="list-card" href="/users/{{$.Profile.Username}}/lists/{{.Slug}}">{{if .CoverGames}}<div class="list-covers">{{range .CoverGames}}<img src="{{cover .}}" alt="" loading="lazy">{{end}}</div>{{end}}<div><h3>{{.Title}}</h3><div class="muted">{{.EntryCount}} {{plural .EntryCount "game" "games"}} · {{privacyLabel .Privacy}}</div></div></a>{{else}}<div class="empty">No lists yet.</div>{{end}}</div>
   </section>
 {{else if eq .Tab "activity"}}
   <section class="section" style="margin-top:0">

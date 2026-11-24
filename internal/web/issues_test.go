@@ -403,6 +403,81 @@ func TestLogFormNewFieldsAndTimePreservation(t *testing.T) {
 	}
 }
 
+func TestReviewTitlesWeb(t *testing.T) {
+	ts, st := testServer(t)
+	ctx := context.Background()
+	alice, _ := st.CreateUser(ctx, "titlealice", "titlealice@example.test", "hash", false)
+	game := mustSaveGame(t, st, &models.Game{IGDBID: -940, Slug: "review-title-game", Title: "Review Title Game", ReleaseStatus: "released"})
+	client, sess := authedClient(t, ts, st, alice)
+	noRedirect := noRedirectClient(client)
+
+	code, form := getBody(t, client, ts.URL+"/games/review-title-game/log")
+	if code != http.StatusOK {
+		t.Fatalf("log form = %d", code)
+	}
+	for _, want := range []string{`name="name"`, `maxlength="200"`, "highlighted review widget"} {
+		if !strings.Contains(form, want) {
+			t.Errorf("log form missing %q", want)
+		}
+	}
+
+	if got := postStatus(t, noRedirect, ts.URL+"/games/review-title-game/log", url.Values{
+		"_csrf": {sess.CSRF}, "name": {"  The First Climb  "}, "review": {"A full review body"},
+		"status": {"completed"}, "playtime": {"2.5"},
+	}); got != http.StatusSeeOther {
+		t.Fatalf("create titled review = %d", got)
+	}
+	log, err := st.LatestLogFor(ctx, alice.ID, game.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if log.Name != "The First Climb" {
+		t.Fatalf("saved title = %q", log.Name)
+	}
+	reviewPath := "/users/titlealice/reviews/" + itoa(log.ID)
+	for _, path := range []string{
+		reviewPath,
+		"/reviews",
+		"/games/review-title-game",
+		"/search?q=The+First+Climb&tab=reviews",
+		"/",
+		"/users/titlealice",
+		"/users/titlealice?tab=reviews",
+		"/settings",
+	} {
+		code, body := getBody(t, client, ts.URL+path)
+		if code != http.StatusOK || !strings.Contains(body, "The First Climb") {
+			t.Errorf("%s missing review title (%d)", path, code)
+		}
+	}
+
+	// Editing through older forms that omit the title must preserve it.
+	if got := postStatus(t, noRedirect, ts.URL+"/logs/"+itoa(log.ID)+"/edit", url.Values{
+		"_csrf": {sess.CSRF}, "status": {"completed"}, "review": {"A full review body"},
+	}); got != http.StatusSeeOther {
+		t.Fatalf("edit without title field = %d", got)
+	}
+	edited, _ := st.LogByID(ctx, log.ID)
+	if edited.Name != "The First Climb" {
+		t.Fatalf("editing cleared the title: %q", edited.Name)
+	}
+
+	// The field can be cleared, and the review page falls back to the game name.
+	if got := postStatus(t, noRedirect, ts.URL+"/logs/"+itoa(log.ID)+"/edit", url.Values{
+		"_csrf": {sess.CSRF}, "name": {"   "}, "status": {"completed"}, "review": {"A full review body"},
+	}); got != http.StatusSeeOther {
+		t.Fatalf("clear title = %d", got)
+	}
+	cleared, _ := st.LogByID(ctx, log.ID)
+	if cleared.Name != "" {
+		t.Fatalf("cleared title = %q", cleared.Name)
+	}
+	_, reviewBody := getBody(t, client, ts.URL+reviewPath)
+	if !strings.Contains(reviewBody, "Review of Review Title Game") {
+		t.Error("review page missing the game-name title fallback")
+	}
+}
+
 func TestSessionEditingDaysAndPrivacy(t *testing.T) {
 	ts, st := testServer(t)
 	ctx := context.Background()

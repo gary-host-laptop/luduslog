@@ -35,6 +35,7 @@ func templateFuncs(s *Server) template.FuncMap {
 		"beatParts":       beatParts,
 		"timeago":         timeAgo,
 		"date":            dateFmt,
+		"dateSlash":       dateSlash,
 		"dateLong":        dateLong,
 		"releaseDate":     releaseDate,
 		"sameTitle":       sameTitle,
@@ -309,6 +310,13 @@ func dateLong(t time.Time) string {
 		return ""
 	}
 	return t.Format("January 2, 2006")
+}
+
+func dateSlash(t time.Time) string {
+	if t.IsZero() {
+		return ""
+	}
+	return t.Format("2006/01/02")
 }
 
 func releaseDate(s string) string {

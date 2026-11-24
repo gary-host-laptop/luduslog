@@ -23,6 +23,7 @@ type User struct {
 	HideSocialGraph    bool
 	AdultOptIn         bool
 	StarScale          int
+	YearlyGoal         int
 	CoverMode          string // any | mine | none
 	TimeDisplay        string // always | played | click
 	InfiniteScroll     bool
@@ -35,6 +36,10 @@ type User struct {
 	NotePrivacy        string // everyone | friends | none
 	CatalogEditor      bool
 	FeaturedBadge      string
+	OverviewWidget1    string
+	OverviewWidget2    string
+	FeaturedReviewID   *int64
+	FeaturedListID     *int64
 	Federation         bool
 	FedStatuses        bool
 	FedReviews         bool
@@ -234,6 +239,7 @@ type Status struct {
 	Liked     bool
 	PlayedAt  time.Time
 	PlayingAt time.Time
+	BacklogAt time.Time
 	UpdatedAt time.Time
 }
 
@@ -262,6 +268,7 @@ type List struct {
 	EntryCount  int
 	APID        string
 	Entries     []ListEntry
+	CoverGames  []Game
 	Folders     []string
 }
 
