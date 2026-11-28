@@ -182,7 +182,7 @@ func TestFavoriteGamesLifecycle(t *testing.T) {
 	}
 }
 
-func TestRateGameCreatesAndPreservesLogs(t *testing.T) {
+func TestRateGameDoesNotCreateLogs(t *testing.T) {
 	ctx := context.Background()
 	st := testStore(t)
 	alice, _ := st.CreateUser(ctx, "alice", "alice@example.test", "hash", false)
@@ -198,37 +198,52 @@ func TestRateGameCreatesAndPreservesLogs(t *testing.T) {
 	if err := st.RateGame(ctx, alice.ID, game.ID, 7); err != nil {
 		t.Fatal(err)
 	}
-	log, err := st.LatestLogFor(ctx, alice.ID, game.ID)
-	if err != nil {
-		t.Fatal(err)
+	if got := st.RatingForUser(ctx, alice.ID, game.ID); got != 7 {
+		t.Fatalf("central rating = %v, want 7", got)
 	}
-	if log.Rating != 7 || log.Status != "played" {
-		t.Fatalf("quick rating created %+v, want rating 7 and played", log)
+	if _, err := st.LatestLogFor(ctx, alice.ID, game.ID); err == nil {
+		t.Fatal("rating a game created a log")
+	}
+	status, _ := st.StatusFor(ctx, alice.ID, game.ID)
+	if status.Played != 0 || status.Shelf != "" {
+		t.Fatalf("rating changed the game status: %+v", status)
 	}
 	stats, _ := st.GameByID(ctx, game.ID)
 	if stats.RatingCount != 1 {
 		t.Fatalf("rating count = %d, want 1", stats.RatingCount)
 	}
 
-	if _, err := st.UpdateLog(ctx, log.ID, LogInput{
+	log, err := st.CreateLog(ctx, LogInput{
 		UserID: alice.ID, GameID: game.ID, Rating: 7, Review: "A precise climb", Status: "shelved", Replay: true,
-	}); err != nil {
+	})
+	if err != nil {
 		t.Fatal(err)
 	}
 	if err := st.RateGame(ctx, alice.ID, game.ID, 4); err != nil {
 		t.Fatal(err)
 	}
-	log, _ = st.LatestLogFor(ctx, alice.ID, game.ID)
-	if log.Rating != 4 || log.Review != "A precise climb" || log.Status != "shelved" || !log.Replay {
-		t.Fatalf("rating update overwrote the log: %+v", log)
+	if got := st.RatingForUser(ctx, alice.ID, game.ID); got != 4 {
+		t.Fatalf("updated rating = %v, want 4", got)
+	}
+	logs, _ := st.UserGameLogs(ctx, alice.ID, game.ID, true)
+	if len(logs) != 1 {
+		t.Fatalf("logs after re-rating = %d, want 1", len(logs))
+	}
+	if logs[0].Review != "A precise climb" || logs[0].Status != "shelved" || !logs[0].Replay || logs[0].Rating != 4 {
+		t.Fatalf("rating update overwrote the log: %+v", logs[0])
 	}
 
-	if err := st.RateGame(ctx, alice.ID, game.ID, 0); err != nil {
+	if err := st.DeleteLog(ctx, log.ID, alice.ID); err != nil {
 		t.Fatal(err)
 	}
-	log, _ = st.LatestLogFor(ctx, alice.ID, game.ID)
-	if log.Rating != 0 || log.Review != "A precise climb" {
-		t.Fatalf("clearing rating damaged the log: %+v", log)
+	if got := st.RatingForUser(ctx, alice.ID, game.ID); got != 4 {
+		t.Fatalf("deleting a log changed the rating to %v", got)
+	}
+	if err := st.ClearRating(ctx, alice.ID, game.ID); err != nil {
+		t.Fatal(err)
+	}
+	if got := st.RatingForUser(ctx, alice.ID, game.ID); got != 0 {
+		t.Fatalf("rating after clear = %v, want 0", got)
 	}
 	stats, _ = st.GameByID(ctx, game.ID)
 	if stats.RatingCount != 0 {

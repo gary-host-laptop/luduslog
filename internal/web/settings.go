@@ -867,6 +867,12 @@ func (s *Server) importLuduslogExport(r *http.Request, u *models.User, payload l
 	ctx := r.Context()
 	existing := map[int64][]*models.Log{}
 	claimed := map[int64]bool{}
+	type ratingChoice struct {
+		rating  float64
+		primary bool
+		at      time.Time
+	}
+	ratings := map[int64]ratingChoice{}
 	type flags struct{ played, playing, backlog, wishlist bool }
 	shelf := map[int64]*flags{}
 	for _, e := range payload.Logs {
@@ -875,7 +881,12 @@ func (s *Server) importLuduslogExport(r *http.Request, u *models.User, payload l
 			missing++
 			continue
 		}
-		primary := e.PrimaryRating && e.Rating > 0 && !e.Draft
+		if e.Rating > 0 && !e.Draft {
+			choice := ratings[g.ID]
+			if e.PrimaryRating || (!choice.primary && (choice.at.IsZero() || !e.CreatedAt.Before(choice.at))) {
+				ratings[g.ID] = ratingChoice{rating: e.Rating, primary: e.PrimaryRating, at: e.CreatedAt}
+			}
+		}
 		in := store.LogInput{
 			UserID: u.ID, GameID: g.ID, Name: e.Name, Rating: e.Rating, Review: e.Review,
 			Spoiler: e.Spoiler, Status: store.NormalizePlayedStatus(e.Status), Replay: e.Replay,
@@ -883,7 +894,7 @@ func (s *Server) importLuduslogExport(r *http.Request, u *models.User, payload l
 			PlayedOnID: s.platformIDByName(ctx, e.PlayedOn), Ownership: e.Ownership, Storefront: e.Storefront,
 			StartedAt: e.StartedAt, FinishedAt: e.FinishedAt, TimeToFinish: e.TimeToFinish,
 			TimeToMaster: e.TimeToMaster, Playtime: e.Playtime, SyncSessions: e.SyncSessions,
-			Language: e.Language, Draft: e.Draft, PrimaryRating: &primary,
+			Language: e.Language, Draft: e.Draft,
 		}
 		logs, ok := existing[g.ID]
 		if !ok {
@@ -946,6 +957,13 @@ func (s *Server) importLuduslogExport(r *http.Request, u *models.User, payload l
 		f.wishlist = f.wishlist || in.Status == "wishlist"
 		if in.Ownership != "" {
 			s.st.SaveLibraryEntry(ctx, u.ID, g.ID, in.PlatformID, in.Ownership, in.Storefront, e.Edition)
+		}
+	}
+	// Log writes mirror the rating as they go; set the chosen one last so an
+	// old export with several rated logs keeps its primary rating.
+	for gameID, choice := range ratings {
+		if err := s.st.SetRating(ctx, u.ID, gameID, choice.rating); err != nil {
+			return added, updated, sessions, missing, err
 		}
 	}
 	for gameID, f := range shelf {

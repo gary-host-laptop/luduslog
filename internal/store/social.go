@@ -395,7 +395,7 @@ func (s *Store) StatsFor(ctx context.Context, userID int64) (*UserStats, error) 
 		COALESCE(SUM(CASE WHEN shelf='wishlist' THEN 1 ELSE 0 END),0)
 		FROM statuses WHERE user_id=?`, userID).Scan(&st.GamesPlayed, &st.GamesPlaying, &st.GamesBacklog, &st.GamesWishlist)
 	s.DB.QueryRowContext(ctx, `SELECT COALESCE(SUM(playtime),0) FROM logs WHERE user_id=? AND deleted_at IS NULL`, userID).Scan(&st.TotalHours)
-	s.DB.QueryRowContext(ctx, `SELECT COALESCE(AVG(rating),0) FROM logs WHERE user_id=? AND rating>0 AND primary_rating=1 AND deleted_at IS NULL`, userID).Scan(&st.AvgRating)
+	s.DB.QueryRowContext(ctx, `SELECT COALESCE(AVG(rating),0) FROM game_ratings WHERE user_id=? AND rating>0`, userID).Scan(&st.AvgRating)
 	s.DB.QueryRowContext(ctx, `SELECT COUNT(*) FROM logs WHERE user_id=? AND review<>'' AND deleted_at IS NULL`, userID).Scan(&st.Reviews)
 	s.DB.QueryRowContext(ctx, `SELECT COUNT(*) FROM lists WHERE user_id=? AND deleted_at IS NULL`, userID).Scan(&st.Lists)
 	s.DB.QueryRowContext(ctx, `SELECT COUNT(*) FROM logs WHERE user_id=? AND mastered=1 AND deleted_at IS NULL`, userID).Scan(&st.PerfectGames)
@@ -412,7 +412,7 @@ func (s *Store) StatsFor(ctx context.Context, userID int64) (*UserStats, error) 
 		WHERE l.user_id=? AND l.deleted_at IS NULL GROUP BY p.name ORDER BY n DESC LIMIT 1`, userID).Scan(&topPlatform, &topN)
 	st.TopPlatform = topPlatform.String
 	s.DB.QueryRowContext(ctx, `SELECT COUNT(DISTINCT game_id) FROM logs WHERE user_id=? AND deleted_at IS NULL AND substr(COALESCE(finished_at,started_at,created_at),1,4)=?`, userID, time.Now().UTC().Format("2006")).Scan(&st.ThisYear)
-	rows, _ := s.DB.QueryContext(ctx, `SELECT CAST(rating AS INTEGER),COUNT(*) FROM logs WHERE user_id=? AND rating>0 AND primary_rating=1 AND deleted_at IS NULL GROUP BY 1`, userID)
+	rows, _ := s.DB.QueryContext(ctx, `SELECT CAST(rating AS INTEGER),COUNT(*) FROM game_ratings WHERE user_id=? AND rating>0 GROUP BY 1`, userID)
 	if rows != nil {
 		for rows.Next() {
 			var r, n int
@@ -431,7 +431,12 @@ func (s *Store) StatsFor(ctx context.Context, userID int64) (*UserStats, error) 
 		}
 		mrows.Close()
 	}
-	trows, _ := s.DB.QueryContext(ctx, `SELECT `+logCols+` FROM logs l WHERE l.user_id=? AND l.rating>0 AND l.deleted_at IS NULL ORDER BY l.rating DESC LIMIT 5`, userID)
+	trows, _ := s.DB.QueryContext(ctx, `SELECT `+logCols+` FROM logs l
+		JOIN game_ratings gr ON gr.user_id=l.user_id AND gr.game_id=l.game_id
+		WHERE l.user_id=? AND gr.rating>0 AND l.deleted_at IS NULL
+			AND l.id=(SELECT l2.id FROM logs l2 WHERE l2.user_id=l.user_id AND l2.game_id=l.game_id
+				AND l2.deleted_at IS NULL ORDER BY l2.updated_at DESC, l2.id DESC LIMIT 1)
+		ORDER BY gr.rating DESC, gr.updated_at DESC LIMIT 5`, userID)
 	if trows != nil {
 		for trows.Next() {
 			l, err := scanLog(trows)
@@ -704,7 +709,7 @@ func (s *Store) YearRecap(ctx context.Context, userID int64, year int) (map[stri
 	out["games"] = int(games)
 	out["hours"] = hours
 	out["reviews"] = reviews
-	rows, err := s.DB.QueryContext(ctx, `SELECT `+logCols+` FROM logs l WHERE l.user_id=? AND l.deleted_at IS NULL AND substr(COALESCE(l.finished_at,l.started_at,l.created_at),1,4)=? ORDER BY l.rating DESC`, userID, itoa(year))
+	rows, err := s.DB.QueryContext(ctx, `SELECT `+logCols+` FROM logs l WHERE l.user_id=? AND l.deleted_at IS NULL AND substr(COALESCE(l.finished_at,l.started_at,l.created_at),1,4)=? ORDER BY COALESCE((SELECT gr.rating FROM game_ratings gr WHERE gr.user_id=l.user_id AND gr.game_id=l.game_id),l.rating) DESC`, userID, itoa(year))
 	if err != nil {
 		return out, nil, err
 	}

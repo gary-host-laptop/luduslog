@@ -177,7 +177,7 @@ func TestUserGameLogPage(t *testing.T) {
 		t.Fatalf("user game log = %d", code)
 	}
 	for _, want := range []string{
-		"owner", "Journal Game", "Played 1×", "completed", "8.0 / 10",
+		"owner", "Journal Game", "Played 1×", "completed", "6.0 / 10",
 		"Started 2024-01-01", "Finished 2024-01-05", "Platform PC", "Replay",
 		"A full review", "Read the full review →", "Second run", "playing", "Mastered",
 	} {

@@ -74,7 +74,7 @@
       <div class="log-band-row">
         <section class="log-band">
           <div class="log-band-head"><h2>Rating</h2></div>
-          {{$rating := 0.0}}{{if $log}}{{$rating = $log.Rating}}{{end}}
+          {{$rating := .Rating}}
           <div class="log-rating-row">
             <div class="log-rating">
               <label class="log-rating-clear" title="Clear rating"><input type="radio" name="rating" value="0" {{if eq $rating 0.0}}checked{{end}}><i class="ph-light ph-x" aria-hidden="true"></i><span class="sr-only">No rating</span></label>
@@ -88,9 +88,8 @@
                 {{end}}
               </fieldset>
             </div>
-            <label class="check log-inline-check"><input type="hidden" name="primary_rating" value="0"><input type="checkbox" name="primary_rating" value="1" {{if or (not $editing) (and $log $log.PrimaryRating)}}checked{{end}}> Use this as my primary rating for the game</label>
           </div>
-          <div class="field-hint">Half-star precision. One rating per game counts toward the average.</div>
+          <div class="field-hint">Half-star precision. This rating applies to the game, not just this playthrough.</div>
         </section>
 
         <section class="log-band">

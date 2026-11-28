@@ -32,7 +32,7 @@ func TestIssue73EditorPage(t *testing.T) {
 		`class="log-editor-head"`, `data-log-tabs`,
 		`data-log-tab="play"`, `data-log-panel="play"`, `data-log-tab="journal"`, `data-log-panel="journal"`,
 		`data-log-tab="library"`, `data-log-panel="library"`, `data-log-tab="review"`, `data-log-panel="review"`,
-		`name="rating"`, `name="primary_rating"`, `name="status"`,
+		`name="rating"`, `name="status"`,
 		`name="platform_id"`, `name="played_on_id"`, `name="edition_game_id"`, `name="language"`,
 		`name="playtime_hours"`, `name="playtime_minutes"`,
 		`name="time_to_finish_hours"`, `name="time_to_finish_minutes"`,
@@ -51,13 +51,16 @@ func TestIssue73EditorPage(t *testing.T) {
 			t.Errorf("editor missing %q", want)
 		}
 	}
-	for _, unwanted := range []string{"No logs yet", `name="log"`, `class="log-bar`, `<option value="playing"`, `<option value="backlog"`, `<option value="wishlist"`} {
+	for _, unwanted := range []string{"No logs yet", `name="log"`, `class="log-bar`, `<option value="playing"`, `<option value="backlog"`, `<option value="wishlist"`, `name="primary_rating"`, "primary rating"} {
 		if strings.Contains(body, unwanted) {
 			t.Errorf("editor still renders old log bar/status: %q", unwanted)
 		}
 	}
 	if strings.Index(body, `name="rating"`) > strings.Index(body, `data-log-panel="journal"`) {
 		t.Error("rating is not in the Play panel")
+	}
+	if !strings.Contains(body, `value="6" checked`) {
+		t.Error("editor is not showing the central game rating")
 	}
 	if strings.Index(body, `href="/logs/`+itoa(first.ID)+`/edit?tab=play"`) > strings.Index(body, `href="/logs/`+itoa(second.ID)+`/edit?tab=play"`) {
 		t.Error("log chips are not oldest first")
@@ -374,9 +377,9 @@ func TestIssue73LogPageFiltersAndProfileGames(t *testing.T) {
 	if !strings.Contains(body, "Replay run") || strings.Contains(body, "Completed run") {
 		t.Fatal("status filter did not isolate the replayed log")
 	}
-	_, sorted := getBody(t, client, ts.URL+"/users/filteruser/logs/filter-game?sort=rating")
-	if strings.Index(sorted, "Completed run") > strings.Index(sorted, "Replay run") {
-		t.Fatal("rating sort is not highest first")
+	_, listed := getBody(t, client, ts.URL+"/users/filteruser/logs/filter-game")
+	if strings.Count(listed, "4.0 / 10") != 1 || strings.Contains(listed, "9.0 / 10") {
+		t.Fatal("log page should show the central game rating once, not a per-log rating")
 	}
 
 	// The profile Games tab exposes status/rating/platform filters and rows.

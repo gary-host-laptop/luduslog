@@ -126,10 +126,6 @@ func (s *Server) rateGame(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if rating > 0 {
-		if err := s.st.EnsurePlayed(r.Context(), u.ID, g.ID); err != nil {
-			s.serverError(w, r, err)
-			return
-		}
 		s.st.AddActivity(r.Context(), u.ID, "rated", &g.ID, nil, nil, strconv.FormatFloat(rating, 'f', -1, 64), "public")
 		s.flash(w, r, "success", "Rating saved.")
 	} else {
@@ -144,6 +140,7 @@ type logFormData struct {
 	Game              *models.Game
 	Log               *models.Log
 	Logs              []*models.Log
+	Rating            float64
 	Platforms         []models.Platform
 	PlayedOnPlatforms []models.Platform
 	Played            int
@@ -297,6 +294,7 @@ func (s *Server) logEditorData(r *http.Request, u *models.User, g *models.Game, 
 	data.PlayedOnPlatforms = s.st.Platforms(ctx)
 	data.Played = s.logFormPlayed(ctx, u.ID, g.ID, selected)
 	data.GameStatus, _ = s.st.StatusFor(ctx, u.ID, g.ID)
+	data.Rating = s.st.RatingForUser(ctx, u.ID, g.ID)
 	return data
 }
 
@@ -376,15 +374,6 @@ func logInputFrom(r *http.Request, u *models.User, gameID int64) store.LogInput 
 		Draft:        r.FormValue("draft") == "1",
 	}
 	in.Status = store.NormalizePlayedStatus(in.Status)
-	if values, ok := r.Form["primary_rating"]; ok {
-		primary := false
-		for _, v := range values {
-			if v == "1" {
-				primary = true
-			}
-		}
-		in.PrimaryRating = &primary
-	}
 	if v := r.FormValue("platform_id"); v != "" {
 		if id, err := strconv.ParseInt(v, 10, 64); err == nil {
 			in.PlatformID = &id
@@ -404,6 +393,28 @@ func logInputFrom(r *http.Request, u *models.User, gameID int64) store.LogInput 
 		in.Rating = 0
 	}
 	return in
+}
+
+// applyGameRatingForm saves the one game-level rating from the Play tab. An
+// absent field leaves the central rating alone; an explicit zero clears it.
+// Drafts never change the public rating.
+func (s *Server) applyGameRatingForm(r *http.Request, userID, gameID int64, draft bool) error {
+	_ = r.ParseForm()
+	values, ok := r.Form["rating"]
+	if !ok || len(values) == 0 || draft {
+		return nil
+	}
+	rating := atof(strings.TrimSpace(values[0]))
+	if rating < 0 {
+		rating = 0
+	}
+	if rating > 10 {
+		rating = 10
+	}
+	if rating == 0 {
+		return s.st.ClearRating(r.Context(), userID, gameID)
+	}
+	return s.st.SetRating(r.Context(), userID, gameID, rating)
 }
 
 // applyGameShelfForm saves the single game-level shelf from the Play tab.
@@ -456,6 +467,10 @@ func (s *Server) logSubmit(w http.ResponseWriter, r *http.Request) {
 	if existing, _ := s.st.UserGameLogs(r.Context(), u.ID, g.ID, true); len(existing) >= maxLogsPerGame && !in.Draft {
 		s.flash(w, r, "error", "This game already has the maximum number of logs (100). Delete an old log first.")
 		s.redirect(w, r, "/games/"+g.Slug+"/log")
+		return
+	}
+	if err := s.applyGameRatingForm(r, u.ID, g.ID, in.Draft); err != nil {
+		s.serverError(w, r, err)
 		return
 	}
 	l, err := s.st.CreateLog(r.Context(), in)
@@ -516,6 +531,10 @@ func (s *Server) logEdit(w http.ResponseWriter, r *http.Request) {
 	}
 	if !formDurationPresent(r, "time_to_master") {
 		in.TimeToMaster = l.TimeToMaster
+	}
+	if err := s.applyGameRatingForm(r, u.ID, l.GameID, in.Draft); err != nil {
+		s.serverError(w, r, err)
+		return
 	}
 	updated, err := s.st.UpdateLog(r.Context(), id, in)
 	if err != nil {

@@ -85,13 +85,15 @@ func TestQuickRatingWeb(t *testing.T) {
 	if got := postStatus(t, plain, ts.URL+"/games/quick-rate/rate", url.Values{"_csrf": {sess.CSRF}, "rating": {"6"}}); got != http.StatusSeeOther {
 		t.Fatalf("rate = %d", got)
 	}
-	log, err := st.LatestLogFor(ctx, alice.ID, game.ID)
-	if err != nil || log.Rating != 6 || log.Status != "played" {
-		t.Fatalf("quick rating log = %+v, %v", log, err)
+	if got := st.RatingForUser(ctx, alice.ID, game.ID); got != 6 {
+		t.Fatalf("central rating = %v, want 6", got)
+	}
+	if _, err := st.LatestLogFor(ctx, alice.ID, game.ID); err == nil {
+		t.Fatal("quick rating created a log")
 	}
 	status, _ := st.StatusFor(ctx, alice.ID, game.ID)
-	if status.Played < 1 {
-		t.Fatalf("rating did not mark played: %+v", status)
+	if status.Played != 0 || status.Shelf != "" {
+		t.Fatalf("rating changed the game status: %+v", status)
 	}
 	_, body = getBody(t, client, ts.URL+"/games/quick-rate")
 	if !strings.Contains(body, `value="6" checked`) || !strings.Contains(body, "6.0 out of 10") || !strings.Contains(body, `aria-label="Clear rating"`) || !strings.Contains(body, "quick-rate-clear") {
@@ -104,10 +106,15 @@ func TestQuickRatingWeb(t *testing.T) {
 	if got := postStatus(t, plain, ts.URL+"/games/quick-rate/rate", url.Values{"_csrf": {sess.CSRF}, "clear": {"1"}}); got != http.StatusSeeOther {
 		t.Fatalf("clear rating = %d", got)
 	}
-	log, _ = st.LatestLogFor(ctx, alice.ID, game.ID)
+	if got := st.RatingForUser(ctx, alice.ID, game.ID); got != 0 {
+		t.Fatalf("rating after clear = %v, want 0", got)
+	}
+	if _, err := st.LatestLogFor(ctx, alice.ID, game.ID); err == nil {
+		t.Fatal("clearing a rating created a log")
+	}
 	status, _ = st.StatusFor(ctx, alice.ID, game.ID)
-	if log.Rating != 0 || status.Played < 1 {
-		t.Fatalf("clearing rating damaged rating/play count: rating=%v played=%d", log.Rating, status.Played)
+	if status.Played != 0 || status.Shelf != "" {
+		t.Fatalf("clearing a rating changed the game status: %+v", status)
 	}
 	_, body = getBody(t, client, ts.URL+"/games/quick-rate")
 	if strings.Contains(body, "quick-rate-clear") {

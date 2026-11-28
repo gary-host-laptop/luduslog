@@ -48,6 +48,9 @@ func scanLog(row scanner) (*models.Log, error) {
 }
 
 func (s *Store) hydrateLog(ctx context.Context, l *models.Log) {
+	// Ratings belong to the game, not the playthrough. Every hydrated log shows
+	// the same value; logs.rating remains in the database for old exports.
+	l.Rating = s.RatingForUser(ctx, l.UserID, l.GameID)
 	if g, err := s.GameByID(ctx, l.GameID); err == nil {
 		l.Game = g
 	}
@@ -119,9 +122,6 @@ type LogInput struct {
 	Language      string
 	Draft         bool
 	AutoCreated   bool
-	// PrimaryRating is nil when the caller did not choose; new rated logs then
-	// become the primary rating automatically.
-	PrimaryRating *bool
 }
 
 func (in LogInput) statusOr() string {
@@ -165,114 +165,67 @@ func ValidShelf(v string) bool {
 	return false
 }
 
-func logIsPrimary(in LogInput) bool {
-	if in.PrimaryRating != nil {
-		return *in.PrimaryRating && !in.Draft
+// ratingForLogSave writes a new rating to the central table and returns the
+// value to mirror into logs.rating. Existing logs pick up the central rating
+// when they are saved, so exports always carry the current game-level value.
+func (s *Store) ratingForLogSave(ctx context.Context, in LogInput) (float64, error) {
+	rating := clampRating(in.Rating)
+	if !in.Draft && rating > 0 {
+		if err := s.SetRating(ctx, in.UserID, in.GameID, rating); err != nil {
+			return 0, err
+		}
 	}
-	return in.Rating > 0 && !in.Draft
+	if central := s.RatingForUser(ctx, in.UserID, in.GameID); central > 0 {
+		return central, nil
+	}
+	return rating, nil
 }
 
 func (s *Store) CreateLog(ctx context.Context, in LogInput) (*models.Log, error) {
 	now := Now()
+	rating, err := s.ratingForLogSave(ctx, in)
+	if err != nil {
+		return nil, err
+	}
 	res, err := s.DB.ExecContext(ctx, `INSERT INTO logs(user_id,game_id,name,rating,review,spoiler,status,replay,mastered,
 		difficulty,platform_id,played_on_id,ownership,storefront,edition_game_id,started_at,finished_at,time_to_finish,
 		time_to_master,playtime,sync_sessions,primary_rating,language,draft,auto_created,created_at,updated_at)
 		VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
-		in.UserID, in.GameID, in.Name, in.Rating, in.Review, b2i(in.Spoiler), NormalizePlayedStatus(in.statusOr()), b2i(in.Replay),
+		in.UserID, in.GameID, in.Name, rating, in.Review, b2i(in.Spoiler), NormalizePlayedStatus(in.statusOr()), b2i(in.Replay),
 		b2i(in.Mastered), in.Difficulty, in.PlatformID, in.PlayedOnID, in.Ownership, in.Storefront, in.EditionGameID,
 		nullStr(in.StartedAt), nullStr(in.FinishedAt), in.TimeToFinish, in.TimeToMaster, in.Playtime,
-		b2i(in.SyncSessions), b2i(logIsPrimary(in)), in.Language, b2i(in.Draft), b2i(in.AutoCreated), now, now)
+		b2i(in.SyncSessions), 0, in.Language, b2i(in.Draft), b2i(in.AutoCreated), now, now)
 	if err != nil {
 		return nil, err
 	}
 	id, _ := res.LastInsertId()
-	if in.Rating > 0 && !in.Draft {
-		s.SetPrimaryRating(ctx, id, in.UserID, in.GameID)
-	}
 	s.RefreshGameStats(ctx, in.GameID)
 	return s.LogByID(ctx, id)
 }
 
 func (s *Store) UpdateLog(ctx context.Context, id int64, in LogInput) (*models.Log, error) {
-	_, err := s.DB.ExecContext(ctx, `UPDATE logs SET name=?,rating=?,review=?,spoiler=?,status=?,replay=?,mastered=?,
+	rating, err := s.ratingForLogSave(ctx, in)
+	if err != nil {
+		return nil, err
+	}
+	_, err = s.DB.ExecContext(ctx, `UPDATE logs SET name=?,rating=?,review=?,spoiler=?,status=?,replay=?,mastered=?,
 		difficulty=?,platform_id=?,played_on_id=?,ownership=?,storefront=?,edition_game_id=?,started_at=?,finished_at=?,
 		time_to_finish=?,time_to_master=?,playtime=?,sync_sessions=?,language=?,draft=?,updated_at=? WHERE id=? AND user_id=?`,
-		in.Name, in.Rating, in.Review, b2i(in.Spoiler), NormalizePlayedStatus(in.statusOr()), b2i(in.Replay), b2i(in.Mastered),
+		in.Name, rating, in.Review, b2i(in.Spoiler), NormalizePlayedStatus(in.statusOr()), b2i(in.Replay), b2i(in.Mastered),
 		in.Difficulty, in.PlatformID, in.PlayedOnID, in.Ownership, in.Storefront, in.EditionGameID,
 		nullStr(in.StartedAt), nullStr(in.FinishedAt), in.TimeToFinish, in.TimeToMaster, in.Playtime,
 		b2i(in.SyncSessions), in.Language, b2i(in.Draft), Now(), id, in.UserID)
 	if err != nil {
 		return nil, err
 	}
-	if in.PrimaryRating != nil && !*in.PrimaryRating {
-		s.DB.ExecContext(ctx, `UPDATE logs SET primary_rating=0 WHERE id=?`, id)
-	} else if in.Rating > 0 && in.Draft == false {
-		s.SetPrimaryRating(ctx, id, in.UserID, in.GameID)
-	}
 	s.RefreshGameStats(ctx, in.GameID)
 	return s.LogByID(ctx, id)
 }
 
-// RateGame records a 0–10 rating without creating a review or replay log.
-// When no log exists a minimal played log is created. A zero rating clears the
-// latest log's rating. Existing reviews, statuses and play counts are kept.
+// RateGame records a 0-10 rating on the game itself. It never creates a log,
+// changes a shelf, or changes the play counter. A zero rating clears it.
 func (s *Store) RateGame(ctx context.Context, userID, gameID int64, rating float64) error {
-	if rating < 0 {
-		rating = 0
-	}
-	if rating > 10 {
-		rating = 10
-	}
-	latest, err := scanLog(s.DB.QueryRowContext(ctx, `SELECT `+logCols+` FROM logs l
-		WHERE l.user_id=? AND l.game_id=? AND l.deleted_at IS NULL AND l.draft=0
-		ORDER BY l.updated_at DESC LIMIT 1`, userID, gameID))
-	if err == sql.ErrNoRows {
-		if rating == 0 {
-			return nil
-		}
-		_, err = s.CreateLog(ctx, LogInput{UserID: userID, GameID: gameID, Rating: rating, Status: "played"})
-		return err
-	}
-	if err != nil {
-		return err
-	}
-	in := logInputFromLog(latest)
-	in.Rating = rating
-	if _, err := s.UpdateLog(ctx, latest.ID, in); err != nil {
-		return err
-	}
-	if rating == 0 {
-		_, err = s.DB.ExecContext(ctx, `UPDATE logs SET rating=0,primary_rating=0 WHERE id=?`, latest.ID)
-	}
-	return err
-}
-
-// logInputFromLog copies a stored log back into the editable input shape so a
-// rating-only update leaves every other field untouched.
-func logInputFromLog(l *models.Log) LogInput {
-	return LogInput{
-		UserID: l.UserID, GameID: l.GameID, Name: l.Name, Rating: l.Rating, Review: l.Review,
-		Spoiler: l.Spoiler, Status: l.Status, Replay: l.Replay, Mastered: l.Mastered,
-		Difficulty: l.Difficulty, PlatformID: l.PlatformID, PlayedOnID: l.PlayedOnID,
-		Ownership: l.Ownership, Storefront: l.Storefront, EditionGameID: l.EditionGameID,
-		StartedAt: l.StartedAt, FinishedAt: l.FinishedAt, TimeToFinish: l.TimeToFinish,
-		TimeToMaster: l.TimeToMaster, Playtime: l.Playtime, SyncSessions: l.SyncSessions,
-		Language: l.Language, Draft: l.Draft, AutoCreated: l.AutoCreated,
-		PrimaryRating: &l.PrimaryRating,
-	}
-}
-
-// SetPrimaryRating makes one log the rating that counts for the game. Other
-// logs by the user are demoted but their rating is remembered.
-func (s *Store) SetPrimaryRating(ctx context.Context, logID, userID, gameID int64) error {
-	tx, err := s.DB.BeginTx(ctx, nil)
-	if err != nil {
-		return err
-	}
-	defer tx.Rollback()
-	tx.ExecContext(ctx, `UPDATE logs SET primary_rating=0 WHERE user_id=? AND game_id=?`, userID, gameID)
-	tx.ExecContext(ctx, `UPDATE logs SET primary_rating=1 WHERE id=?`, logID)
-	return tx.Commit()
+	return s.SetRating(ctx, userID, gameID, rating)
 }
 
 // RenameLog changes the review/log title without touching any other field.
@@ -436,7 +389,7 @@ func reviewOrder(sortKey, direction string) string {
 	}
 	switch sortKey {
 	case "rating":
-		return "l.rating " + dir + ", l.created_at " + dir + ", l.id " + dir
+		return "COALESCE((SELECT gr.rating FROM game_ratings gr WHERE gr.user_id=l.user_id AND gr.game_id=l.game_id),l.rating) " + dir + ", l.created_at " + dir + ", l.id " + dir
 	case "popularity":
 		return "(SELECT COUNT(*) FROM log_likes ll WHERE ll.log_id=l.id) " + dir + ", l.created_at " + dir + ", l.id " + dir
 	default:
@@ -950,7 +903,7 @@ func (s *Store) GameStatusCounts(ctx context.Context, gameID int64) map[string]i
 // stars on the five-star scale used by game pages.
 func (s *Store) RatingDistribution(ctx context.Context, gameID int64) map[int]int {
 	out := map[int]int{}
-	rows, err := s.DB.QueryContext(ctx, `SELECT rating,COUNT(*) FROM logs WHERE game_id=? AND rating>0 AND primary_rating=1 AND deleted_at IS NULL GROUP BY rating`, gameID)
+	rows, err := s.DB.QueryContext(ctx, `SELECT rating,COUNT(*) FROM game_ratings WHERE game_id=? AND rating>0 GROUP BY rating`, gameID)
 	if err != nil {
 		return out
 	}
@@ -968,13 +921,6 @@ func (s *Store) RatingDistribution(ctx context.Context, gameID int64) map[int]in
 		out[bucket] += n
 	}
 	return out
-}
-
-// RatingForUser returns the rating that counts, if the user has one.
-func (s *Store) RatingForUser(ctx context.Context, userID, gameID int64) float64 {
-	var r float64
-	s.DB.QueryRowContext(ctx, `SELECT rating FROM logs WHERE user_id=? AND game_id=? AND primary_rating=1 AND deleted_at IS NULL AND rating>0 ORDER BY updated_at DESC LIMIT 1`, userID, gameID).Scan(&r)
-	return r
 }
 
 // RecentlyPlayed is a game on the user's played or currently-playing shelf,
@@ -995,9 +941,7 @@ func (s *Store) RecentlyPlayedGames(ctx context.Context, userID int64, limit int
 	rows, err := s.DB.QueryContext(ctx, `SELECT `+gameCols+`,
 		CASE WHEN st.shelf='playing' THEN 'Playing' ELSE 'Played' END,
 		COALESCE(st.shelf_at,st.updated_at),
-		COALESCE((SELECT l.rating FROM logs l WHERE l.user_id=st.user_id AND l.game_id=st.game_id
-			AND l.primary_rating=1 AND l.rating>0 AND l.deleted_at IS NULL
-			ORDER BY l.updated_at DESC LIMIT 1),0)
+		COALESCE((SELECT gr.rating FROM game_ratings gr WHERE gr.user_id=st.user_id AND gr.game_id=st.game_id AND gr.rating>0),0)
 		FROM statuses st JOIN games g ON g.id=st.game_id
 		WHERE st.user_id=? AND st.shelf IN ('playing','played')
 		ORDER BY COALESCE(st.shelf_at,st.updated_at) DESC, g.id DESC
@@ -1058,9 +1002,7 @@ func (s *Store) ShelfGames(ctx context.Context, userID int64, shelf string, limi
 	condition := "st.shelf=?"
 	eventAt := "COALESCE(st.shelf_at,st.updated_at)"
 	rows, err := s.DB.QueryContext(ctx, `SELECT `+gameCols+`,`+eventAt+`,
-		COALESCE((SELECT l.rating FROM logs l WHERE l.user_id=st.user_id AND l.game_id=st.game_id
-			AND l.primary_rating=1 AND l.rating>0 AND l.deleted_at IS NULL
-			ORDER BY l.updated_at DESC LIMIT 1),0)
+		COALESCE((SELECT gr.rating FROM game_ratings gr WHERE gr.user_id=st.user_id AND gr.game_id=st.game_id AND gr.rating>0),0)
 		FROM statuses st JOIN games g ON g.id=st.game_id
 		WHERE st.user_id=? AND `+condition+`
 		ORDER BY `+eventAt+` DESC, g.id DESC LIMIT ?`, userID, shelf, limit)
@@ -1474,8 +1416,7 @@ func (s *Store) UserGameRows(ctx context.Context, userID int64) ([]UserGameRow, 
 	rows, err := s.DB.QueryContext(ctx, `SELECT `+gameCols+`,
 		COALESCE(st.shelf,''),COALESCE(st.played,0),
 		COALESCE(st.updated_at,g.updated_at),
-		COALESCE((SELECT l.rating FROM logs l WHERE l.user_id=x.user_id AND l.game_id=x.game_id
-			AND l.primary_rating=1 AND l.rating>0 AND l.deleted_at IS NULL ORDER BY l.updated_at DESC LIMIT 1),0),
+		COALESCE((SELECT gr.rating FROM game_ratings gr WHERE gr.user_id=x.user_id AND gr.game_id=x.game_id AND gr.rating>0),0),
 		COALESCE((SELECT SUM(l.playtime) FROM logs l WHERE l.user_id=x.user_id AND l.game_id=x.game_id AND l.deleted_at IS NULL),0),
 		COALESCE((SELECT MAX(l.mastered) FROM logs l WHERE l.user_id=x.user_id AND l.game_id=x.game_id AND l.deleted_at IS NULL),0),
 		COALESCE((SELECT MAX(CASE WHEN l.review<>'' THEN 1 ELSE 0 END) FROM logs l WHERE l.user_id=x.user_id AND l.game_id=x.game_id AND l.deleted_at IS NULL),0),
@@ -1546,6 +1487,7 @@ func (s *Store) DeleteGameData(ctx context.Context, userID, gameID int64) error 
 		`DELETE FROM hidden_games WHERE user_id=? AND game_id=?`,
 		`DELETE FROM statuses WHERE user_id=? AND game_id=?`,
 		`DELETE FROM activities WHERE user_id=? AND game_id=?`,
+		`DELETE FROM game_ratings WHERE user_id=? AND game_id=?`,
 		`DELETE FROM game_likes WHERE user_id=? AND game_id=?`,
 	} {
 		if _, err := tx.ExecContext(ctx, stmt, userID, gameID); err != nil {

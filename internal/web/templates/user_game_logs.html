@@ -70,7 +70,6 @@
       <div class="log-head">
         <span>{{timeago $log.CreatedAt}}</span>
         <span class="pill">{{playedStatusLabel $log.Status}}</span>
-        {{if $log.Rating}}<span>{{stars $log.Rating 5}}</span><span>{{rating $log.Rating 10}} / 10</span>{{end}}
         {{if $log.Replay}}<span class="pill">Replay</span>{{end}}
         {{if $log.Mastered}}<span class="pill">Mastered</span>{{end}}
         {{if $log.Draft}}<span class="draft-badge">Draft</span>{{end}}

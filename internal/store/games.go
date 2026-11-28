@@ -1016,8 +1016,8 @@ func (s *Store) RefreshGameStats(ctx context.Context, id int64) error {
 
 func refreshGameStats(ctx context.Context, q execQueryer, id int64) error {
 	_, err := q.ExecContext(ctx, `UPDATE games SET
-		avg_rating=COALESCE((SELECT AVG(l.rating) FROM logs l WHERE l.game_id=games.id AND l.rating>0 AND l.primary_rating=1 AND l.deleted_at IS NULL),0),
-		rating_count=(SELECT COUNT(*) FROM logs l WHERE l.game_id=games.id AND l.rating>0 AND l.primary_rating=1 AND l.deleted_at IS NULL),
+		avg_rating=COALESCE((SELECT AVG(gr.rating) FROM game_ratings gr WHERE gr.game_id=games.id AND gr.rating>0),0),
+		rating_count=(SELECT COUNT(*) FROM game_ratings gr WHERE gr.game_id=games.id AND gr.rating>0),
 		reviews=(SELECT COUNT(*) FROM logs l WHERE l.game_id=games.id AND l.review<>'' AND l.deleted_at IS NULL),
 		plays=(SELECT COUNT(*) FROM statuses st WHERE st.game_id=games.id AND st.played>0),
 		playing=(SELECT COUNT(*) FROM statuses st WHERE st.game_id=games.id AND st.shelf='playing'),
