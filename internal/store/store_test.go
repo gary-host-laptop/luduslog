@@ -581,6 +581,12 @@ func TestPlayedCountAndLikeToggle(t *testing.T) {
 	if err := st.SetPlayedCount(ctx, bob.ID, game.ID, 4); err != nil {
 		t.Fatal(err)
 	}
+	if err := st.SetShelf(ctx, alice.ID, game.ID, "played"); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.SetShelf(ctx, bob.ID, game.ID, "played"); err != nil {
+		t.Fatal(err)
+	}
 	updated, _ := st.GameByID(ctx, game.ID)
 	if updated.Plays != 2 {
 		t.Fatalf("public played count = %d, want 2 distinct players", updated.Plays)
@@ -687,66 +693,58 @@ func TestRecentlyPlayedGamesTracksShelfEvents(t *testing.T) {
 	old, _ := st.SaveGame(ctx, &models.Game{IGDBID: -801, Slug: "old-played", Title: "Old Played", ReleaseStatus: "released"})
 	playing, _ := st.SaveGame(ctx, &models.Game{IGDBID: -802, Slug: "now-playing", Title: "Now Playing", ReleaseStatus: "released"})
 	rated, _ := st.SaveGame(ctx, &models.Game{IGDBID: -803, Slug: "rated-played", Title: "Rated Played", ReleaseStatus: "released"})
-	both, _ := st.SaveGame(ctx, &models.Game{IGDBID: -804, Slug: "both-shelves", Title: "Both Shelves", ReleaseStatus: "released"})
 	backlog, _ := st.SaveGame(ctx, &models.Game{IGDBID: -805, Slug: "backlog-only", Title: "Backlog Only", ReleaseStatus: "released"})
 
-	if err := st.SetPlayedCount(ctx, alice.ID, old.ID, 1); err != nil {
+	if err := st.SetShelf(ctx, alice.ID, old.ID, "played"); err != nil {
 		t.Fatal(err)
 	}
-	if err := st.SetStatusFlag(ctx, alice.ID, playing.ID, "playing", true); err != nil {
+	if err := st.SetShelf(ctx, alice.ID, playing.ID, "playing"); err != nil {
 		t.Fatal(err)
 	}
-	if err := st.EnsurePlayed(ctx, alice.ID, rated.ID); err != nil {
+	if err := st.SetShelf(ctx, alice.ID, rated.ID, "played"); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := st.CreateLog(ctx, LogInput{UserID: alice.ID, GameID: rated.ID, Rating: 9, Status: "played"}); err != nil {
 		t.Fatal(err)
 	}
-	if err := st.SetStatuses(ctx, alice.ID, both.ID, true, true, false, false, false); err != nil {
-		t.Fatal(err)
-	}
-	if err := st.SetStatusFlag(ctx, alice.ID, backlog.ID, "backlog", true); err != nil {
+	if err := st.SetShelf(ctx, alice.ID, backlog.ID, "backlog"); err != nil {
 		t.Fatal(err)
 	}
 
-	setEventTimes := func(gameID int64, playedAt, playingAt any, updatedAt string) {
+	setEventTimes := func(gameID int64, shelfAt string) {
 		t.Helper()
-		if _, err := st.DB.ExecContext(ctx, `UPDATE statuses SET played_at=?,playing_at=?,updated_at=? WHERE user_id=? AND game_id=?`,
-			playedAt, playingAt, updatedAt, alice.ID, gameID); err != nil {
+		if _, err := st.DB.ExecContext(ctx, `UPDATE statuses SET shelf_at=?,updated_at=? WHERE user_id=? AND game_id=?`,
+			shelfAt, shelfAt, alice.ID, gameID); err != nil {
 			t.Fatal(err)
 		}
 	}
-	setEventTimes(old.ID, "2026-01-02T12:00:00Z", nil, "2026-01-02T12:00:00Z")
-	setEventTimes(playing.ID, nil, "2026-02-03T12:00:00Z", "2026-02-03T12:00:00Z")
-	setEventTimes(rated.ID, "2026-03-04T12:00:00Z", nil, "2026-03-04T12:00:00Z")
-	setEventTimes(both.ID, "2026-04-06T12:00:00Z", "2026-04-05T12:00:00Z", "2026-04-06T12:00:00Z")
+	setEventTimes(old.ID, "2026-01-02T12:00:00Z")
+	setEventTimes(playing.ID, "2026-02-03T12:00:00Z")
+	setEventTimes(rated.ID, "2026-03-04T12:00:00Z")
 
-	// Changing an unrelated shelf flag must not make an old played game recent.
-	if err := st.SetStatusFlag(ctx, alice.ID, old.ID, "backlog", true); err != nil {
+	// Changing the play counter must not change the shelf or its event time.
+	if err := st.SetPlayedCount(ctx, alice.ID, old.ID, 7); err != nil {
 		t.Fatal(err)
 	}
 	oldStatus, _ := st.StatusFor(ctx, alice.ID, old.ID)
-	if want := time.Date(2026, 1, 2, 12, 0, 0, 0, time.UTC); !oldStatus.PlayedAt.Equal(want) {
-		t.Fatalf("backlog edit changed played_at to %v", oldStatus.PlayedAt)
-	}
-	if oldStatus.BacklogAt.IsZero() {
-		t.Fatal("backlog edit did not record backlog_at")
+	if want := time.Date(2026, 1, 2, 12, 0, 0, 0, time.UTC); !oldStatus.ShelfAt.Equal(want) || oldStatus.Shelf != "played" {
+		t.Fatalf("play count changed the shelf: %+v", oldStatus)
 	}
 
 	entries, err := st.RecentlyPlayedGames(ctx, alice.ID, 6)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(entries) != 4 {
-		t.Fatalf("recently played = %d entries, want 4", len(entries))
+	if len(entries) != 3 {
+		t.Fatalf("recently played = %d entries, want 3", len(entries))
 	}
-	wantOrder := []string{"Both Shelves", "Rated Played", "Now Playing", "Old Played"}
+	wantOrder := []string{"Rated Played", "Now Playing", "Old Played"}
 	for i, title := range wantOrder {
 		if entries[i].Game.Title != title {
 			t.Fatalf("entry %d = %q, want %q", i, entries[i].Game.Title, title)
 		}
 	}
-	if entries[0].Event != "Played" || entries[1].Rating != 9 || entries[2].Event != "Playing" {
+	if entries[0].Event != "Played" || entries[0].Rating != 9 || entries[1].Event != "Playing" {
 		t.Fatalf("unexpected recently played data: %+v", entries)
 	}
 	for _, entry := range entries {
@@ -755,26 +753,26 @@ func TestRecentlyPlayedGamesTracksShelfEvents(t *testing.T) {
 		}
 	}
 
-	if err := st.SetStatusFlag(ctx, alice.ID, playing.ID, "playing", false); err != nil {
+	if err := st.SetShelf(ctx, alice.ID, playing.ID, ""); err != nil {
 		t.Fatal(err)
 	}
 	playingStatus, _ := st.StatusFor(ctx, alice.ID, playing.ID)
-	if !playingStatus.PlayingAt.IsZero() {
-		t.Fatal("leaving the playing shelf did not clear playing_at")
+	if !playingStatus.PlayingAt.IsZero() || playingStatus.Shelf != "" {
+		t.Fatalf("leaving the playing shelf did not clear it: %+v", playingStatus)
 	}
 	if err := st.SetPlayedCount(ctx, alice.ID, old.ID, 0); err != nil {
 		t.Fatal(err)
 	}
 	oldStatus, _ = st.StatusFor(ctx, alice.ID, old.ID)
-	if !oldStatus.PlayedAt.IsZero() {
-		t.Fatal("removing the last play did not clear played_at")
+	if oldStatus.Shelf != "played" {
+		t.Fatalf("clearing the play counter moved the shelf: %+v", oldStatus)
 	}
 	if err := st.SetPlayedCount(ctx, alice.ID, old.ID, 1); err != nil {
 		t.Fatal(err)
 	}
 	oldStatus, _ = st.StatusFor(ctx, alice.ID, old.ID)
-	if oldStatus.PlayedAt.IsZero() {
-		t.Fatal("replaying did not record a new played_at")
+	if oldStatus.Shelf != "played" {
+		t.Fatalf("replaying moved the shelf: %+v", oldStatus)
 	}
 }
 

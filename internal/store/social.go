@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"database/sql"
+	"net/url"
 	"strings"
 	"time"
 
@@ -12,7 +13,7 @@ import (
 // ---- comments ----
 
 const commentCols = `c.id,c.user_id,c.subject_type,c.subject_id,c.parent_id,c.body,c.remote_actor,c.remote_name,
-c.remote_avatar,c.deleted_at,c.created_at`
+c.remote_avatar,c.ap_id,c.in_reply_to,c.deleted_at,c.created_at`
 
 func scanComment(row scanner) (*models.Comment, error) {
 	var c models.Comment
@@ -20,7 +21,7 @@ func scanComment(row scanner) (*models.Comment, error) {
 	var deleted sql.NullString
 	var created string
 	err := row.Scan(&c.ID, &userID, &c.SubjectType, &c.SubjectID, &parent, &c.Body, &c.RemoteActor, &c.RemoteName,
-		&c.RemoteAvatar, &deleted, &created)
+		&c.RemoteAvatar, &c.APID, &c.InReplyTo, &deleted, &created)
 	if err != nil {
 		return nil, err
 	}
@@ -104,6 +105,10 @@ func (s *Store) CommentSubjectOwner(ctx context.Context, subjectType string, sub
 		}
 	case "list":
 		if err := s.DB.QueryRowContext(ctx, `SELECT user_id FROM lists WHERE id=? AND deleted_at IS NULL`, subjectID).Scan(&owner); err != nil {
+			return 0, false
+		}
+	case "post":
+		if err := s.DB.QueryRowContext(ctx, `SELECT user_id FROM posts WHERE id=? AND deleted_at IS NULL`, subjectID).Scan(&owner); err != nil {
 			return 0, false
 		}
 	default:
@@ -385,7 +390,9 @@ func (s *Store) StatsFor(ctx context.Context, userID int64) (*UserStats, error) 
 	st := &UserStats{RatingCounts: map[int]int{}, MonthlyPlays: map[string]int{}}
 	s.DB.QueryRowContext(ctx, `SELECT
 		COALESCE(SUM(CASE WHEN played>0 THEN 1 ELSE 0 END),0),
-		COALESCE(SUM(playing),0),COALESCE(SUM(backlog),0),COALESCE(SUM(wishlist),0)
+		COALESCE(SUM(CASE WHEN shelf='playing' THEN 1 ELSE 0 END),0),
+		COALESCE(SUM(CASE WHEN shelf='backlog' THEN 1 ELSE 0 END),0),
+		COALESCE(SUM(CASE WHEN shelf='wishlist' THEN 1 ELSE 0 END),0)
 		FROM statuses WHERE user_id=?`, userID).Scan(&st.GamesPlayed, &st.GamesPlaying, &st.GamesBacklog, &st.GamesWishlist)
 	s.DB.QueryRowContext(ctx, `SELECT COALESCE(SUM(playtime),0) FROM logs WHERE user_id=? AND deleted_at IS NULL`, userID).Scan(&st.TotalHours)
 	s.DB.QueryRowContext(ctx, `SELECT COALESCE(AVG(rating),0) FROM logs WHERE user_id=? AND rating>0 AND primary_rating=1 AND deleted_at IS NULL`, userID).Scan(&st.AvgRating)
@@ -547,9 +554,25 @@ func (s *Store) CreateReport(ctx context.Context, reporterID *int64, targetType 
 	return err
 }
 
+// CreateReportDetailed records a report with optional remote reporter/instance
+// metadata and whether a Flag was forwarded to the remote instance.
+func (s *Store) CreateReportDetailed(ctx context.Context, reporterID *int64, targetType string, targetID int64, targetURL, reason, details, remoteReporter, sourceInstance string, forwarded bool) (int64, error) {
+	res, err := s.DB.ExecContext(ctx, `INSERT INTO reports(reporter_id,target_type,target_id,target_url,reason,details,status,remote_reporter,source_instance,forwarded,created_at)
+		VALUES(?,?,?,?,?,?,'open',?,?,?,?)`, reporterID, targetType, targetID, targetURL, reason, details, remoteReporter, sourceInstance, b2i(forwarded), Now())
+	if err != nil {
+		return 0, err
+	}
+	return res.LastInsertId()
+}
+
+func (s *Store) MarkReportForwarded(ctx context.Context, id int64) error {
+	_, err := s.DB.ExecContext(ctx, `UPDATE reports SET forwarded=1 WHERE id=?`, id)
+	return err
+}
+
 func (s *Store) Reports(ctx context.Context, status string) ([]*models.Report, error) {
-	rows, err := s.DB.QueryContext(ctx, `SELECT id,reporter_id,target_type,target_id,target_url,reason,details,status,created_at
-		FROM reports WHERE (?='' OR status=?) ORDER BY created_at DESC`, status, status)
+	rows, err := s.DB.QueryContext(ctx, `SELECT id,reporter_id,target_type,target_id,target_url,reason,details,status,created_at,
+		remote_reporter,source_instance,forwarded FROM reports WHERE (?='' OR status=?) ORDER BY created_at DESC`, status, status)
 	if err != nil {
 		return nil, err
 	}
@@ -558,7 +581,10 @@ func (s *Store) Reports(ctx context.Context, status string) ([]*models.Report, e
 		r := &models.Report{}
 		var reporter sql.NullInt64
 		var created string
-		rows.Scan(&r.ID, &reporter, &r.TargetType, &r.TargetID, &r.TargetURL, &r.Reason, &r.Details, &r.Status, &created)
+		var forwarded int
+		rows.Scan(&r.ID, &reporter, &r.TargetType, &r.TargetID, &r.TargetURL, &r.Reason, &r.Details, &r.Status, &created,
+			&r.RemoteReporter, &r.SourceInstance, &forwarded)
+		r.Forwarded = forwarded == 1
 		if reporter.Valid {
 			r.ReporterID = &reporter.Int64
 		}
@@ -584,7 +610,47 @@ func (s *Store) Reports(ctx context.Context, status string) ([]*models.Report, e
 		}
 		r.Reporter = name
 	}
+	for _, r := range out {
+		s.hydrateReportTarget(ctx, r)
+	}
 	return out, nil
+}
+
+func (s *Store) hydrateReportTarget(ctx context.Context, r *models.Report) {
+	switch r.TargetType {
+	case "post":
+		p, err := s.PostByID(ctx, r.TargetID, 0)
+		if err == nil && p != nil {
+			if p.User != nil {
+				r.TargetAuthor = p.User.Username
+			}
+			r.ContentPreview = p.Body
+			if p.URL != "" {
+				r.TargetURL = p.URL
+			}
+		}
+	case "log", "review":
+		if l, err := s.LogByID(ctx, r.TargetID); err == nil {
+			if l.User != nil {
+				r.TargetAuthor = l.User.Username
+			}
+			r.ContentPreview = l.Review
+		}
+	case "comment":
+		if c, err := s.CommentByID(ctx, r.TargetID); err == nil {
+			if c.User != nil {
+				r.TargetAuthor = c.User.Username
+			}
+			r.ContentPreview = c.Body
+		}
+	case "user":
+		if u, err := s.UserByID(ctx, r.TargetID); err == nil {
+			r.TargetAuthor = u.Username
+		}
+	}
+	if raw, err := url.Parse(r.TargetURL); err == nil && raw.Host != "" {
+		r.TargetInstance = raw.Host
+	}
 }
 
 func (s *Store) ResolveReport(ctx context.Context, id int64, status string) error {

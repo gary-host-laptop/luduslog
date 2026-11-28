@@ -104,7 +104,7 @@ func TestRecentlyAnticipatedRecentRankingAndFallback(t *testing.T) {
 	today := save("today", "Today", 0, false)
 
 	wish := func(u models.User, g *models.Game) {
-		if err := st.SetStatusFlag(ctx, u.ID, g.ID, "wishlist", true); err != nil {
+		if err := st.SetShelf(ctx, u.ID, g.ID, "wishlist"); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -125,10 +125,10 @@ func TestRecentlyAnticipatedRecentRankingAndFallback(t *testing.T) {
 
 	old := time.Now().UTC().AddDate(0, 0, -90).Format(time.RFC3339)
 	older := time.Now().UTC().AddDate(0, 0, -60).Format(time.RFC3339)
-	if _, err := st.DB.ExecContext(ctx, `UPDATE statuses SET wishlist_at=? WHERE game_id=?`, old, classic.ID); err != nil {
+	if _, err := st.DB.ExecContext(ctx, `UPDATE statuses SET shelf_at=? WHERE game_id=?`, old, classic.ID); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := st.DB.ExecContext(ctx, `UPDATE statuses SET wishlist_at=? WHERE game_id=?`, older, runner.ID); err != nil {
+	if _, err := st.DB.ExecContext(ctx, `UPDATE statuses SET shelf_at=? WHERE game_id=?`, older, runner.ID); err != nil {
 		t.Fatal(err)
 	}
 
@@ -164,7 +164,7 @@ func TestRecentlyAnticipatedRecentRankingAndFallback(t *testing.T) {
 	}
 }
 
-func TestWishlistTimestampSetPreserveClear(t *testing.T) {
+func TestShelfTimestampSetAndClear(t *testing.T) {
 	st := testStore(t)
 	ctx := context.Background()
 	u, err := st.CreateUser(ctx, "timekeeper", "timekeeper@example.com", "password123", false)
@@ -176,75 +176,85 @@ func TestWishlistTimestampSetPreserveClear(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if err := st.SetStatusFlag(ctx, u.ID, g.ID, "wishlist", true); err != nil {
+	if err := st.SetShelf(ctx, u.ID, g.ID, "wishlist"); err != nil {
 		t.Fatal(err)
 	}
 	status, err := st.StatusFor(ctx, u.ID, g.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if status.WishlistAt.IsZero() {
-		t.Fatal("wishlist_at not set")
+	if status.ShelfAt.IsZero() || status.WishlistAt.IsZero() {
+		t.Fatal("shelf time not set")
 	}
 
 	old := time.Date(2025, 1, 2, 3, 4, 5, 0, time.UTC)
-	if _, err := st.DB.ExecContext(ctx, `UPDATE statuses SET wishlist_at=? WHERE user_id=? AND game_id=?`, old.Format(time.RFC3339), u.ID, g.ID); err != nil {
+	if _, err := st.DB.ExecContext(ctx, `UPDATE statuses SET shelf_at=? WHERE user_id=? AND game_id=?`, old.Format(time.RFC3339), u.ID, g.ID); err != nil {
 		t.Fatal(err)
 	}
-	if err := st.SetStatusFlag(ctx, u.ID, g.ID, "backlog", true); err != nil {
+	if err := st.SetShelf(ctx, u.ID, g.ID, "wishlist"); err != nil {
 		t.Fatal(err)
 	}
 	status, err = st.StatusFor(ctx, u.ID, g.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !status.WishlistAt.Equal(old) {
-		t.Fatalf("wishlist_at = %v, want preserved %v", status.WishlistAt, old)
+	if !status.ShelfAt.Equal(old) {
+		t.Fatalf("re-selecting the same shelf changed its time: %v", status.ShelfAt)
+	}
+	if err := st.SetShelf(ctx, u.ID, g.ID, "backlog"); err != nil {
+		t.Fatal(err)
+	}
+	status, err = st.StatusFor(ctx, u.ID, g.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if status.Shelf != "backlog" || status.BacklogAt.IsZero() || !status.WishlistAt.IsZero() {
+		t.Fatalf("switching shelves = %+v, want only backlog", status)
 	}
 
-	if err := st.SetStatusFlag(ctx, u.ID, g.ID, "wishlist", false); err != nil {
+	if err := st.SetShelf(ctx, u.ID, g.ID, ""); err != nil {
 		t.Fatal(err)
 	}
 	status, err = st.StatusFor(ctx, u.ID, g.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !status.WishlistAt.IsZero() {
-		t.Fatalf("wishlist_at not cleared: %v", status.WishlistAt)
+	if !status.ShelfAt.IsZero() || !status.BacklogAt.IsZero() {
+		t.Fatalf("shelf time not cleared: %+v", status)
 	}
 
-	if err := st.SetStatuses(ctx, u.ID, g.ID, false, false, true, true, false); err != nil {
+	if err := st.SetStatuses(ctx, u.ID, g.ID, false, false, false, true, false); err != nil {
 		t.Fatal(err)
 	}
 	status, err = st.StatusFor(ctx, u.ID, g.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if status.WishlistAt.IsZero() {
-		t.Fatal("SetStatuses did not set wishlist_at")
+	if status.Shelf != "wishlist" || status.ShelfAt.IsZero() {
+		t.Fatal("SetStatuses did not set the wishlist shelf")
 	}
-	if _, err := st.DB.ExecContext(ctx, `UPDATE statuses SET wishlist_at=? WHERE user_id=? AND game_id=?`, old.Format(time.RFC3339), u.ID, g.ID); err != nil {
+	if _, err := st.DB.ExecContext(ctx, `UPDATE statuses SET shelf_at=? WHERE user_id=? AND game_id=?`, old.Format(time.RFC3339), u.ID, g.ID); err != nil {
 		t.Fatal(err)
 	}
-	if err := st.SetStatuses(ctx, u.ID, g.ID, false, false, true, true, false); err != nil {
-		t.Fatal(err)
-	}
-	status, err = st.StatusFor(ctx, u.ID, g.ID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !status.WishlistAt.Equal(old) {
-		t.Fatalf("SetStatuses did not preserve wishlist_at: %v", status.WishlistAt)
-	}
-	if err := st.SetStatuses(ctx, u.ID, g.ID, false, false, true, false, false); err != nil {
+	if err := st.SetStatuses(ctx, u.ID, g.ID, false, false, false, true, false); err != nil {
 		t.Fatal(err)
 	}
 	status, err = st.StatusFor(ctx, u.ID, g.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !status.WishlistAt.IsZero() {
-		t.Fatalf("SetStatuses did not clear wishlist_at: %v", status.WishlistAt)
+	if !status.ShelfAt.Equal(old) {
+		t.Fatalf("SetStatuses did not preserve shelf time: %v", status.ShelfAt)
+	}
+	if err := st.SetStatuses(ctx, u.ID, g.ID, false, false, false, false, false); err != nil {
+		t.Fatal(err)
+	}
+	status, err = st.StatusFor(ctx, u.ID, g.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !status.ShelfAt.IsZero() {
+		t.Fatalf("SetStatuses did not clear shelf time: %v", status.ShelfAt)
 	}
 }
 

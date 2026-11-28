@@ -14,15 +14,14 @@
     <a href="{{.Base}}?tab={{.Tab}}&amp;sort=popularity&amp;dir={{.Dir}}" class="sort-btn{{if eq .Sort "popularity"}} on{{end}}"{{if eq .Sort "popularity"}} aria-current="true"{{end}}>Popularity</a>
     <a href="{{.Base}}?tab={{.Tab}}&amp;sort=date&amp;dir={{.Dir}}" class="sort-btn{{if eq .Sort "date"}} on{{end}}"{{if eq .Sort "date"}} aria-current="true"{{end}}>Date</a>
     <a href="{{.Base}}?tab={{.Tab}}&amp;sort=rating&amp;dir={{.Dir}}" class="sort-btn{{if eq .Sort "rating"}} on{{end}}"{{if eq .Sort "rating"}} aria-current="true"{{end}}>Rating</a>
-    <span class="sort-dir" role="group" aria-label="Sort direction">
-      <a href="{{.Base}}?tab={{.Tab}}&amp;sort={{.Sort}}&amp;dir=asc" class="sort-btn sort-dir-btn{{if eq .Dir "asc"}} on{{end}}" aria-label="Sort ascending" title="Ascending"{{if eq .Dir "asc"}} aria-current="true"{{end}}>↑</a>
-      <a href="{{.Base}}?tab={{.Tab}}&amp;sort={{.Sort}}&amp;dir=desc" class="sort-btn sort-dir-btn{{if eq .Dir "desc"}} on{{end}}" aria-label="Sort descending" title="Descending"{{if eq .Dir "desc"}} aria-current="true"{{end}}>↓</a>
-    </span>
+    <a href="{{.Base}}?tab={{.Tab}}&amp;sort={{.Sort}}&amp;dir={{if eq .Dir "asc"}}desc{{else}}asc{{end}}" class="sort-btn sort-dir-btn" aria-label="Sorting {{if eq .Dir "asc"}}ascending{{else}}descending{{end}}; click to sort {{if eq .Dir "asc"}}descending{{else}}ascending{{end}}" title="{{if eq .Dir "asc"}}Ascending{{else}}Descending{{end}} · click to reverse">{{if eq .Dir "asc"}}↑{{else}}↓{{end}}</a>
   </div>
 </div>
 {{if .Game}}<div class="mb2"><a href="/games/{{.Game.Slug}}">← Back to {{.Game.Title}}</a></div>{{end}}
 {{if .Reviews}}
-  {{range .Reviews}}<div class="review-card mb1">
+  {{range .Reviews}}<div class="review-card review-card-cover review-card-flat">
+    {{if .Game}}<a class="review-cover" href="/games/{{.Game.Slug}}" aria-hidden="true" tabindex="-1"><img src="{{cover .Game}}" alt="" loading="lazy"></a>{{end}}
+    <div class="review-card-main">
     <div class="log-head">
       {{if .User}}<a class="byline-author" href="/users/{{.User.Username}}"><img class="avatar avatar-sm" src="{{avatar .User}}" alt=""> {{.User.Username}}</a>{{end}}
       {{stars .Rating 5}} <span>{{timeago .CreatedAt}}</span>
@@ -31,6 +30,7 @@
     <h2 class="mt1" style="font-size:1.2rem"><a href="{{reviewPath .}}">{{if .Name}}{{.Name}}{{else}}{{.Game.Title}}{{end}}</a></h2>
     {{template "review_preview" .}}
     {{template "review_actions" .}}
+    </div>
   </div>{{end}}
   {{template "pager" .}}
 {{else}}

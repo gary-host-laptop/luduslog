@@ -14,11 +14,13 @@ import (
 
 	"luduslog/internal/markdown"
 	"luduslog/internal/models"
+	"luduslog/internal/store"
 )
 
 func templateFuncs(s *Server) template.FuncMap {
 	return template.FuncMap{
 		"safe":            safeHTML,
+		"safeURL":         func(s string) template.URL { return template.URL(s) },
 		"md":              md,
 		"plain":           mdPlain,
 		"avatar":          avatarURL,
@@ -74,6 +76,7 @@ func templateFuncs(s *Server) template.FuncMap {
 		},
 		"plural":       plural,
 		"truncate":     truncate,
+		"tagPreview":   tagPreview,
 		"creditNames":  creditNames,
 		"relationRole": relationRole,
 		"ancestorTab":  ancestorTab,
@@ -94,8 +97,29 @@ func templateFuncs(s *Server) template.FuncMap {
 			}
 			return "/users/" + l.User.Username + "/reviews/" + strconv.FormatInt(l.ID, 10)
 		},
-		"privacyLabel":     privacyLabel,
-		"notePrivacyLabel": notePrivacyLabel,
+		"privacyLabel":      privacyLabel,
+		"notePrivacyLabel":  notePrivacyLabel,
+		"playedStatusLabel": playedStatusLabel,
+		"shelfLabel": func(v string) string {
+			switch strings.ToLower(strings.TrimSpace(v)) {
+			case "playing":
+				return "Playing"
+			case "played":
+				return "Played"
+			case "backlog":
+				return "Backlog"
+			case "wishlist":
+				return "Wishlist"
+			}
+			return "Unshelved"
+		},
+		"playedStatuses": func() []string { return store.PlayedStatuses },
+		"firstSessions": func(sessions []models.Session, n int) []models.Session {
+			if n > len(sessions) {
+				n = len(sessions)
+			}
+			return sessions[:n]
+		},
 		"ratingScaleMax": func(scale int) int {
 			if scale == 10 {
 				return 10
@@ -118,6 +142,20 @@ func templateFuncs(s *Server) template.FuncMap {
 			}
 			return fmt.Sprintf("%.1fh", h)
 		},
+		"durationHours": func(h float64) int {
+			total := int(math.Round(h * 60))
+			if total < 0 {
+				total = 0
+			}
+			return total / 60
+		},
+		"durationMinutes": func(h float64) int {
+			total := int(math.Round(h * 60))
+			if total < 0 {
+				total = 0
+			}
+			return total % 60
+		},
 		"siteName":  func() string { return s.cfg.Name },
 		"instance":  func() string { return s.cfg.BaseURL },
 		"abs":       func(p string) string { return s.cfg.BaseURL + p },
@@ -139,6 +177,29 @@ func templateFuncs(s *Server) template.FuncMap {
 			return false
 		},
 		"agoYear": func(t time.Time) int { return t.Year() },
+	}
+}
+
+func playedStatusLabel(status string) string {
+	switch status {
+	case "completed":
+		return "Completed"
+	case "playing":
+		return "Playing"
+	case "backlog":
+		return "Backlog"
+	case "wishlist":
+		return "Wishlist"
+	case "abandoned":
+		return "Abandoned"
+	case "retired":
+		return "Retired"
+	case "shelved":
+		return "Shelved"
+	case "replayed":
+		return "Replayed"
+	default:
+		return "Played"
 	}
 }
 
@@ -427,6 +488,17 @@ func truncate(s string, n int) string {
 	}
 	r := []rune(s)
 	return string(r[:n]) + "…"
+}
+
+// tagPreview keeps list-card tags to a single row: at most three tags, plus a
+// trailing "+N" pill when the list has more.
+func tagPreview(tags []string) []string {
+	if len(tags) <= 3 {
+		return tags
+	}
+	out := make([]string, 0, 4)
+	out = append(out, tags[:3]...)
+	return append(out, "+"+strconv.Itoa(len(tags)-3))
 }
 
 func initials(name string) string {

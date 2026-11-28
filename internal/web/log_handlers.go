@@ -3,6 +3,7 @@ package web
 import (
 	"context"
 	"net/http"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -11,6 +12,24 @@ import (
 	"luduslog/internal/store"
 )
 
+// maxLogsPerGame keeps one game's journal navigable and mirrors the cap a
+// Backloggd log list has.
+const maxLogsPerGame = 100
+
+var logTabs = map[string]bool{"play": true, "journal": true, "library": true, "review": true}
+
+// Old editor links used log/time/details for what is now the Play tab.
+func logTab(raw string) string {
+	switch raw {
+	case "log", "time", "details":
+		return "play"
+	}
+	if logTabs[raw] {
+		return raw
+	}
+	return "play"
+}
+
 func (s *Server) setStatus(w http.ResponseWriter, r *http.Request) {
 	g, err := s.st.GameBySlug(r.Context(), r.PathValue("slug"))
 	if err != nil {
@@ -18,23 +37,41 @@ func (s *Server) setStatus(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	u := currentUser(r)
-	flag := r.FormValue("flag")
-	on := r.FormValue("on") != "0"
-	switch flag {
-	case "playing", "backlog", "wishlist":
-	default:
+	_ = r.ParseForm()
+	shelf, newForm := r.Form["shelf"]
+	selected := ""
+	if newForm {
+		selected = shelf[0]
+	} else if flag := r.FormValue("flag"); flag != "" {
+		// Older status forms toggle one flag; removal clears the shelf.
+		if r.FormValue("on") != "0" {
+			selected = flag
+		}
+	}
+	selected = strings.ToLower(strings.TrimSpace(selected))
+	if selected == "__remove__" {
+		selected = ""
+	}
+	if !store.ValidShelf(selected) {
 		s.notFound(w, r)
 		return
 	}
-	if err := s.st.SetStatusFlag(r.Context(), u.ID, g.ID, flag, on); err != nil {
+	if err := s.st.SetShelf(r.Context(), u.ID, g.ID, selected); err != nil {
 		s.serverError(w, r, err)
 		return
 	}
-	target := flag + ":0"
-	if on {
-		target = flag + ":1"
+	target := selected + ":1"
+	if selected == "" {
+		target = "shelf:0"
 	}
 	s.st.AddActivity(r.Context(), u.ID, "status", &g.ID, nil, nil, target, "public")
+	label := "Added to " + selected
+	if selected == "" {
+		label = "Removed from shelf"
+	} else if selected == "playing" {
+		label = "Started playing"
+	}
+	s.deliverStatusActivity(r, u, g, label)
 	s.redirect(w, r, "/games/"+g.Slug)
 }
 
@@ -104,17 +141,62 @@ func (s *Server) rateGame(w http.ResponseWriter, r *http.Request) {
 
 type logFormData struct {
 	Page
-	Game      *models.Game
-	Log       *models.Log
-	Platforms []models.Platform
-	Editions  []models.Game
-	Played    int
-	Error     string
-	Action    string
+	Game              *models.Game
+	Log               *models.Log
+	Logs              []*models.Log
+	Platforms         []models.Platform
+	PlayedOnPlatforms []models.Platform
+	Played            int
+	Error             string
+	Action            string
+	Tab               string
+	Sessions          []models.Session
+	Library           *models.LibraryEntry
+	Cover             string
+	GameStatus        models.Status
+	DefaultStatus     string
+	LogCount          int
+	MaxLogs           int
+	IsNew             bool
+	Lists             []*models.List
+}
+
+// logPlatformOptions limits the platform pickers to systems the game actually
+// released on, keeping a saved value visible if the catalog no longer lists it.
+func logPlatformOptions(g *models.Game, l *models.Log) []models.Platform {
+	opts := append([]models.Platform{}, g.Platforms...)
+	if l == nil {
+		return opts
+	}
+	has := func(id int64) bool {
+		for _, p := range opts {
+			if p.ID == id {
+				return true
+			}
+		}
+		return false
+	}
+	if l.PlatformID != nil && !has(*l.PlatformID) {
+		opts = append(opts, models.Platform{ID: *l.PlatformID, Name: l.PlatformName})
+	}
+	if l.PlayedOnID != nil && !has(*l.PlayedOnID) {
+		opts = append(opts, models.Platform{ID: *l.PlayedOnID, Name: l.PlayedOnName})
+	}
+	return opts
 }
 
 func playedLogStatus(status string) bool {
 	return status == "played" || status == "replayed" || status == "completed"
+}
+
+// Old defaults used the combined game/played status select. Map those game
+// values to played so the new log-only select always has a valid selection.
+func playedStatusForForm(v string) string {
+	switch v {
+	case "playing", "backlog", "wishlist":
+		return "played"
+	}
+	return store.NormalizePlayedStatus(v)
 }
 
 // logFormPlayed shows the real counter, defaulting a fresh play-like log to 1.
@@ -144,23 +226,114 @@ func playedCountFrom(r *http.Request) (int, bool) {
 	return n, true
 }
 
+// formDuration reads the paired hours/minutes fields used by the editor. When
+// neither half is present it falls back to the older decimal-hours field so
+// API clients and bookmarks keep working.
+func formDuration(r *http.Request, name string) float64 {
+	_ = r.ParseForm()
+	_, hasHours := r.Form[name+"_hours"]
+	_, hasMinutes := r.Form[name+"_minutes"]
+	if !hasHours && !hasMinutes {
+		return atof(r.FormValue(name))
+	}
+	hours := atof(r.FormValue(name + "_hours"))
+	minutes := atof(r.FormValue(name + "_minutes"))
+	if hours < 0 {
+		hours = 0
+	}
+	if minutes < 0 {
+		minutes = 0
+	}
+	return (hours*60 + minutes) / 60
+}
+
+func formDurationPresent(r *http.Request, name string) bool {
+	_ = r.ParseForm()
+	if _, ok := r.Form[name+"_hours"]; ok {
+		return true
+	}
+	if _, ok := r.Form[name+"_minutes"]; ok {
+		return true
+	}
+	_, ok := r.Form[name]
+	return ok
+}
+
+// logEditorData fills the shared parts of the create and edit editors: every
+// log for the game, the selected log's journal and library state, and the
+// header status the game carries across all logs.
+func (s *Server) logEditorData(r *http.Request, u *models.User, g *models.Game, selected *models.Log, tab string) logFormData {
+	ctx := r.Context()
+	g, _ = s.st.GameDetail(ctx, g)
+	data := logFormData{
+		Page:          s.page(r, "Log "+g.Title),
+		Game:          g,
+		Tab:           logTab(tab),
+		DefaultStatus: playedStatusForForm(u.DefaultPlayedStatus),
+		MaxLogs:       maxLogsPerGame,
+	}
+	data.Logs, _ = s.st.UserGameLogs(ctx, u.ID, g.ID, true)
+	// The editor opens on the original playthrough. Only this view is
+	// reordered; the store keeps newest-first for the log page and export.
+	sort.SliceStable(data.Logs, func(i, j int) bool {
+		if data.Logs[i].CreatedAt.Equal(data.Logs[j].CreatedAt) {
+			return data.Logs[i].ID < data.Logs[j].ID
+		}
+		return data.Logs[i].CreatedAt.Before(data.Logs[j].CreatedAt)
+	})
+	data.LogCount = len(data.Logs)
+	data.Lists, _ = s.st.ListsForUser(ctx, u.ID, true, 100, 0)
+	if selected == nil && len(data.Logs) > 0 {
+		selected = data.Logs[0]
+	}
+	data.Log = selected
+	data.IsNew = selected == nil || selected.ID == 0
+	if !data.IsNew {
+		data.Sessions, _ = s.st.SessionsFor(ctx, selected.ID)
+		data.Library, _ = s.st.LibraryEntry(ctx, u.ID, g.ID)
+		data.Cover = s.st.CoverFor(ctx, u.ID, g.ID)
+	}
+	data.Platforms = logPlatformOptions(g, selected)
+	data.PlayedOnPlatforms = s.st.Platforms(ctx)
+	data.Played = s.logFormPlayed(ctx, u.ID, g.ID, selected)
+	data.GameStatus, _ = s.st.StatusFor(ctx, u.ID, g.ID)
+	return data
+}
+
 func (s *Server) logForm(w http.ResponseWriter, r *http.Request) {
 	g, err := s.st.GameBySlug(r.Context(), r.PathValue("slug"))
 	if err != nil {
 		s.notFound(w, r)
 		return
 	}
-	g, _ = s.st.GameDetail(r.Context(), g)
 	u := currentUser(r)
-	data := logFormData{Page: s.page(r, "Log "+g.Title), Game: g, Platforms: s.st.Platforms(r.Context())}
-	if l, err := s.st.LatestLogFor(r.Context(), u.ID, g.ID); err == nil {
-		data.Log = l
+	q := r.URL.Query()
+	newLog := q.Get("new") == "1" || q.Get("review") == "1"
+	var selected *models.Log
+	if !newLog {
+		if raw := q.Get("log"); raw != "" {
+			if id, err := strconv.ParseInt(raw, 10, 64); err == nil {
+				if l, err := s.st.LogByID(r.Context(), id); err == nil && l.UserID == u.ID && l.GameID == g.ID {
+					selected = l
+				}
+			}
+		}
 	}
-	if r.URL.Query().Get("review") == "1" {
-		data.Log = &models.Log{UserID: u.ID, GameID: g.ID}
+	data := s.logEditorData(r, u, g, selected, q.Get("tab"))
+	if newLog {
+		data.Log = &models.Log{UserID: u.ID, GameID: g.ID, Status: data.DefaultStatus}
+		data.IsNew = true
+		data.Sessions = nil
+		data.Library = nil
+		data.Cover = ""
+		data.Platforms = logPlatformOptions(data.Game, nil)
+		data.Played = s.logFormPlayed(r.Context(), u.ID, g.ID, nil)
 	}
-	data.Played = s.logFormPlayed(r.Context(), u.ID, g.ID, data.Log)
-	data.Action = "/games/" + g.Slug + "/log"
+	if data.IsNew {
+		data.Action = "/games/" + g.Slug + "/log"
+	} else {
+		data.Action = "/logs/" + itoa(data.Log.ID) + "/edit"
+	}
 	s.render(w, r, "log_form", data)
 }
 
@@ -173,11 +346,10 @@ func (s *Server) logEditForm(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	g, _ := s.st.GameByID(r.Context(), l.GameID)
-	g, _ = s.st.GameDetail(r.Context(), g)
-	s.render(w, r, "log_form", logFormData{
-		Page: s.page(r, "Edit log"), Game: g, Log: l, Platforms: s.st.Platforms(r.Context()),
-		Played: s.logFormPlayed(r.Context(), u.ID, l.GameID, l), Action: "/logs/" + itoa(id) + "/edit",
-	})
+	data := s.logEditorData(r, u, g, l, r.URL.Query().Get("tab"))
+	data.Page = s.page(r, "Edit log")
+	data.Action = "/logs/" + itoa(id) + "/edit"
+	s.render(w, r, "log_form", data)
 }
 
 func logInputFrom(r *http.Request, u *models.User, gameID int64) store.LogInput {
@@ -196,12 +368,22 @@ func logInputFrom(r *http.Request, u *models.User, gameID int64) store.LogInput 
 		Storefront:   r.FormValue("storefront"),
 		StartedAt:    r.FormValue("started_at"),
 		FinishedAt:   r.FormValue("finished_at"),
-		Playtime:     atof(r.FormValue("playtime")),
-		TimeToFinish: atof(r.FormValue("time_to_finish")),
-		TimeToMaster: atof(r.FormValue("time_to_master")),
+		Playtime:     formDuration(r, "playtime"),
+		TimeToFinish: formDuration(r, "time_to_finish"),
+		TimeToMaster: formDuration(r, "time_to_master"),
 		SyncSessions: r.FormValue("sync_sessions") == "1",
 		Language:     r.FormValue("language"),
 		Draft:        r.FormValue("draft") == "1",
+	}
+	in.Status = store.NormalizePlayedStatus(in.Status)
+	if values, ok := r.Form["primary_rating"]; ok {
+		primary := false
+		for _, v := range values {
+			if v == "1" {
+				primary = true
+			}
+		}
+		in.PrimaryRating = &primary
 	}
 	if v := r.FormValue("platform_id"); v != "" {
 		if id, err := strconv.ParseInt(v, 10, 64); err == nil {
@@ -222,6 +404,24 @@ func logInputFrom(r *http.Request, u *models.User, gameID int64) store.LogInput 
 		in.Rating = 0
 	}
 	return in
+}
+
+// applyGameShelfForm saves the single game-level shelf from the Play tab.
+// Older clients without the marker leave the shelf untouched. The return value
+// tells the caller whether an explicit shelf was supplied.
+func (s *Server) applyGameShelfForm(r *http.Request, userID, gameID int64) bool {
+	if r.FormValue("game_shelf_form") != "1" {
+		return false
+	}
+	shelf := ""
+	if r.FormValue("game_shelf_remove") != "1" {
+		shelf = strings.ToLower(strings.TrimSpace(r.FormValue("game_shelf")))
+	}
+	if !store.ValidShelf(shelf) {
+		shelf = ""
+	}
+	_ = s.st.SetShelf(r.Context(), userID, gameID, shelf)
+	return true
 }
 
 // syncLogLibrary keeps the ownership library in step with a saved log: an
@@ -250,28 +450,28 @@ func (s *Server) logSubmit(w http.ResponseWriter, r *http.Request) {
 	}
 	u := currentUser(r)
 	in := logInputFrom(r, u, g.ID)
-	if in.Status == "" {
-		in.Status = "played"
+	if strings.TrimSpace(r.FormValue("status")) == "" {
+		in.Status = u.DefaultPlayedStatus
+	}
+	if existing, _ := s.st.UserGameLogs(r.Context(), u.ID, g.ID, true); len(existing) >= maxLogsPerGame && !in.Draft {
+		s.flash(w, r, "error", "This game already has the maximum number of logs (100). Delete an old log first.")
+		s.redirect(w, r, "/games/"+g.Slug+"/log")
+		return
 	}
 	l, err := s.st.CreateLog(r.Context(), in)
 	if err != nil {
 		s.serverError(w, r, err)
 		return
 	}
+	shelfSet := s.applyGameShelfForm(r, u.ID, g.ID)
 	played, hasPlayed := playedCountFrom(r)
 	if !in.Draft {
-		switch in.Status {
-		case "playing", "backlog", "wishlist":
-			s.st.SetStatusFlag(r.Context(), u.ID, g.ID, in.Status, true)
-		case "played", "replayed", "completed":
-			if !hasPlayed {
-				s.st.EnsurePlayed(r.Context(), u.ID, g.ID)
-			}
+		if !shelfSet && playedLogStatus(in.Status) && !hasPlayed {
+			// Older clients sent a combined play status without a shelf. A log
+			// still means the game was played, but it never picks a shelf.
+			s.st.EnsurePlayed(r.Context(), u.ID, g.ID)
 		}
 		if hasPlayed {
-			if playedLogStatus(in.Status) && played < 1 {
-				played = 1
-			}
 			if err := s.st.SetPlayedCount(r.Context(), u.ID, g.ID, played); err != nil {
 				s.serverError(w, r, err)
 				return
@@ -286,11 +486,12 @@ func (s *Server) logSubmit(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	s.flash(w, r, "success", "Your log for "+g.Title+" was saved.")
+	s.deliverLogActivity(r, u, l)
 	if in.Review != "" && !in.Draft {
 		s.redirect(w, r, "/users/"+u.Username+"/reviews/"+itoa(l.ID))
 		return
 	}
-	s.redirect(w, r, "/games/"+g.Slug)
+	s.redirect(w, r, "/users/"+u.Username+"/logs/"+g.Slug)
 }
 
 func (s *Server) logEdit(w http.ResponseWriter, r *http.Request) {
@@ -302,30 +503,32 @@ func (s *Server) logEdit(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	in := logInputFrom(r, u, l.GameID)
+	if strings.TrimSpace(r.FormValue("status")) == "" {
+		in.Status = u.DefaultPlayedStatus
+	}
 	// Older forms and API clients may not send the title or manual timing
 	// fields; an absent field must not wipe stored values.
 	if _, ok := r.Form["name"]; !ok {
 		in.Name = l.Name
 	}
-	if _, ok := r.Form["time_to_finish"]; !ok {
+	if !formDurationPresent(r, "time_to_finish") {
 		in.TimeToFinish = l.TimeToFinish
 	}
-	if _, ok := r.Form["time_to_master"]; !ok {
+	if !formDurationPresent(r, "time_to_master") {
 		in.TimeToMaster = l.TimeToMaster
 	}
-	if _, err := s.st.UpdateLog(r.Context(), id, in); err != nil {
+	updated, err := s.st.UpdateLog(r.Context(), id, in)
+	if err != nil {
 		s.serverError(w, r, err)
 		return
 	}
+	shelfSet := s.applyGameShelfForm(r, u.ID, l.GameID)
 	played, hasPlayed := playedCountFrom(r)
 	if !in.Draft {
-		if playedLogStatus(in.Status) && !hasPlayed {
+		if !shelfSet && playedLogStatus(in.Status) && !hasPlayed {
 			s.st.EnsurePlayed(r.Context(), u.ID, l.GameID)
 		}
 		if hasPlayed {
-			if playedLogStatus(in.Status) && played < 1 {
-				played = 1
-			}
 			if err := s.st.SetPlayedCount(r.Context(), u.ID, l.GameID, played); err != nil {
 				s.serverError(w, r, err)
 				return
@@ -336,7 +539,21 @@ func (s *Server) logEdit(w http.ResponseWriter, r *http.Request) {
 		s.syncLogLibrary(r.Context(), u.ID, l.GameID, in)
 	}
 	s.flash(w, r, "success", "Log updated.")
-	s.redirect(w, r, "/users/"+u.Username+"/reviews/"+itoa(id))
+	s.deliverLogActivity(r, u, updated)
+	if to := safeReturnTo(r.FormValue("return_to")); to != "" {
+		s.redirect(w, r, to)
+		return
+	}
+	if in.Review != "" && !in.Draft {
+		s.redirect(w, r, "/users/"+u.Username+"/reviews/"+itoa(id))
+		return
+	}
+	g, _ := s.st.GameByID(r.Context(), l.GameID)
+	slug := ""
+	if g != nil {
+		slug = g.Slug
+	}
+	s.redirect(w, r, "/users/"+u.Username+"/logs/"+slug)
 }
 
 func (s *Server) logDelete(w http.ResponseWriter, r *http.Request) {
@@ -352,6 +569,7 @@ func (s *Server) logDelete(w http.ResponseWriter, r *http.Request) {
 			s.serverError(w, r, err)
 			return
 		}
+		s.deleteCanonicalPost(r, u, "log", id)
 		if err := s.st.LogModAction(r.Context(), u.ID, "remove_review", &l.UserID, r.FormValue("reason"), nil); err != nil {
 			s.serverError(w, r, err)
 			return
@@ -361,6 +579,7 @@ func (s *Server) logDelete(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.st.DeleteLog(r.Context(), id, l.UserID)
+	s.deleteCanonicalPost(r, u, "log", id)
 	s.st.RefreshGameStats(r.Context(), l.GameID)
 	s.flash(w, r, "success", "Log deleted.")
 	s.redirect(w, r, "/users/"+u.Username)
@@ -455,7 +674,7 @@ func (s *Server) sessionUpdate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.flash(w, r, "success", "Session updated.")
-	s.redirect(w, r, "/logs/"+itoa(sess.LogID)+"/sessions")
+	s.redirect(w, r, sessionReturn(r, "/logs/"+itoa(sess.LogID)+"/sessions"))
 }
 
 func (s *Server) sessionCreate(w http.ResponseWriter, r *http.Request) {
@@ -479,7 +698,7 @@ func (s *Server) sessionCreate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.flash(w, r, "success", "Session added.")
-	s.redirect(w, r, "/logs/"+itoa(id)+"/sessions")
+	s.redirect(w, r, sessionReturn(r, "/logs/"+itoa(id)+"/sessions"))
 }
 
 // gameSessionCreate logs a session straight from a game page, creating the
@@ -509,17 +728,99 @@ func (s *Server) gameSessionCreate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.flash(w, r, "success", "Session added.")
-	s.redirect(w, r, "/logs/"+itoa(l.ID)+"/sessions")
+	s.redirect(w, r, sessionReturn(r, "/logs/"+itoa(l.ID)+"/sessions"))
+}
+
+// sessionReturn keeps journal edits inside the editor when it sent a local
+// return path, and falls back to the standalone sessions page otherwise.
+func sessionReturn(r *http.Request, fallback string) string {
+	if to := safeReturnTo(r.FormValue("return_to")); to != "" {
+		return to
+	}
+	if ref := safeReturnTo(r.Header.Get("Referer")); ref != "" && strings.Contains(ref, "/edit") {
+		return ref
+	}
+	return fallback
 }
 
 func (s *Server) sessionDelete(w http.ResponseWriter, r *http.Request) {
 	id, _ := strconv.ParseInt(r.PathValue("id"), 10, 64)
 	u := currentUser(r)
+	sess, err := s.st.SessionByID(r.Context(), id)
+	if err != nil {
+		s.notFound(w, r)
+		return
+	}
 	if err := s.st.DeleteSession(r.Context(), id, u.ID); err != nil {
 		s.notFound(w, r)
 		return
 	}
-	s.redirect(w, r, r.Header.Get("Referer"))
+	s.deleteCanonicalPost(r, u, "session", id)
+	s.redirect(w, r, sessionReturn(r, "/logs/"+itoa(sess.LogID)+"/sessions"))
+}
+
+// logRename is the editor's log-bar rename action. It changes only the
+// display title so the rest of an in-progress edit cannot be lost.
+func (s *Server) logRename(w http.ResponseWriter, r *http.Request) {
+	id, _ := strconv.ParseInt(r.PathValue("id"), 10, 64)
+	u := currentUser(r)
+	l, err := s.st.LogByID(r.Context(), id)
+	if err != nil || l.UserID != u.ID {
+		s.notFound(w, r)
+		return
+	}
+	if err := s.st.RenameLog(r.Context(), id, u.ID, strings.TrimSpace(r.FormValue("name"))); err != nil {
+		s.notFound(w, r)
+		return
+	}
+	s.flash(w, r, "success", "Log renamed.")
+	s.redirect(w, r, "/logs/"+itoa(id)+"/edit")
+}
+
+// logCover stores a custom cover URL for the game in this user's library.
+// An empty value clears it and falls back to the catalog cover.
+func (s *Server) logCover(w http.ResponseWriter, r *http.Request) {
+	id, _ := strconv.ParseInt(r.PathValue("id"), 10, 64)
+	u := currentUser(r)
+	l, err := s.st.LogByID(r.Context(), id)
+	if err != nil || l.UserID != u.ID {
+		s.notFound(w, r)
+		return
+	}
+	url := strings.TrimSpace(r.FormValue("cover_url"))
+	if url != "" && !strings.HasPrefix(url, "http://") && !strings.HasPrefix(url, "https://") {
+		s.flash(w, r, "error", "Cover URLs must start with http:// or https://.")
+		s.redirect(w, r, "/logs/"+itoa(id)+"/edit?tab=library")
+		return
+	}
+	if err := s.st.SetCover(r.Context(), u.ID, l.GameID, url); err != nil {
+		s.serverError(w, r, err)
+		return
+	}
+	s.flash(w, r, "success", "Cover updated.")
+	s.redirect(w, r, "/logs/"+itoa(id)+"/edit?tab=library")
+}
+
+// logDeleteAll removes every trace of the game in this user's account.
+func (s *Server) logDeleteAll(w http.ResponseWriter, r *http.Request) {
+	id, _ := strconv.ParseInt(r.PathValue("id"), 10, 64)
+	u := currentUser(r)
+	l, err := s.st.LogByID(r.Context(), id)
+	if err != nil || l.UserID != u.ID {
+		s.notFound(w, r)
+		return
+	}
+	g, _ := s.st.GameByID(r.Context(), l.GameID)
+	if err := s.st.DeleteGameData(r.Context(), u.ID, l.GameID); err != nil {
+		s.serverError(w, r, err)
+		return
+	}
+	s.flash(w, r, "success", "All your logs, sessions and library data for this game were deleted.")
+	if g != nil {
+		s.redirect(w, r, "/games/"+g.Slug)
+		return
+	}
+	s.redirect(w, r, "/games")
 }
 
 func itoa(n int64) string { return strconv.FormatInt(n, 10) }

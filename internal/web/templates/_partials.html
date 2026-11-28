@@ -6,6 +6,19 @@
 </a>
 {{end}}
 
+{{define "game_card_plain"}}
+<a class="game-card" href="/games/{{.Slug}}">
+  <div class="cover-wrap"><img class="game-cover" loading="lazy" src="{{cover .}}" alt="Cover of {{.Title}}"></div>
+  <div class="game-title">{{.Title}}</div>
+</a>
+{{end}}
+
+{{define "game_grid_plain"}}
+<div class="grid grid-cards">
+  {{range .}}{{template "game_card_plain" .}}{{end}}
+</div>
+{{end}}
+
 {{define "game_card_role"}}
 <a class="game-card" href="/games/{{.Game.Slug}}">
   <div class="cover-wrap"><img class="game-cover" loading="lazy" src="{{cover .Game}}" alt="Cover of {{.Game.Title}}"></div>
@@ -72,11 +85,24 @@
   <div class="timeline-body">
     <div class="timeline-head">
       {{if .User}}<a href="/users/{{.User.Username}}"><strong>{{.User.Username}}</strong></a>{{else}}<span class="muted">Someone</span>{{end}}
-      {{if eq .Kind "review"}} wrote a review{{else if eq .Kind "log"}} logged a game{{else if eq .Kind "session"}} played a session{{else if eq .Kind "follow"}} {{with .TargetUser}}<a href="/users/{{.Username}}">@{{.Username}}</a>{{end}}{{end}}
+      {{if eq .Kind "boost"}} boosted a post{{else if eq .Kind "review"}} wrote a review{{else if eq .Kind "log"}} logged a game{{else if eq .Kind "session"}} played a session{{else if eq .Kind "follow"}} {{with .TargetUser}}<a href="/users/{{.Username}}">@{{.Username}}</a>{{end}}{{end}}
       <span class="feed-time">{{timeago .At}}</span>
     </div>
 
-    {{if eq .Kind "review"}}{{with .Log}}
+    {{if eq .Kind "boost"}}{{with .Post}}
+    <div class="timeline-card timeline-boost">
+      <div class="timeline-card-body">
+        <div class="log-head">
+          {{with .User}}<a class="byline-author" href="/users/{{.Username}}"><img class="avatar avatar-xs" src="{{avatar .}}" alt=""> {{.Username}}</a>{{end}}
+          {{if .Game}}<a href="/games/{{.Game.Slug}}">{{.Game.Title}}</a>{{end}}
+          <span class="feed-time">{{timeago .CreatedAt}}</span>
+        </div>
+        <h3><a href="/posts/{{.ID}}">{{if and .Log .Log.Name}}{{.Log.Name}}{{else if .Game}}{{.Game.Title}}{{else}}{{.Kind}}{{end}}</a></h3>
+        {{if .Body}}<div class="prose review-preview">{{truncate (plain .Body) 420}}</div>{{end}}
+        <div class="log-actions"><a href="/posts/{{.ID}}">Open post →</a></div>
+      </div>
+    </div>
+    {{end}}{{else if eq .Kind "review"}}{{with .Log}}
     <div class="timeline-card timeline-review">
       {{if .Game}}<a href="/games/{{.Game.Slug}}"><img class="game-cover" loading="lazy" src="{{cover .Game}}" alt=""></a>{{end}}
       <div class="timeline-card-body">
@@ -121,8 +147,82 @@
     {{else if eq .Kind "follow"}}
     <div class="timeline-copy">started following {{with .TargetUser}}<a href="/users/{{.Username}}">@{{.Username}}</a>{{end}}</div>
     {{end}}
+    {{if .Post}}{{template "post_interactions" .}}{{end}}
   </div>
 </article>
+{{end}}
+
+{{define "post_interactions"}}
+{{with .Post}}
+<div class="post-actions" data-post="{{.ID}}">
+  <form class="inline-form" method="post" action="/posts/{{.ID}}/like">
+    <input type="hidden" name="_csrf" value="{{$.CSRF}}"><input type="hidden" name="return_to" value="{{$.Path}}">
+    <button class="linklike{{if .Liked}} on{{end}}" type="submit" aria-pressed="{{.Liked}}" title="Like"><i class="ph-light ph-heart icon" aria-hidden="true"></i>{{if .Likes}}{{.Likes}}{{end}}</button>
+  </form>
+  <form class="inline-form" method="post" action="/posts/{{.ID}}/boost">
+    <input type="hidden" name="_csrf" value="{{$.CSRF}}"><input type="hidden" name="return_to" value="{{$.Path}}">
+    <button class="linklike{{if .Boosted}} on{{end}}" type="submit" aria-pressed="{{.Boosted}}" title="Boost"><i class="ph-light ph-repeat icon" aria-hidden="true"></i>{{if .Boosts}}{{.Boosts}}{{end}}</button>
+  </form>
+  <a class="linklike" href="/posts/{{.ID}}#comments"><i class="ph-light ph-chat-circle icon" aria-hidden="true"></i>{{if .Comments}}{{.Comments}}{{end}}</a>
+  <a class="linklike post-report" href="/report?target_type=post&target_id={{.ID}}&return_to={{$.Path}}">Report</a>
+  {{if and $.ViewerID (eq $.ViewerID .UserID)}}
+  <form class="inline-form" method="post" action="/posts/{{.ID}}/delete" onsubmit="return confirm('Delete this post?')">
+    <input type="hidden" name="_csrf" value="{{$.CSRF}}"><input type="hidden" name="return_to" value="{{$.Path}}">
+    <button class="linklike" type="submit">Delete</button>
+  </form>
+  {{end}}
+</div>
+{{template "post_comments" (dict "Comments" $.Comments "CanReply" $.CanReply "CSRF" $.CSRF "SubjectType" "post" "SubjectID" .ID "Path" $.Path)}}
+{{end}}
+{{end}}
+
+{{define "post_comments"}}
+<details class="post-comments"{{if .Open}} open{{end}}>
+  <summary>{{if .Comments}}{{len .Comments}} comment{{if ne (len .Comments) 1}}s{{end}}{{else}}Reply{{end}}</summary>
+  <div class="comment-list mt1">
+    {{range .Comments}}{{template "post_comment" (dict "Comment" . "Ctx" $)}}{{end}}
+  </div>
+  {{if .CanReply}}
+  <form class="stack mt1" method="post" action="/comments">
+    <input type="hidden" name="_csrf" value="{{.CSRF}}">
+    <input type="hidden" name="subject_type" value="{{.SubjectType}}">
+    <input type="hidden" name="subject_id" value="{{.SubjectID}}">
+    <input type="hidden" name="return_to" value="{{.Path}}">
+    <textarea name="body" rows="2" required placeholder="Write a reply…"></textarea>
+    <button class="btn btn-sm btn-primary" type="submit">Reply</button>
+  </form>
+  {{end}}
+</details>
+{{end}}
+
+{{define "post_comment"}}
+{{with .Comment}}{{$ctx := $.Ctx}}
+<div class="feed-item" id="c{{.ID}}">
+  <img class="avatar avatar-sm" src="{{if .User}}{{avatar .User}}{{else}}/static/avatar.svg{{end}}" alt="">
+  <div class="grow">
+    <div class="log-head">
+      {{if .User}}<a href="/users/{{.User.Username}}">{{.User.Username}}</a>{{else}}<span>{{.RemoteName}}</span>{{end}}
+      <span>{{timeago .CreatedAt}}</span>
+    </div>
+    <div class="prose">{{md .Body}}</div>
+    <div class="log-actions">
+      {{if $ctx.CanReply}}<button class="linklike" type="button" onclick="document.getElementById('reply-{{.ID}}').hidden = !document.getElementById('reply-{{.ID}}').hidden">Reply</button>{{end}}
+    </div>
+    {{if $ctx.CanReply}}
+    <form id="reply-{{.ID}}" hidden class="stack mt1" method="post" action="/comments">
+      <input type="hidden" name="_csrf" value="{{$ctx.CSRF}}">
+      <input type="hidden" name="subject_type" value="{{$ctx.SubjectType}}">
+      <input type="hidden" name="subject_id" value="{{$ctx.SubjectID}}">
+      <input type="hidden" name="parent_id" value="{{.ID}}">
+      <input type="hidden" name="return_to" value="{{$ctx.Path}}">
+      <textarea name="body" rows="2" required placeholder="Write a reply…"></textarea>
+      <button class="btn btn-sm btn-primary" type="submit">Reply</button>
+    </form>
+    {{end}}
+    {{range .Replies}}<div class="mt1">{{template "post_comment" (dict "Comment" . "Ctx" $ctx)}}</div>{{end}}
+  </div>
+</div>
+{{end}}
 {{end}}
 
 {{define "timeline_stream"}}
@@ -218,9 +318,26 @@
 {{define "pager"}}
 {{if gt .Pages 1}}
 <nav class="pager" aria-label="Pagination">
-  {{if gt .PageNum 1}}<a href="?{{.BaseQuery}}{{if .BaseQuery}}&{{end}}page={{dec .PageNum}}">← Prev</a>{{end}}
+  {{if gt .PageNum 1}}<a href="?{{.BaseQuery | safeURL}}{{if .BaseQuery}}&{{end}}page={{dec .PageNum}}">← Prev</a>{{end}}
   <span class="on">{{.PageNum}} / {{.Pages}}</span>
-  {{if lt .PageNum .Pages}}<a href="?{{.BaseQuery}}{{if .BaseQuery}}&{{end}}page={{inc .PageNum}}">Next →</a>{{end}}
+  {{if lt .PageNum .Pages}}<a href="?{{.BaseQuery | safeURL}}{{if .BaseQuery}}&{{end}}page={{inc .PageNum}}">Next →</a>{{end}}
 </nav>
 {{end}}
+{{end}}
+
+{{define "list_card"}}{{$l := .l}}{{$meta := .meta}}
+<div class="list-card">
+  <a class="list-card-main" href="{{if $l.User}}/users/{{$l.User.Username}}/lists/{{$l.Slug}}{{else}}/lists{{end}}">
+    <h3 class="list-card-title">{{$l.Title}}</h3>
+    <div class="list-covers{{if not $l.CoverGames}} list-covers-empty{{end}}">
+      {{range $l.CoverGames}}<img src="{{cover .}}" alt="" loading="lazy">{{end}}
+      {{if not $l.CoverGames}}<span class="list-cover-fallback" aria-hidden="true"><i class="ph-light ph-list icon"></i></span>{{end}}
+    </div>
+  </a>
+  <div class="list-card-meta muted">
+    {{if eq $meta "profile"}}{{$l.EntryCount}} {{plural $l.EntryCount "game" "games"}} · {{privacyLabel $l.Privacy}}
+    {{else}}{{with $l.User}}<a class="list-card-author" href="/users/{{.Username}}"><img class="list-card-avatar" src="{{avatar .}}" alt="" width="20" height="20" loading="lazy"><span>{{.Username}}</span></a>{{end}} · {{$l.EntryCount}} {{plural $l.EntryCount "game" "games"}}{{end}}
+  </div>
+  <div class="list-card-tags pill-row">{{range tagPreview $l.Tags}}<span class="pill">{{.}}</span>{{end}}</div>
+</div>
 {{end}}

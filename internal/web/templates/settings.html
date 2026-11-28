@@ -218,6 +218,11 @@
       </div>
       <div class="form-row">
         <div><label for="star_scale">Rating scale</label><select id="star_scale" name="star_scale"><option value="5" {{if eq .User.StarScale 5}}selected{{end}}>5 stars</option><option value="10" {{if eq .User.StarScale 10}}selected{{end}}>10 points</option></select></div>
+        <div><label for="default_played_status">Default played status</label><select id="default_played_status" name="default_played_status">
+          {{range $s := slice "played" "completed" "abandoned" "retired" "shelved" "replayed"}}
+          <option value="{{$s}}" {{if eq $.User.DefaultPlayedStatus $s}}selected{{end}}>{{playedStatusLabel $s}}</option>
+          {{end}}
+        </select><div class="field-hint">Used when you create a new log without choosing a status.</div></div>
         <div><label for="theme">Theme</label><select id="theme" name="theme"><option value="system" {{if eq .User.Theme "system"}}selected{{end}}>Match system</option><option value="dark" {{if eq .User.Theme "dark"}}selected{{end}}>Dark</option><option value="light" {{if eq .User.Theme "light"}}selected{{end}}>Light</option></select></div>
       </div>
       <label class="check"><input type="checkbox" name="high_contrast" value="1" {{if .User.HighContrast}}checked{{end}}> High contrast mode</label>
@@ -238,8 +243,10 @@
       <h2>Federation</h2>
       <p class="muted">Your actor: <code>{{abs (printf "/users/%s" .User.Username)}}</code></p>
       <label class="check"><input type="checkbox" name="federation" value="1" {{if .User.Federation}}checked{{end}}> Publish my profile over ActivityPub</label>
+      <label class="check"><input type="checkbox" name="fed_statuses" value="1" {{if .User.FedStatuses}}checked{{end}}> Federate shelf and played-status changes</label>
       <label class="check"><input type="checkbox" name="fed_reviews" value="1" {{if .User.FedReviews}}checked{{end}}> Federate public reviews</label>
-      <p class="field-hint">Followers on other servers receive your public reviews as ActivityPub objects; drafts and journal-only entries are never published. Status and list federation are not delivered yet. Replies and likes federate back to your inbox.</p>
+      <label class="check"><input type="checkbox" name="fed_lists" value="1" {{if .User.FedLists}}checked{{end}}> Federate public lists</label>
+      <p class="field-hint">Followers on other servers receive your public reviews, status changes and lists as ActivityPub objects; drafts, private lists and journal-only entries are never published as reviews. Replies and likes federate back to your inbox.</p>
       <div><button class="btn btn-primary" type="submit">Save federation</button></div>
     </form>
     {{else if eq .Tab "blocks"}}

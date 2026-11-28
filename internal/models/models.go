@@ -4,47 +4,48 @@ package models
 import "time"
 
 type User struct {
-	ID                 int64
-	Username           string
-	Email              string
-	EmailVerified      bool
-	Approved           bool
-	PasswordHash       string
-	Bio                string
-	Avatar             string
-	Header             string
-	Role               string // user | mod | admin
-	CreatedAt          time.Time
-	DeactivatedAt      *time.Time
-	LastUsernameChange *time.Time
-	PrivateProfile     bool
-	HideActivity       bool
-	ManuallyApproves   bool
-	HideSocialGraph    bool
-	AdultOptIn         bool
-	StarScale          int
-	YearlyGoal         int
-	CoverMode          string // any | mine | none
-	TimeDisplay        string // always | played | click
-	InfiniteScroll     bool
-	Theme              string // system | dark | light
-	HighContrast       bool
-	Timezone           string
-	FadePlayed         bool
-	JournalView        string // calendar | activity | list
-	CommentPrivacy     string // everyone | friends | none
-	NotePrivacy        string // everyone | friends | none
-	CatalogEditor      bool
-	FeaturedBadge      string
-	OverviewWidget1    string
-	OverviewWidget2    string
-	FeaturedReviewID   *int64
-	FeaturedListID     *int64
-	Federation         bool
-	FedStatuses        bool
-	FedReviews         bool
-	FedLists           bool
-	RemoteActor        string
+	ID                  int64
+	Username            string
+	Email               string
+	EmailVerified       bool
+	Approved            bool
+	PasswordHash        string
+	Bio                 string
+	Avatar              string
+	Header              string
+	Role                string // user | mod | admin
+	CreatedAt           time.Time
+	DeactivatedAt       *time.Time
+	LastUsernameChange  *time.Time
+	PrivateProfile      bool
+	HideActivity        bool
+	ManuallyApproves    bool
+	HideSocialGraph     bool
+	AdultOptIn          bool
+	StarScale           int
+	YearlyGoal          int
+	CoverMode           string // any | mine | none
+	TimeDisplay         string // always | played | click
+	InfiniteScroll      bool
+	Theme               string // system | dark | light
+	HighContrast        bool
+	Timezone            string
+	FadePlayed          bool
+	JournalView         string // calendar | activity | list
+	DefaultPlayedStatus string // played | completed | playing | backlog | wishlist | abandoned | retired | shelved | replayed
+	CommentPrivacy      string // everyone | friends | none
+	NotePrivacy         string // everyone | friends | none
+	CatalogEditor       bool
+	FeaturedBadge       string
+	OverviewWidget1     string
+	OverviewWidget2     string
+	FeaturedReviewID    *int64
+	FeaturedListID      *int64
+	Federation          bool
+	FedStatuses         bool
+	FedReviews          bool
+	FedLists            bool
+	RemoteActor         string
 }
 
 func (u *User) IsAdmin() bool { return u != nil && u.Role == "admin" }
@@ -233,15 +234,17 @@ type LibraryEntry struct {
 type Status struct {
 	UserID     int64
 	GameID     int64
-	Played     int
-	Playing    bool
-	Backlog    bool
-	Wishlist   bool
+	Shelf      string // '' | playing | played | backlog | wishlist
+	Played     int    // times played, independent of shelf
+	Playing    bool   // derived from Shelf
+	Backlog    bool   // derived from Shelf
+	Wishlist   bool   // derived from Shelf
 	Liked      bool
 	PlayedAt   time.Time
 	PlayingAt  time.Time
 	BacklogAt  time.Time
 	WishlistAt time.Time
+	ShelfAt    time.Time
 	UpdatedAt  time.Time
 }
 
@@ -299,6 +302,8 @@ type Comment struct {
 	RemoteActor  string
 	RemoteName   string
 	RemoteAvatar string
+	APID         string
+	InReplyTo    string
 	Body         string
 	BodyHTML     string
 	Deleted      bool
@@ -345,7 +350,7 @@ type Activity struct {
 // logs and play sessions; social rows come from activities.
 type TimelineItem struct {
 	Key          string
-	Kind         string // review | log | session | shelf | like | rating | list | follow
+	Kind         string // review | log | session | shelf | like | rating | list | follow | boost
 	At           time.Time
 	User         *User
 	UserID       int64
@@ -359,6 +364,44 @@ type TimelineItem struct {
 	TargetUser   *User
 	TargetUserID *int64
 	Visibility   string
+
+	Post            *Post
+	PostID          *int64
+	PostSubjectType string
+	PostSubjectID   int64
+	Comments        []*Comment
+	CSRF            string
+	ViewerID        int64
+	CanModerate     bool
+	CanReply        bool
+	Path            string
+}
+
+// Post is the canonical, interactable feed object. SubjectType/SubjectID
+// point at the underlying log, session or activity row.
+type Post struct {
+	ID          int64
+	UserID      int64
+	User        *User
+	Kind        string
+	SubjectType string
+	SubjectID   int64
+	Visibility  string
+	Body        string
+	URL         string
+	APID        string
+	CreatedAt   time.Time
+	Deleted     bool
+	Likes       int
+	Boosts      int
+	Comments    int
+	Liked       bool
+	Boosted     bool
+	Log         *Log
+	Session     *Session
+	Game        *Game
+	List        *List
+	RemoteActor string
 }
 
 type RemoteNote struct {
@@ -385,16 +428,22 @@ type Badge struct {
 }
 
 type Report struct {
-	ID         int64
-	ReporterID *int64
-	TargetType string
-	TargetID   int64
-	TargetURL  string
-	Reason     string
-	Details    string
-	Status     string
-	CreatedAt  time.Time
-	Reporter   string
+	ID             int64
+	ReporterID     *int64
+	TargetType     string
+	TargetID       int64
+	TargetURL      string
+	Reason         string
+	Details        string
+	Status         string
+	CreatedAt      time.Time
+	Reporter       string
+	RemoteReporter string
+	SourceInstance string
+	Forwarded      bool
+	TargetAuthor   string
+	TargetInstance string
+	ContentPreview string
 }
 
 type News struct {

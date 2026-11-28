@@ -4,8 +4,27 @@
   <div class="profile-body">
     <img class="avatar avatar-lg" src="{{avatar .Profile}}" alt="">
     <div class="profile-id">
-      <h1>{{.Profile.Username}} {{if ne .Profile.Role "user"}}<span class="pill">{{.Profile.RoleLabel}}</span>{{end}}</h1>
-      <div class="muted">Joined {{dateSlash .Profile.CreatedAt}}</div>
+      <div class="profile-title-row">
+        <div class="profile-headline">
+          <h1>{{.Profile.Username}} {{if ne .Profile.Role "user"}}<span class="pill">{{.Profile.RoleLabel}}</span>{{end}}</h1>
+          <div class="muted">Joined {{dateSlash .Profile.CreatedAt}}</div>
+        </div>
+        {{if not .IsMe}}
+        <div class="profile-actions">
+          {{if .Page.User}}
+            {{if .IsFollowing}}
+              <form method="post" action="/users/{{.Profile.Username}}/unfollow"><input type="hidden" name="_csrf" value="{{.CSRF}}"><button class="btn" type="submit">{{if .Pending}}Requested{{else}}Following{{end}}</button></form>
+            {{else}}
+              <form method="post" action="/users/{{.Profile.Username}}/follow"><input type="hidden" name="_csrf" value="{{.CSRF}}"><button class="btn btn-primary" type="submit">Follow</button></form>
+            {{end}}
+            <a class="btn btn-danger-soft" href="/report?target_type=user&target_id={{.Profile.ID}}">Report</a>
+            <form method="post" action="/users/{{.Profile.Username}}/block"><input type="hidden" name="_csrf" value="{{.CSRF}}"><button class="btn btn-danger-strong" type="submit">Block</button></form>
+          {{else}}
+            <a class="btn btn-primary" href="/login">Follow</a>
+          {{end}}
+        </div>
+        {{end}}
+      </div>
       {{if or .Links .Stats}}
       <div class="profile-meta-row">
         {{if .Links}}<div class="profile-links">{{range .Links}}<a class="pill" href="{{.URL}}" rel="me nofollow ugc">{{.Site}}</a>{{end}}</div>{{end}}
@@ -19,21 +38,6 @@
       </div>
       {{end}}
     </div>
-    {{if not .IsMe}}
-    <div class="profile-actions">
-      {{if .Page.User}}
-        {{if .IsFollowing}}
-          <form method="post" action="/users/{{.Profile.Username}}/unfollow"><input type="hidden" name="_csrf" value="{{.CSRF}}"><button class="btn" type="submit">{{if .Pending}}Requested{{else}}Following{{end}}</button></form>
-        {{else}}
-          <form method="post" action="/users/{{.Profile.Username}}/follow"><input type="hidden" name="_csrf" value="{{.CSRF}}"><button class="btn btn-primary" type="submit">Follow</button></form>
-        {{end}}
-        <a class="btn btn-sm" href="/report?target_type=user&target_id={{.Profile.ID}}">Report</a>
-        <form method="post" action="/users/{{.Profile.Username}}/block"><input type="hidden" name="_csrf" value="{{.CSRF}}"><button class="btn btn-sm btn-ghost" type="submit">Block</button></form>
-      {{else}}
-        <a class="btn btn-primary" href="/login">Follow</a>
-      {{end}}
-    </div>
-    {{end}}
   </div>
   {{if .Private}}
     {{if .Profile.Bio}}<div class="profile-bio prose">{{md .Profile.Bio}}</div>{{end}}
@@ -65,6 +69,7 @@
 {{else}}
 <div class="tabs">
   <a href="/users/{{.Profile.Username}}" class="{{if eq .Tab "overview"}}on{{end}}">Overview</a>
+  <a href="/users/{{.Profile.Username}}?tab=games" class="{{if eq .Tab "games"}}on{{end}}">Games</a>
   <a href="/users/{{.Profile.Username}}?tab=reviews" class="{{if eq .Tab "reviews"}}on{{end}}">Reviews</a>
   <a href="/users/{{.Profile.Username}}?tab=lists" class="{{if eq .Tab "lists"}}on{{end}}">Lists</a>
   <a href="/users/{{.Profile.Username}}?tab=trophies" class="{{if eq .Tab "trophies"}}on{{end}}">Trophies</a>
@@ -111,10 +116,12 @@
         <div class="section-head"><h2>Highlighted list</h2></div>
         <a class="list-card list-card-widget" href="/users/{{$.Profile.Username}}/lists/{{.Slug}}">
           {{if .CoverGames}}<div class="list-covers">{{range .CoverGames}}<img src="{{cover .}}" alt="" loading="lazy">{{end}}</div>{{end}}
-          <div>
+          <div class="list-widget-info">
             <h3>{{.Title}}</h3>
-            {{if .Description}}<div class="muted mt1">{{truncate .Description 110}}</div>{{end}}
-            <div class="muted">{{.EntryCount}} {{plural .EntryCount "game" "games"}} · {{privacyLabel .Privacy}}</div>
+            <div class="list-widget-stats">
+              <span class="list-widget-stat"><strong>{{.EntryCount}}</strong><span>{{plural .EntryCount "game" "games"}}</span></span>
+              <span class="list-widget-stat"><strong>{{.Likes}}</strong><span>{{plural .Likes "like" "likes"}}</span></span>
+            </div>
           </div>
         </a>
       {{end}}{{end}}
@@ -144,7 +151,7 @@
         <img class="game-cover" src="{{cover .Game}}" alt="{{.Game.Title}}">
         <div class="recent-title">{{.Game.Title}}</div>
         <div class="recent-meta"><span>Added {{dateLong .AddedAt}}</span></div>
-        {{if .Rating}}<div class="recent-rating">{{stars .Rating 5}} <span>{{rating .Rating 10}} / 10</span></div>{{end}}
+        <div class="recent-rating">{{if .Rating}}{{stars .Rating 5}}{{end}}</div>
       </a>
     {{end}}</div>
     {{else}}<div class="empty">No games on this shelf yet.</div>{{end}}
@@ -155,6 +162,90 @@
     <div class="section-head"><div><h2>Activity</h2><span class="muted">What {{.Profile.Username}} has been doing</span></div></div>
     {{template "timeline_stream" .Stream}}
   </section>
+{{else if eq .Tab "games"}}
+  <section class="section" style="margin-top:0">
+    <form class="log-filter card" method="get" action="/users/{{.Profile.Username}}">
+      <input type="hidden" name="tab" value="games">
+      <div class="log-filter-fields">
+        <div><label for="game-sort">Sort</label><select id="game-sort" name="sort">
+          <option value="" {{if eq .GameSort ""}}selected{{end}}>Recent</option>
+          <option value="title" {{if eq .GameSort "title"}}selected{{end}}>Title</option>
+          <option value="rating" {{if eq .GameSort "rating"}}selected{{end}}>Rating</option>
+          <option value="playtime" {{if eq .GameSort "playtime"}}selected{{end}}>Playtime</option>
+        </select></div>
+        <div><label for="game-status">Shelf</label><select id="game-status" name="status">
+          <option value="">Any shelf</option>
+          <option value="played" {{if eq .GameStatus "played"}}selected{{end}}>Played</option>
+          <option value="playing" {{if eq .GameStatus "playing"}}selected{{end}}>Playing</option>
+          <option value="backlog" {{if eq .GameStatus "backlog"}}selected{{end}}>Backlog</option>
+          <option value="wishlist" {{if eq .GameStatus "wishlist"}}selected{{end}}>Wishlist</option>
+        </select></div>
+        <div><label for="game-played">Played status</label><select id="game-played" name="played">
+          <option value="">Any played status</option>
+          {{range $s := playedStatuses}}
+          <option value="{{$s}}" {{if eq $.GamePlayed $s}}selected{{end}}>{{playedStatusLabel $s}}</option>
+          {{end}}
+        </select></div>
+        <div><label for="game-rating">Minimum rating</label><select id="game-rating" name="rating">
+          <option value="">Any rating</option>
+          {{range $r := seq 10 1}}<option value="{{$r}}" {{if eq $.GameRating (printf "%d" $r)}}selected{{end}}>{{rating (float64 $r) 10}} / 10</option>{{end}}
+        </select></div>
+        <div><label for="game-platform">Platform</label><select id="game-platform" name="platform">
+          <option value="">Any platform</option>
+          {{range .GamePlatforms}}<option value="{{.}}" {{if eq $.GamePlatform .}}selected{{end}}>{{.}}</option>{{end}}
+        </select></div>
+        <div><label for="game-year">Played year</label><select id="game-year" name="year">
+          <option value="">Any year</option>
+          {{range .GameYears}}<option value="{{.}}" {{if eq $.GameYear (printf "%d" .)}}selected{{end}}>{{.}}</option>{{end}}
+        </select></div>
+        <div><label for="game-tag">Session tag</label><select id="game-tag" name="tag">
+          <option value="">Any tag</option>
+          {{range .GameTags}}<option value="{{.}}" {{if eq $.GameTag .}}selected{{end}}>#{{.}}</option>{{end}}
+        </select></div>
+        <div><label for="game-ownership">Ownership</label><select id="game-ownership" name="ownership">
+          <option value="">Any ownership</option>
+          <option value="owned" {{if eq .GameOwnership "owned"}}selected{{end}}>Owned</option>
+          <option value="digital" {{if eq .GameOwnership "digital"}}selected{{end}}>Digital</option>
+          <option value="physical" {{if eq .GameOwnership "physical"}}selected{{end}}>Physical</option>
+          <option value="rented" {{if eq .GameOwnership "rented"}}selected{{end}}>Rented</option>
+          <option value="borrowed" {{if eq .GameOwnership "borrowed"}}selected{{end}}>Borrowed</option>
+          <option value="subscription" {{if eq .GameOwnership "subscription"}}selected{{end}}>Subscription</option>
+          <option value="emulated" {{if eq .GameOwnership "emulated"}}selected{{end}}>Emulated</option>
+        </select></div>
+        <div><label for="game-playtime">Min playtime (h)</label><input id="game-playtime" type="number" name="playtime" min="0" step="0.5" value="{{.GamePlaytime}}" placeholder="Any"></div>
+        <div class="log-filter-checks">
+          <label class="check"><input type="checkbox" name="mastered" value="1" {{if .GameMastered}}checked{{end}}> Mastered</label>
+          <label class="check"><input type="checkbox" name="review" value="1" {{if .GameReviewed}}checked{{end}}> Has review</label>
+        </div>
+        <div class="log-filter-actions"><button class="btn btn-sm btn-primary" type="submit">Apply</button><a class="btn btn-sm" href="/users/{{.Profile.Username}}?tab=games">Reset</a></div>
+      </div>
+      <div class="muted log-filter-count">{{.GameFiltered}} {{plural .GameFiltered "game" "games"}} shown</div>
+    </form>
+    <div class="game-log-list">
+    {{range .GameRows}}
+      <article class="card game-log-row">
+        <a class="game-log-cover" href="/games/{{.Game.Slug}}"><img src="{{userCover $.Profile .Game}}" alt="Cover of {{.Game.Title}}"></a>
+        <div class="game-log-copy">
+          <h2><a href="/games/{{.Game.Slug}}">{{.Game.Title}}</a></h2>
+          <div class="muted">{{if .Platform}}{{.Platform}}{{end}}{{if .Ownership}}{{if .Platform}} · {{end}}{{.Ownership}}{{end}}{{if .Tags}}{{range .Tags}} <span class="pill">#{{.}}</span>{{end}}{{end}}</div>
+          <div class="pill-row">
+            {{if .Shelf}}<span class="pill">{{shelfLabel .Shelf}}</span>{{end}}
+            {{if gt .Played 1}}<span class="pill">Played {{.Played}}×</span>{{end}}
+            <span class="pill">{{playedStatusLabel .PlayedStatus}}</span>
+            {{if .Mastered}}<span class="pill">Mastered</span>{{end}}
+            {{if .HasReview}}<span class="pill">Review</span>{{end}}
+            {{if .Drafts}}<span class="draft-badge">{{.Drafts}} draft</span>{{end}}
+          </div>
+        </div>
+        <div class="game-log-stats">
+          <div>{{if .Rating}}<span class="stars">{{stars .Rating 5}}</span><span>{{rating .Rating 10}} / 10</span>{{else}}<span class="muted">Unrated</span>{{end}}</div>
+          <div class="muted">{{if .Playtime}}{{hours .Playtime}}{{else}}No playtime{{end}}</div>
+          {{if .LastLogID}}<a class="btn btn-sm" href="/users/{{$.Profile.Username}}/logs/{{.Game.Slug}}">Open log</a>{{else}}<a class="btn btn-sm" href="/games/{{.Game.Slug}}/log?new=1">Log game</a>{{end}}
+        </div>
+      </article>
+    {{else}}<div class="empty">No games match these filters.</div>{{end}}
+    </div>
+  </section>
 {{else if eq .Tab "reviews"}}
   <section class="section" style="margin-top:0">
   {{range .Reviews}}{{template "log_row" .}}{{else}}<div class="empty">No reviews yet.</div>{{end}}
@@ -163,7 +254,7 @@
 {{else if eq .Tab "lists"}}
   <section class="section" style="margin-top:0">
   <div class="section-head"><h2>Lists</h2>{{if .IsMe}}<a class="btn btn-sm btn-primary" href="/lists/new">New list</a>{{end}}</div>
-  <div class="grid grid-2">{{range .Lists}}<a class="list-card" href="/users/{{$.Profile.Username}}/lists/{{.Slug}}">{{if .CoverGames}}<div class="list-covers">{{range .CoverGames}}<img src="{{cover .}}" alt="" loading="lazy">{{end}}</div>{{end}}<div><h3>{{.Title}}</h3><div class="muted">{{.EntryCount}} {{plural .EntryCount "game" "games"}} · {{privacyLabel .Privacy}}</div></div></a>{{else}}<div class="empty">No lists yet.</div>{{end}}</div>
+  <div class="grid grid-2">{{range .Lists}}{{template "list_card" (dict "l" . "meta" "profile")}}{{else}}<div class="empty">No lists yet.</div>{{end}}</div>
   </section>
 {{end}}
 {{end}}

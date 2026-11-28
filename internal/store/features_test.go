@@ -211,7 +211,7 @@ func TestRateGameCreatesAndPreservesLogs(t *testing.T) {
 	}
 
 	if _, err := st.UpdateLog(ctx, log.ID, LogInput{
-		UserID: alice.ID, GameID: game.ID, Rating: 7, Review: "A precise climb", Status: "backlog", Replay: true,
+		UserID: alice.ID, GameID: game.ID, Rating: 7, Review: "A precise climb", Status: "shelved", Replay: true,
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -219,7 +219,7 @@ func TestRateGameCreatesAndPreservesLogs(t *testing.T) {
 		t.Fatal(err)
 	}
 	log, _ = st.LatestLogFor(ctx, alice.ID, game.ID)
-	if log.Rating != 4 || log.Review != "A precise climb" || log.Status != "backlog" || !log.Replay {
+	if log.Rating != 4 || log.Review != "A precise climb" || log.Status != "shelved" || !log.Replay {
 		t.Fatalf("rating update overwrote the log: %+v", log)
 	}
 

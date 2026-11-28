@@ -114,7 +114,7 @@ func TestUnifiedTimelinePagesAndFilters(t *testing.T) {
 	}
 }
 
-func TestTimelineHomeFeedVisibilityAndPrivacySettings(t *testing.T) {
+func TestTimelineFeedVisibilityAndPrivacySettings(t *testing.T) {
 	ts, st := testServer(t)
 	ctx := context.Background()
 	alice, _ := st.CreateUser(ctx, "alice", "alice@example.test", "hash", false)
@@ -128,16 +128,16 @@ func TestTimelineHomeFeedVisibilityAndPrivacySettings(t *testing.T) {
 	}
 	aliceClient, aliceSess := authedClient(t, ts, st, alice)
 
-	_, home := getBody(t, aliceClient, ts.URL+"/")
+	_, home := getBody(t, aliceClient, ts.URL+"/feed")
 	if !strings.Contains(home, "Bob Private Game") {
-		t.Fatal("home feed did not include an approved follow")
+		t.Fatal("feed did not include an approved follow")
 	}
 	if err := st.SetActivityVisibility(ctx, bob.ID, map[string]string{"log": "private", "follow": "followers"}); err != nil {
 		t.Fatal(err)
 	}
-	_, home = getBody(t, aliceClient, ts.URL+"/")
+	_, home = getBody(t, aliceClient, ts.URL+"/feed")
 	if strings.Contains(home, "Bob Private Game") {
-		t.Fatal("private log leaked into the home feed")
+		t.Fatal("private log leaked into the feed")
 	}
 
 	// Privacy settings save all eight kinds and reject invalid values.

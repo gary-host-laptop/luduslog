@@ -1,76 +1,420 @@
 {{define "content"}}
-<h1>{{if .Log}}Edit log{{else}}Log{{end}}: {{.Game.Title}}</h1>
-<div class="row mb2"><a href="/games/{{.Game.Slug}}"><img src="{{cover .Game}}" alt="" style="width:80px;border-radius:6px"></a><div class="muted">{{if .Game.ReleaseYear}}{{.Game.ReleaseYear}}{{end}}{{if .Game.Franchise}} · {{.Game.Franchise}}{{end}}</div></div>
-{{if .Error}}<div class="alert alert-error">{{.Error}}</div>{{end}}
-<form class="card stack" method="post" action="{{.Action}}" style="max-width:720px">
-  <input type="hidden" name="_csrf" value="{{.CSRF}}">
-  <div>
-    <label>Rating <span class="muted">(1–10, half-star precision)</span></label>
-    <div class="rating-picker">
-      {{$rating := 0.0}}{{if .Log}}{{$rating = .Log.Rating}}{{end}}
-      <label><input type="radio" name="rating" value="0" {{if eq $rating 0.0}}checked{{end}}><span>—</span></label>
-      {{range $i := seq 1 10}}<label><input type="radio" name="rating" value="{{$i}}" {{if eq $rating (float64 $i)}}checked{{end}}><span>{{$i}}</span></label>{{end}}
+{{$log := .Log}}
+{{$editing := and $log $log.ID}}
+<header class="log-editor-head">
+  <div class="log-editor-id">
+    <a href="/games/{{.Game.Slug}}"><img class="log-editor-cover" src="{{if .Cover}}{{.Cover}}{{else}}{{cover .Game}}{{end}}" alt="Cover of {{.Game.Title}}"></a>
+    <div>
+      <div class="muted log-editor-crumb"><a href="/games/{{.Game.Slug}}">{{.Game.Title}}</a>{{if .Game.ReleaseYear}} · {{.Game.ReleaseYear}}{{end}}{{if .LogCount}} · {{.LogCount}} {{plural .LogCount "log" "logs"}}{{end}}</div>
+      <h1>{{if $editing}}{{if $log.Name}}{{$log.Name}}{{else}}Edit log{{end}}{{else}}Log {{.Game.Title}}{{end}}</h1>
+      <div class="pill-row">
+        {{$status := .DefaultStatus}}{{if $log}}{{$status = $log.Status}}{{end}}
+        <span class="pill">{{playedStatusLabel $status}}</span>
+        {{if .GameStatus.Shelf}}<span class="pill">{{shelfLabel .GameStatus.Shelf}}</span>{{end}}
+        {{if .GameStatus.Played}}<span class="pill">Played {{.GameStatus.Played}}×</span>{{end}}
+      </div>
     </div>
-    <div class="field-hint">Shown on the 5-star scale if that's your preference. One rating per game counts toward averages.</div>
   </div>
-  <div class="form-row">
-    <div><label for="status">Status</label><select id="status" name="status">
-      {{$status := "played"}}{{if .Log}}{{$status = .Log.Status}}{{end}}
-      <option value="played" {{if eq $status "played"}}selected{{end}}>Played</option>
-      <option value="completed" {{if eq $status "completed"}}selected{{end}}>Completed</option>
-      <option value="playing" {{if eq $status "playing"}}selected{{end}}>Playing</option>
-      <option value="backlog" {{if eq $status "backlog"}}selected{{end}}>Backlog</option>
-      <option value="wishlist" {{if eq $status "wishlist"}}selected{{end}}>Wishlist</option>
-      <option value="abandoned" {{if eq $status "abandoned"}}selected{{end}}>Abandoned</option>
-      <option value="replayed" {{if eq $status "replayed"}}selected{{end}}>Replayed</option>
-    </select></div>
-    <div><label for="platform_id">Platform</label><select id="platform_id" name="platform_id"><option value="">—</option>{{range .Platforms}}<option value="{{.ID}}" {{if and $.Log $.Log.PlatformID (eq (derefInt $.Log.PlatformID) .ID)}}selected{{end}}>{{.Name}}</option>{{end}}</select></div>
+  <div class="log-editor-actions">
+    <button class="btn btn-primary" type="submit" form="log-form">{{if $editing}}Save log{{else}}Create log{{end}}</button>
+    <a class="btn" href="{{if $editing}}/users/{{.Page.User.Username}}/logs/{{.Game.Slug}}{{else}}/games/{{.Game.Slug}}{{end}}">Cancel</a>
   </div>
-  <div class="form-row">
-    <div><label for="played_on_id">Played on</label><select id="played_on_id" name="played_on_id"><option value="">—</option>{{range .Platforms}}<option value="{{.ID}}" {{if and $.Log $.Log.PlayedOnID (eq (derefInt $.Log.PlayedOnID) .ID)}}selected{{end}}>{{.Name}}</option>{{end}}</select><div class="field-hint">The system you actually played it on, when it differs from the release platform.</div></div>
-    <div><label for="edition_game_id">Edition</label><select id="edition_game_id" name="edition_game_id"><option value="">—</option>{{if .Game}}{{range .Game.Editions}}<option value="{{.ID}}" {{if and $.Log $.Log.EditionGameID (eq (derefInt $.Log.EditionGameID) .ID)}}selected{{end}}>{{if .EditionName}}{{.EditionName}}{{else}}{{.Title}}{{end}}</option>{{end}}{{end}}</select></div>
+</header>
+
+{{if .Error}}<div class="alert alert-error">{{.Error}}</div>{{end}}
+{{if ge .LogCount 90}}<div class="alert alert-warn">This game has {{.LogCount}} of {{.MaxLogs}} possible logs. Delete older logs before creating more.</div>{{end}}
+
+<nav class="log-chipbar" aria-label="Logs for {{.Game.Title}}">
+  <div class="log-chips">
+    {{range .Logs}}
+    <a class="log-chip{{if and $log (eq $log.ID .ID)}} active{{end}}" href="/logs/{{.ID}}/edit?tab={{$.Tab}}" {{if and $log (eq $log.ID .ID)}}aria-current="page"{{end}} title="{{if .Name}}{{.Name}}{{else}}{{playedStatusLabel .Status}}{{end}} · {{date .CreatedAt}}">{{if .Name}}{{.Name}}{{else}}{{playedStatusLabel .Status}}{{end}} <span class="log-chip-date">{{date .CreatedAt}}</span></a>
+    {{end}}
+    {{if .IsNew}}
+    <a class="log-chip active" aria-current="page" href="/games/{{.Game.Slug}}/log?new=1&amp;tab={{.Tab}}">{{if .Logs}}New log{{else}}Log 1{{end}}</a>
+    {{end}}
+    {{if $editing}}
+    <details class="log-chip-pop">
+      <summary class="log-chip log-chip-more" aria-label="Rename or delete this log" title="Rename or delete this log">···</summary>
+      <div class="log-chip-menu card">
+        <form class="log-chip-menu-form" method="post" action="/logs/{{$log.ID}}/rename">
+          <input type="hidden" name="_csrf" value="{{.CSRF}}">
+          <label for="log-rename">Log title</label>
+          <div class="row">
+            <input id="log-rename" type="text" name="name" maxlength="200" value="{{$log.Name}}" placeholder="Log title">
+            <button class="btn btn-sm btn-primary" type="submit">Rename</button>
+          </div>
+        </form>
+        <form method="post" action="/logs/{{$log.ID}}/delete" onsubmit="return confirm('Delete this log?')">
+          <input type="hidden" name="_csrf" value="{{.CSRF}}">
+          <button class="linklike log-chip-delete" type="submit">Delete log</button>
+        </form>
+      </div>
+    </details>
+    {{end}}
+    {{if or .IsNew (ge .LogCount .MaxLogs)}}
+    <span class="log-chip log-chip-add is-disabled" aria-disabled="true" title="{{if .IsNew}}Save this log before adding another{{else}}This game already has the maximum number of logs{{end}}"><i class="ph-light ph-plus icon" aria-hidden="true"></i> Add log</span>
+    {{else}}
+    <a class="log-chip log-chip-add" href="/games/{{.Game.Slug}}/log?new=1&amp;tab={{.Tab}}" title="Add another log"><i class="ph-light ph-plus icon" aria-hidden="true"></i> Add log</a>
+    {{end}}
   </div>
-  <div class="form-row">
-    <div><label for="language">Language</label><input id="language" type="text" name="language" list="language-options" value="{{if .Log}}{{.Log.Language}}{{end}}" placeholder="English"><datalist id="language-options"><option value="English"><option value="Japanese"><option value="French"><option value="German"><option value="Spanish"><option value="Portuguese"><option value="Italian"><option value="Korean"><option value="Chinese"></datalist></div>
-    <div><label for="time_to_finish">Time to finish (hours)</label><input id="time_to_finish" type="number" step="0.1" min="0" name="time_to_finish" value="{{if .Log}}{{.Log.TimeToFinish}}{{end}}"><div class="field-hint">Optional manual timing. Not imported from Backloggd.</div></div>
-  </div>
-  <div><label for="time_to_master">Time to master (hours)</label><input id="time_to_master" type="number" step="0.1" min="0" name="time_to_master" value="{{if .Log}}{{.Log.TimeToMaster}}{{end}}"></div>
-  <div class="form-row">
-    <div><label for="started_at">Started</label><input id="started_at" type="date" name="started_at" value="{{if .Log}}{{.Log.StartedAt}}{{end}}"></div>
-    <div><label for="finished_at">Finished</label><input id="finished_at" type="date" name="finished_at" value="{{if .Log}}{{.Log.FinishedAt}}{{end}}"></div>
-  </div>
-  <div class="form-row">
-    <div><label for="played">Times played</label><input id="played" type="number" step="1" min="0" max="9999" name="played" value="{{.Played}}"><div class="field-hint">Raise this for replays. It appears as the play counter on the game page.</div></div>
-    <div><label for="playtime">Playtime (hours)</label><input id="playtime" type="number" step="0.1" min="0" name="playtime" value="{{if .Log}}{{.Log.Playtime}}{{end}}"></div>
-  </div>
-  <div class="form-row">
-    <div><label for="difficulty">Difficulty</label><select id="difficulty" name="difficulty">
-      {{$diff := ""}}{{if .Log}}{{$diff = .Log.Difficulty}}{{end}}
-      <option value="">—</option><option value="easy" {{if eq $diff "easy"}}selected{{end}}>Easy</option><option value="normal" {{if eq $diff "normal"}}selected{{end}}>Normal</option><option value="hard" {{if eq $diff "hard"}}selected{{end}}>Hard</option><option value="brutal" {{if eq $diff "brutal"}}selected{{end}}>Brutal</option>
-    </select></div>
-    <div><label for="ownership">Ownership</label><select id="ownership" name="ownership">
-      {{$own := ""}}{{if .Log}}{{$own = .Log.Ownership}}{{end}}
-      <option value="">—</option><option value="owned" {{if eq $own "owned"}}selected{{end}}>Owned</option><option value="rented" {{if eq $own "rented"}}selected{{end}}>Rented</option><option value="borrowed" {{if eq $own "borrowed"}}selected{{end}}>Borrowed</option><option value="subscription" {{if eq $own "subscription"}}selected{{end}}>Subscription</option><option value="emulated" {{if eq $own "emulated"}}selected{{end}}>Emulated</option>
-    </select></div>
-  </div>
-  <div><label for="storefront">Storefront</label><input id="storefront" type="text" name="storefront" value="{{if .Log}}{{.Log.Storefront}}{{end}}" placeholder="Steam, Itch, retail…"></div>
-  <div>
-    <label for="name">Title <span class="muted">(optional)</span></label>
-    <input id="name" type="text" name="name" maxlength="200" value="{{if .Log}}{{.Log.Name}}{{end}}" placeholder="Give this review a title">
-    <div class="field-hint">Shown on the review and in the highlighted review widget.</div>
-  </div>
-  <div>
-    <label for="review">Review or journal <span class="muted">(Markdown)</span></label>
-    <textarea id="review" name="review" rows="10" placeholder="What did you think?">{{if .Log}}{{.Log.Review}}{{end}}</textarea>
-    <div class="field-hint">Leave empty to keep this as a private log entry. Markdown: **bold**, *italic*, lists, quotes, links.Choosing an ownership here also adds or updates your library entry for this game.</div>
-  </div>
-  <div class="row">
-    <label class="check"><input type="checkbox" name="spoiler" value="1" {{if and .Log .Log.Spoiler}}checked{{end}}> Contains spoilers</label>
-    <label class="check"><input type="checkbox" name="replay" value="1" {{if and .Log .Log.Replay}}checked{{end}}> Replay</label>
-    <label class="check"><input type="checkbox" name="mastered" value="1" {{if and .Log .Log.Mastered}}checked{{end}}> Mastered / 100%</label>
-    <label class="check"><input type="checkbox" name="sync_sessions" value="1" {{if and .Log .Log.SyncSessions}}checked{{end}}> Add playtime from sessions</label>
-    <label class="check"><input type="checkbox" name="draft" value="1" {{if and .Log .Log.Draft}}checked{{end}}> Save as draft</label>
-  </div>
-  <div class="btn-group"><button class="btn btn-primary" type="submit">Save log</button><a class="btn" href="/games/{{.Game.Slug}}">Cancel</a></div>
-</form>
+</nav>
+
+<div class="log-editor" data-log-tabs>
+  <nav class="log-tabs" role="tablist" aria-label="Log editor sections">
+    <button type="button" role="tab" data-log-tab="play" aria-controls="log-form" aria-selected="{{if eq .Tab "play"}}true{{else}}false{{end}}">Play</button>
+    <button type="button" role="tab" data-log-tab="journal" aria-controls="panel-journal" aria-selected="{{if eq .Tab "journal"}}true{{else}}false{{end}}">Journal</button>
+    <button type="button" role="tab" data-log-tab="library" aria-controls="panel-library" aria-selected="{{if eq .Tab "library"}}true{{else}}false{{end}}">Library</button>
+    <button type="button" role="tab" data-log-tab="review" aria-controls="panel-review" aria-selected="{{if eq .Tab "review"}}true{{else}}false{{end}}">Review</button>
+  </nav>
+
+  <form id="log-form" class="log-panel" role="tabpanel" data-log-panel="play" method="post" action="{{.Action}}">
+    <input type="hidden" name="_csrf" value="{{.CSRF}}">
+    <input type="hidden" name="return_to" value="{{if $editing}}/users/{{.Page.User.Username}}/logs/{{.Game.Slug}}{{end}}">
+    <div class="log-sheet">
+      <div class="log-band-row">
+        <section class="log-band">
+          <div class="log-band-head"><h2>Rating</h2></div>
+          {{$rating := 0.0}}{{if $log}}{{$rating = $log.Rating}}{{end}}
+          <div class="log-rating-row">
+            <div class="log-rating">
+              <label class="log-rating-clear" title="Clear rating"><input type="radio" name="rating" value="0" {{if eq $rating 0.0}}checked{{end}}><i class="ph-light ph-x" aria-hidden="true"></i><span class="sr-only">No rating</span></label>
+              <fieldset class="quick-rate log-rate">
+                <legend class="sr-only">Rating out of 5 stars</legend>
+                {{range $star := seq 5 1}}{{$full := add $star $star}}{{$half := sub $full 1}}
+                <input type="radio" id="log-r{{$full}}" name="rating" value="{{$full}}" {{if eq $rating (float64 $full)}}checked{{end}}>
+                <label class="quick-half right" for="log-r{{$full}}"><i class="ph-light ph-star" aria-hidden="true"></i><span class="sr-only">{{rating (float64 $full) 10}} out of 10</span></label>
+                <input type="radio" id="log-r{{$half}}" name="rating" value="{{$half}}" {{if eq $rating (float64 $half)}}checked{{end}}>
+                <label class="quick-half" for="log-r{{$half}}"><i class="ph-light ph-star" aria-hidden="true"></i><span class="sr-only">{{rating (float64 $half) 10}} out of 10</span></label>
+                {{end}}
+              </fieldset>
+            </div>
+            <label class="check log-inline-check"><input type="hidden" name="primary_rating" value="0"><input type="checkbox" name="primary_rating" value="1" {{if or (not $editing) (and $log $log.PrimaryRating)}}checked{{end}}> Use this as my primary rating for the game</label>
+          </div>
+          <div class="field-hint">Half-star precision. One rating per game counts toward the average.</div>
+        </section>
+
+        <section class="log-band">
+          <div class="log-band-head log-band-head-inline">
+            <div>
+              <h2>This game</h2>
+              <div class="field-hint">Shelf and play count apply across logs.</div>
+            </div>
+            <div class="log-toggle-row">
+              <input type="hidden" name="game_shelf_form" value="1">
+              <label class="log-toggle"><input type="radio" name="game_shelf" value="playing" {{if eq .GameStatus.Shelf "playing"}}checked{{end}}><i class="ph-light ph-play icon" aria-hidden="true"></i> Playing</label>
+              <label class="log-toggle"><input type="radio" name="game_shelf" value="played" {{if eq .GameStatus.Shelf "played"}}checked{{end}}><i class="ph-light ph-check-circle icon" aria-hidden="true"></i> Played</label>
+              <label class="log-toggle"><input type="radio" name="game_shelf" value="backlog" {{if eq .GameStatus.Shelf "backlog"}}checked{{end}}><i class="ph-light ph-stack icon" aria-hidden="true"></i> Backlog</label>
+              <label class="log-toggle"><input type="radio" name="game_shelf" value="wishlist" {{if eq .GameStatus.Shelf "wishlist"}}checked{{end}}><i class="ph-light ph-heart icon" aria-hidden="true"></i> Wishlist</label>
+              {{if .GameStatus.Shelf}}<button class="log-toggle log-toggle-remove" type="submit" name="game_shelf_remove" value="1"><i class="ph-light ph-trash icon" aria-hidden="true"></i> Remove from shelf</button>{{end}}
+            </div>
+          </div>
+          <div class="log-fields">
+            <div class="log-field">
+              <label for="played">Times played</label>
+              <input id="played" type="number" step="1" min="0" max="9999" name="played" value="{{.Played}}">
+              <div class="field-hint">The play counter shown on the game page.</div>
+            </div>
+          </div>
+        </section>
+
+      </div>
+
+      <div class="log-band-row">
+        <section class="log-band">
+          <div class="log-band-head"><h2>This playthrough</h2></div>
+          <div class="log-fields">
+            <div class="log-field">
+              <label for="status">Played status</label>
+              <select id="status" name="status">
+                {{$status := .DefaultStatus}}{{if $log}}{{$status = $log.Status}}{{end}}
+                {{range $s := playedStatuses}}
+                <option value="{{$s}}" {{if eq $status $s}}selected{{end}}>{{playedStatusLabel $s}}</option>
+                {{end}}
+              </select>
+              <div class="field-hint">How this playthrough ended. Separate from your game shelf.</div>
+            </div>
+            <div class="log-field">
+              <label for="language">Language</label>
+              <input id="language" type="text" name="language" list="language-options" value="{{if $log}}{{$log.Language}}{{end}}" placeholder="English">
+              <datalist id="language-options"><option value="English"><option value="Japanese"><option value="French"><option value="German"><option value="Spanish"><option value="Portuguese"><option value="Italian"><option value="Korean"><option value="Chinese"></datalist>
+            </div>
+            <div class="log-field">
+              <label for="played_on_id">Played on</label>
+              <select id="played_on_id" name="played_on_id"><option value="">—</option>{{range .PlayedOnPlatforms}}<option value="{{.ID}}" {{if and $log $log.PlayedOnID (eq (derefInt $log.PlayedOnID) .ID)}}selected{{end}}>{{.Name}}</option>{{end}}</select>
+              <div class="field-hint">Any system works, including emulation — e.g. Doom on a 3DS.</div>
+            </div>
+            <div class="log-field">
+              <label for="platform_id">Release platform</label>
+              <select id="platform_id" name="platform_id"><option value="">—</option>{{range .Platforms}}<option value="{{.ID}}" {{if and $log $log.PlatformID (eq (derefInt $log.PlatformID) .ID)}}selected{{end}}>{{.Name}}</option>{{end}}</select>
+              <div class="field-hint">Optional catalog platform, when it differs from where you played.</div>
+            </div>
+            <div class="log-field">
+              <label for="edition_game_id">Edition</label>
+              <select id="edition_game_id" name="edition_game_id"><option value="">—</option>{{range .Game.Editions}}<option value="{{.ID}}" {{if and $log $log.EditionGameID (eq (derefInt $log.EditionGameID) .ID)}}selected{{end}}>{{if .EditionName}}{{.EditionName}}{{else}}{{.Title}}{{end}}</option>{{end}}</select>
+            </div>
+          </div>
+        </section>
+
+        <section class="log-band">
+          <div class="log-band-head"><h2>Time</h2></div>
+          <div class="log-fields">
+            <div class="log-field">
+              <label for="started_at">Started on</label>
+              <input id="started_at" type="date" name="started_at" value="{{if $log}}{{$log.StartedAt}}{{end}}">
+            </div>
+            <div class="log-field">
+              <label for="finished_at">Finished on</label>
+              <input id="finished_at" type="date" name="finished_at" value="{{if $log}}{{$log.FinishedAt}}{{end}}">
+            </div>
+            <div class="log-field log-duration">
+              <span class="log-field-label">Playtime</span>
+              <div class="log-duration-pair">
+                <div class="log-duration-part">
+                  <input id="playtime-hours" type="number" min="0" max="9999" step="1" name="playtime_hours" value="{{if $log}}{{durationHours $log.Playtime}}{{end}}" aria-label="Playtime hours">
+                  <span class="log-duration-unit" aria-hidden="true">hrs</span>
+                </div>
+                <div class="log-duration-part">
+                  <input id="playtime-minutes" type="number" min="0" max="59" step="1" name="playtime_minutes" value="{{if $log}}{{durationMinutes $log.Playtime}}{{end}}" aria-label="Playtime minutes">
+                  <span class="log-duration-unit" aria-hidden="true">mins</span>
+                </div>
+              </div>
+            </div>
+            <div class="log-field log-duration">
+              <span class="log-field-label">Time to finish</span>
+              <div class="log-duration-pair">
+                <div class="log-duration-part">
+                  <input id="time-to-finish-hours" type="number" min="0" max="9999" step="1" name="time_to_finish_hours" value="{{if $log}}{{durationHours $log.TimeToFinish}}{{end}}" aria-label="Time to finish hours">
+                  <span class="log-duration-unit" aria-hidden="true">hrs</span>
+                </div>
+                <div class="log-duration-part">
+                  <input id="time-to-finish-minutes" type="number" min="0" max="59" step="1" name="time_to_finish_minutes" value="{{if $log}}{{durationMinutes $log.TimeToFinish}}{{end}}" aria-label="Time to finish minutes">
+                  <span class="log-duration-unit" aria-hidden="true">mins</span>
+                </div>
+              </div>
+            </div>
+            <div class="log-field log-duration">
+              <span class="log-field-label">Time to master</span>
+              <div class="log-duration-pair">
+                <div class="log-duration-part">
+                  <input id="time-to-master-hours" type="number" min="0" max="9999" step="1" name="time_to_master_hours" value="{{if $log}}{{durationHours $log.TimeToMaster}}{{end}}" aria-label="Time to master hours">
+                  <span class="log-duration-unit" aria-hidden="true">hrs</span>
+                </div>
+                <div class="log-duration-part">
+                  <input id="time-to-master-minutes" type="number" min="0" max="59" step="1" name="time_to_master_minutes" value="{{if $log}}{{durationMinutes $log.TimeToMaster}}{{end}}" aria-label="Time to master minutes">
+                  <span class="log-duration-unit" aria-hidden="true">mins</span>
+                </div>
+              </div>
+            </div>
+          </div>
+          <div class="log-band-actions">
+            <label class="check log-inline-check"><input type="checkbox" name="sync_sessions" value="1" {{if and $log $log.SyncSessions}}checked{{end}}> Add playtime from sessions</label>
+          </div>
+        </section>
+
+      </div>
+
+      <section class="log-band">
+        <div class="log-band-head"><h2>Play details</h2></div>
+        <div class="log-fields">
+          <div class="log-field">
+            <label for="difficulty">Difficulty</label>
+            <select id="difficulty" name="difficulty">
+              {{$diff := ""}}{{if $log}}{{$diff = $log.Difficulty}}{{end}}
+              <option value="">—</option><option value="easy" {{if eq $diff "easy"}}selected{{end}}>Easy</option><option value="normal" {{if eq $diff "normal"}}selected{{end}}>Normal</option><option value="hard" {{if eq $diff "hard"}}selected{{end}}>Hard</option><option value="brutal" {{if eq $diff "brutal"}}selected{{end}}>Brutal</option>
+            </select>
+          </div>
+          <div class="log-field">
+            <span class="log-field-label">Flags</span>
+            <div class="log-toggle-row">
+              <label class="log-toggle"><input type="checkbox" name="replay" value="1" {{if and $log $log.Replay}}checked{{end}}> Replay</label>
+              <label class="log-toggle"><input type="checkbox" name="mastered" value="1" {{if and $log $log.Mastered}}checked{{end}}> Mastered / 100%</label>
+            </div>
+          </div>
+        </div>
+      </section>
+    </div>
+    <div class="btn-group"><button class="btn btn-primary" type="submit">Save log</button></div>
+  </form>
+
+  <section class="log-panel" role="tabpanel" data-log-panel="journal" id="panel-journal">
+    {{if $editing}}
+    <div class="section-head"><div><h2>Journal</h2><span class="muted">Sessions for this log · {{hours $log.Playtime}} total</span></div></div>
+    <div class="log-journal-grid">
+      <div>
+        {{if .Sessions}}
+          {{range .Sessions}}
+          <article class="card log-session">
+            <div class="row between"><strong>{{if .StartedOn}}{{.StartedOn}}{{else}}{{date .CreatedAt}}{{end}}{{if .EndedOn}} → {{.EndedOn}}{{end}}</strong><span>{{hours .Playtime}}</span></div>
+            <div class="muted">{{notePrivacyLabel .NotePrivacy}}</div>
+            {{if .Note}}<div class="prose mt1">{{md .Note}}</div>{{end}}
+            {{if .Days}}<div class="pill-row">{{range .Days}}<span class="pill">{{.}}</span>{{end}}</div>{{end}}
+            {{if .Tags}}<div class="pill-row">{{range .Tags}}<span class="pill">#{{.}}</span>{{end}}</div>{{end}}
+            <details class="mt1">
+              <summary>Edit session</summary>
+              <form class="stack mt1" method="post" action="/sessions/{{.ID}}/edit">
+                <input type="hidden" name="_csrf" value="{{$.CSRF}}">
+                <input type="hidden" name="return_to" value="/logs/{{$log.ID}}/edit?tab=journal">
+                <div><label for="note-{{.ID}}">What happened?</label><textarea id="note-{{.ID}}" name="note" rows="3">{{.Note}}</textarea></div>
+                <div class="form-row">
+                  <div><label for="playtime-{{.ID}}">Hours</label><input id="playtime-{{.ID}}" type="number" step="0.1" min="0" name="playtime" value="{{.Playtime}}"></div>
+                  <div><label for="privacy-{{.ID}}">Note privacy</label><select id="privacy-{{.ID}}" name="privacy">
+                    <option value="everyone" {{if eq .NotePrivacy "everyone"}}selected{{end}}>Everyone</option>
+                    <option value="friends" {{if eq .NotePrivacy "friends"}}selected{{end}}>Friends</option>
+                    <option value="none" {{if eq .NotePrivacy "none"}}selected{{end}}>Private</option>
+                  </select></div>
+                </div>
+                <div><label>Days played</label>
+                  {{range .Days}}<input type="date" name="days" value="{{.}}">{{end}}
+                  <input type="date" name="days"><input type="date" name="days">
+                  <button class="btn btn-sm" type="button" data-today>Today</button>
+                </div>
+                <div><label for="tags-{{.ID}}">Tags <span class="muted">(up to 8, comma separated)</span></label><input id="tags-{{.ID}}" type="text" name="tags" value="{{join .Tags ", "}}"></div>
+                <button class="btn btn-sm btn-primary" type="submit">Save session</button>
+              </form>
+            </details>
+            <form method="post" action="/sessions/{{.ID}}/delete" class="mt1">
+              <input type="hidden" name="_csrf" value="{{$.CSRF}}">
+              <input type="hidden" name="return_to" value="/logs/{{$log.ID}}/edit?tab=journal">
+              <button class="linklike" type="submit">Delete session</button>
+            </form>
+          </article>
+          {{end}}
+        {{else}}<div class="empty"><h3>No sessions logged</h3><p>Write down what you played — it feeds your journal and playtime.</p></div>{{end}}
+      </div>
+      <aside class="card">
+        <h2>Add a session</h2>
+        <form class="stack" method="post" action="/logs/{{$log.ID}}/sessions">
+          <input type="hidden" name="_csrf" value="{{.CSRF}}">
+          <input type="hidden" name="return_to" value="/logs/{{$log.ID}}/edit?tab=journal">
+          <div><label for="journal-note">What happened?</label><textarea id="journal-note" name="note" rows="3" placeholder="Beat the third boss, found the hidden path…"></textarea></div>
+          <div class="form-row">
+            <div><label for="journal-playtime">Hours</label><input id="journal-playtime" type="number" step="0.1" min="0" name="playtime" placeholder="1.5"></div>
+            <div><label for="journal-privacy">Note privacy</label><select id="journal-privacy" name="privacy"><option value="friends">Friends</option><option value="everyone">Everyone</option><option value="none">Private</option></select></div>
+          </div>
+          <div><label>Days played</label><input type="date" name="days"><input type="date" name="days"><input type="date" name="days"><button class="btn btn-sm" type="button" data-today>Today</button><div class="field-hint">One date per day. Hours above are the total for the session.</div></div>
+          <div><label for="journal-tags">Tags <span class="muted">(up to 8, comma separated)</span></label><input id="journal-tags" type="text" name="tags" placeholder="boss, co-op, stream"></div>
+          <button class="btn btn-primary" type="submit">Add session</button>
+        </form>
+      </aside>
+    </div>
+    {{else}}
+    <div class="empty"><h3>Save the log first</h3><p>The journal starts once this log exists.</p></div>
+    {{end}}
+  </section>
+
+  <section class="log-panel" role="tabpanel" data-log-panel="library" id="panel-library">
+    <div class="log-sheet">
+      <section class="log-band">
+        <div class="log-band-head"><h2>Collection</h2></div>
+        <p class="muted">Your copy of the game, separate from any playthrough.</p>
+        {{if .Library}}<div class="pill-row"><span class="pill">{{.Library.Ownership}}</span>{{if .Library.Platform}}<span class="pill">{{.Library.Platform}}</span>{{end}}{{if .Library.Storefront}}<span class="pill">{{.Library.Storefront}}</span>{{end}}{{if .Library.Edition}}<span class="pill">{{.Library.Edition}}</span>{{end}}</div>{{end}}
+        <form method="post" action="/library">
+          <input type="hidden" name="_csrf" value="{{.CSRF}}">
+          <input type="hidden" name="game_id" value="{{.Game.ID}}">
+          <input type="hidden" name="return_to" value="{{if $editing}}/logs/{{$log.ID}}/edit?tab=library{{else}}/games/{{.Game.Slug}}/log?new=1&amp;tab=library{{end}}">
+          <div class="log-fields">
+            <div class="log-field">
+              <label for="lib-platform">Platform</label>
+              <select id="lib-platform" name="platform_id"><option value="">—</option>{{range .PlayedOnPlatforms}}<option value="{{.ID}}" {{if and $.Library $.Library.PlatformID (eq (derefInt $.Library.PlatformID) .ID)}}selected{{end}}>{{.Name}}</option>{{end}}</select>
+            </div>
+            <div class="log-field">
+              <label for="lib-ownership">Ownership</label>
+              <select id="lib-ownership" name="ownership">
+                {{$own := ""}}{{if .Library}}{{$own = .Library.Ownership}}{{end}}
+                <option value="">—</option><option value="owned" {{if eq $own "owned"}}selected{{end}}>Owned</option><option value="digital" {{if eq $own "digital"}}selected{{end}}>Digital</option><option value="physical" {{if eq $own "physical"}}selected{{end}}>Physical</option><option value="rented" {{if eq $own "rented"}}selected{{end}}>Rented</option><option value="borrowed" {{if eq $own "borrowed"}}selected{{end}}>Borrowed</option><option value="subscription" {{if eq $own "subscription"}}selected{{end}}>Subscription</option><option value="emulated" {{if eq $own "emulated"}}selected{{end}}>Emulated</option>
+              </select>
+            </div>
+            <div class="log-field">
+              <label for="lib-storefront">Storefront</label>
+              <input id="lib-storefront" type="text" name="storefront" value="{{if .Library}}{{.Library.Storefront}}{{end}}" placeholder="Steam, Itch, retail…">
+            </div>
+            <div class="log-field">
+              <label for="lib-edition">Owned edition</label>
+              <input id="lib-edition" type="text" name="edition" value="{{if .Library}}{{.Library.Edition}}{{end}}" placeholder="Deluxe Edition">
+              <div class="field-hint">Your copy's edition label, if different from the catalog edition.</div>
+            </div>
+          </div>
+          <div class="log-band-actions"><button class="btn btn-primary" type="submit">Save library entry</button></div>
+        </form>
+        {{if .Library}}
+        <form class="log-remove-form" method="post" action="/library/remove">
+          <input type="hidden" name="_csrf" value="{{.CSRF}}">
+          <input type="hidden" name="game_id" value="{{.Game.ID}}">
+          <input type="hidden" name="return_to" value="{{if $editing}}/logs/{{$log.ID}}/edit?tab=library{{end}}">
+          <button class="linklike" type="submit">Remove from library</button>
+        </form>
+        {{end}}
+      </section>
+
+      <section class="log-band">
+        <div class="log-band-head"><h2>Custom cover</h2></div>
+        <form method="post" action="/logs/{{if $editing}}{{$log.ID}}{{else}}0{{end}}/cover">
+          <input type="hidden" name="_csrf" value="{{.CSRF}}">
+          <div class="log-fields">
+            <div class="log-field log-field-wide">
+              <label for="cover_url">Image URL</label>
+              <input id="cover_url" type="url" name="cover_url" value="{{.Cover}}" placeholder="https://…">
+              <div class="field-hint">Applies to this game across your profile. Leave empty to use the catalog cover.</div>
+            </div>
+          </div>
+          <div class="log-band-actions"><button class="btn" type="submit" {{if not $editing}}disabled{{end}}>Save cover</button></div>
+        </form>
+      </section>
+
+      <section class="log-band">
+        <div class="log-band-head"><h2>Add to list</h2></div>
+        {{if .Lists}}
+        <form method="post" action="/games/{{.Game.Slug}}/lists">
+          <input type="hidden" name="_csrf" value="{{.CSRF}}">
+          <input type="hidden" name="return_to" value="{{if $editing}}/logs/{{$log.ID}}/edit?tab=library{{end}}">
+          <div class="log-fields">
+            <div class="log-field">
+              <label for="list_id">List</label>
+              <select id="list_id" name="list_id">{{range .Lists}}<option value="{{.ID}}">{{.Title}}</option>{{end}}</select>
+            </div>
+            <div class="log-field">
+              <label for="list-note">Note <span class="muted">(optional)</span></label>
+              <input id="list-note" type="text" name="note">
+            </div>
+          </div>
+          <div class="log-band-actions"><button class="btn" type="submit">Add game to list</button></div>
+        </form>
+        {{else}}<p class="muted">You don't have any lists yet. <a href="/lists/new">Create one</a>.</p>{{end}}
+      </section>
+
+      <section class="log-band log-danger">
+        <div class="log-band-head"><h2>Delete all data</h2></div>
+        <p class="muted">Deletes every log, play session, library entry, cover and status you have for {{.Game.Title}}. This cannot be undone.</p>
+        {{if $editing}}
+        <div class="log-band-actions">
+          <form method="post" action="/logs/{{$log.ID}}/delete-all" onsubmit="return confirm('Delete every log and library entry for {{.Game.Title}}? This cannot be undone.')">
+            <input type="hidden" name="_csrf" value="{{.CSRF}}">
+            <button class="btn btn-danger" type="submit">Delete all data for this game</button>
+          </form>
+        </div>
+        {{end}}
+      </section>
+    </div>
+  </section>
+
+  <section class="log-panel" role="tabpanel" data-log-panel="review" id="panel-review">
+    <div class="stack">
+      <h2>Review</h2>
+      <div>
+        <label for="name">Title <span class="muted">(optional)</span></label>
+        <input id="name" type="text" name="name" maxlength="200" value="{{if $log}}{{$log.Name}}{{end}}" placeholder="Give this review a title" form="log-form">
+        <div class="field-hint">Shown on the review and in the highlighted review widget.</div>
+      </div>
+      <div>
+        <label for="review">Body <span class="muted">(Markdown)</span></label>
+        <textarea id="review" name="review" rows="10" placeholder="What did you think?" form="log-form">{{if $log}}{{$log.Review}}{{end}}</textarea>
+        <div class="field-hint">Leave empty to keep this as a private log entry. Markdown: **bold**, *italic*, lists, quotes, links.</div>
+      </div>
+      <div class="row">
+        <label class="check"><input type="checkbox" name="spoiler" value="1" form="log-form" {{if and $log $log.Spoiler}}checked{{end}}> Contains spoilers</label>
+        <label class="check"><input type="checkbox" name="draft" value="1" form="log-form" {{if and $log $log.Draft}}checked{{end}}> Save as draft</label>
+      </div>
+    </div>
+  </section>
+</div>
 {{end}}

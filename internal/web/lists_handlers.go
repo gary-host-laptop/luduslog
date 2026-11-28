@@ -2,6 +2,7 @@ package web
 
 import (
 	"net/http"
+	"net/url"
 	"strconv"
 	"strings"
 
@@ -23,6 +24,83 @@ type listData struct {
 	Query     string
 	Results   []models.Game
 	PublicURL string
+}
+
+type listsData struct {
+	Page
+	Lists     []*models.List
+	Total     int
+	Tab       string
+	Sort      string
+	Dir       string
+	PageNum   int
+	Pages     int
+	Base      string
+	BaseQuery string
+	LoggedIn  bool
+}
+
+func listTab(raw string) string {
+	switch raw {
+	case "friends", "following":
+		return raw
+	default:
+		return "all"
+	}
+}
+
+// listSort maps the current sort keys and legacy URLs to a public key and
+// direction. Only whitelisted keys and directions reach the store.
+func listSort(rawSort, rawDir string) (key, dir string) {
+	key, dir = "popularity", "desc"
+	switch rawSort {
+	case "popularity", "date":
+		key = rawSort
+	case "popular", "likes":
+		key, dir = "popularity", "desc"
+	case "newest", "new":
+		key, dir = "date", "desc"
+	case "oldest":
+		key, dir = "date", "asc"
+	}
+	if rawDir == "asc" || rawDir == "desc" {
+		dir = rawDir
+	}
+	return key, dir
+}
+
+func (s *Server) listsDiscover(w http.ResponseWriter, r *http.Request) {
+	u := currentUser(r)
+	tab := listTab(r.URL.Query().Get("tab"))
+	sortKey, dir := listSort(r.URL.Query().Get("sort"), r.URL.Query().Get("dir"))
+	page := atoi(r.URL.Query().Get("page"))
+	if page < 1 {
+		page = 1
+	}
+	var viewer int64
+	if u != nil {
+		viewer = u.ID
+	}
+	lists, total, err := s.st.ListsFeedSorted(r.Context(), viewer, tab, sortKey, dir, 30, (page-1)*30)
+	if err != nil {
+		s.serverError(w, r, err)
+		return
+	}
+	base := url.Values{"tab": {tab}, "sort": {sortKey}, "dir": {dir}}
+	data := listsData{
+		Page:      s.page(r, "Lists"),
+		Lists:     lists,
+		Total:     total,
+		Tab:       tab,
+		Sort:      sortKey,
+		Dir:       dir,
+		PageNum:   page,
+		Pages:     (total + 29) / 30,
+		Base:      "/lists",
+		BaseQuery: base.Encode(),
+		LoggedIn:  u != nil,
+	}
+	s.render(w, r, "lists_discover", data)
 }
 
 func (s *Server) listPage(w http.ResponseWriter, r *http.Request) {
@@ -112,6 +190,7 @@ func (s *Server) listCreate(w http.ResponseWriter, r *http.Request) {
 		s.serverError(w, r, err)
 		return
 	}
+	s.deliverListActivity(r, u, l)
 	s.flash(w, r, "success", "List created.")
 	s.redirect(w, r, "/users/"+u.Username+"/lists/"+l.Slug)
 }
@@ -141,6 +220,7 @@ func (s *Server) listUpdate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	updated, _ := s.st.ListByID(r.Context(), id, false)
+	s.deliverListActivity(r, u, updated)
 	s.flash(w, r, "success", "List updated.")
 	s.redirect(w, r, "/users/"+u.Username+"/lists/"+updated.Slug)
 }
@@ -273,6 +353,10 @@ func (s *Server) gameListAdd(w http.ResponseWriter, r *http.Request) {
 	}
 	s.st.AddActivity(r.Context(), u.ID, "list_add", &g.ID, nil, &l.ID, "", "public")
 	s.flash(w, r, "success", "Game added to "+l.Title+".")
+	if to := safeReturnTo(r.FormValue("return_to")); to != "" {
+		s.redirect(w, r, to)
+		return
+	}
 	s.redirect(w, r, "/games/"+g.Slug)
 }
 

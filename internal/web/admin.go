@@ -307,6 +307,18 @@ func (s *Server) adminRemoveContent(w http.ResponseWriter, r *http.Request) {
 			s.serverError(w, r, err)
 			return
 		}
+	case "post":
+		p, err := s.st.PostByID(r.Context(), id, 0)
+		if err != nil {
+			s.notFound(w, r)
+			return
+		}
+		owner = &p.UserID
+		action = "remove_post"
+		if err := s.st.DeletePost(r.Context(), id, p.UserID); err != nil {
+			s.serverError(w, r, err)
+			return
+		}
 	default:
 		s.notFound(w, r)
 		return

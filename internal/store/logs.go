@@ -119,6 +119,9 @@ type LogInput struct {
 	Language      string
 	Draft         bool
 	AutoCreated   bool
+	// PrimaryRating is nil when the caller did not choose; new rated logs then
+	// become the primary rating automatically.
+	PrimaryRating *bool
 }
 
 func (in LogInput) statusOr() string {
@@ -128,16 +131,57 @@ func (in LogInput) statusOr() string {
 	return in.Status
 }
 
+// PlayedStatuses are the playthrough outcomes the editor offers. Game shelf
+// values (playing/played/backlog/wishlist) live on the statuses table.
+var PlayedStatuses = []string{"played", "completed", "abandoned", "retired", "shelved", "replayed"}
+
+// NormalizePlayedStatus maps legacy/free-form values onto the supported set.
+// Old shelf flags are reclassified as a plain played log.
+func NormalizePlayedStatus(v string) string {
+	switch strings.ToLower(strings.TrimSpace(v)) {
+	case "played", "", "playing", "backlog", "wishlist":
+		return "played"
+	case "completed", "complete", "finished", "beaten":
+		return "completed"
+	case "abandoned", "dropped":
+		return "abandoned"
+	case "retired":
+		return "retired"
+	case "shelved", "paused", "on hold", "on_hold":
+		return "shelved"
+	case "replayed", "replay":
+		return "replayed"
+	}
+	return "played"
+}
+
+// ValidShelf reports whether v is a selectable game shelf. The empty string
+// means the game has been removed from all shelves.
+func ValidShelf(v string) bool {
+	switch strings.ToLower(strings.TrimSpace(v)) {
+	case "", "playing", "played", "backlog", "wishlist":
+		return true
+	}
+	return false
+}
+
+func logIsPrimary(in LogInput) bool {
+	if in.PrimaryRating != nil {
+		return *in.PrimaryRating && !in.Draft
+	}
+	return in.Rating > 0 && !in.Draft
+}
+
 func (s *Store) CreateLog(ctx context.Context, in LogInput) (*models.Log, error) {
 	now := Now()
 	res, err := s.DB.ExecContext(ctx, `INSERT INTO logs(user_id,game_id,name,rating,review,spoiler,status,replay,mastered,
 		difficulty,platform_id,played_on_id,ownership,storefront,edition_game_id,started_at,finished_at,time_to_finish,
 		time_to_master,playtime,sync_sessions,primary_rating,language,draft,auto_created,created_at,updated_at)
-		VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,1,?,?,?,?,?)`,
-		in.UserID, in.GameID, in.Name, in.Rating, in.Review, b2i(in.Spoiler), in.statusOr(), b2i(in.Replay),
+		VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+		in.UserID, in.GameID, in.Name, in.Rating, in.Review, b2i(in.Spoiler), NormalizePlayedStatus(in.statusOr()), b2i(in.Replay),
 		b2i(in.Mastered), in.Difficulty, in.PlatformID, in.PlayedOnID, in.Ownership, in.Storefront, in.EditionGameID,
 		nullStr(in.StartedAt), nullStr(in.FinishedAt), in.TimeToFinish, in.TimeToMaster, in.Playtime,
-		b2i(in.SyncSessions), in.Language, b2i(in.Draft), b2i(in.AutoCreated), now, now)
+		b2i(in.SyncSessions), b2i(logIsPrimary(in)), in.Language, b2i(in.Draft), b2i(in.AutoCreated), now, now)
 	if err != nil {
 		return nil, err
 	}
@@ -153,14 +197,16 @@ func (s *Store) UpdateLog(ctx context.Context, id int64, in LogInput) (*models.L
 	_, err := s.DB.ExecContext(ctx, `UPDATE logs SET name=?,rating=?,review=?,spoiler=?,status=?,replay=?,mastered=?,
 		difficulty=?,platform_id=?,played_on_id=?,ownership=?,storefront=?,edition_game_id=?,started_at=?,finished_at=?,
 		time_to_finish=?,time_to_master=?,playtime=?,sync_sessions=?,language=?,draft=?,updated_at=? WHERE id=? AND user_id=?`,
-		in.Name, in.Rating, in.Review, b2i(in.Spoiler), in.statusOr(), b2i(in.Replay), b2i(in.Mastered),
+		in.Name, in.Rating, in.Review, b2i(in.Spoiler), NormalizePlayedStatus(in.statusOr()), b2i(in.Replay), b2i(in.Mastered),
 		in.Difficulty, in.PlatformID, in.PlayedOnID, in.Ownership, in.Storefront, in.EditionGameID,
 		nullStr(in.StartedAt), nullStr(in.FinishedAt), in.TimeToFinish, in.TimeToMaster, in.Playtime,
 		b2i(in.SyncSessions), in.Language, b2i(in.Draft), Now(), id, in.UserID)
 	if err != nil {
 		return nil, err
 	}
-	if in.Rating > 0 && in.Draft == false {
+	if in.PrimaryRating != nil && !*in.PrimaryRating {
+		s.DB.ExecContext(ctx, `UPDATE logs SET primary_rating=0 WHERE id=?`, id)
+	} else if in.Rating > 0 && in.Draft == false {
 		s.SetPrimaryRating(ctx, id, in.UserID, in.GameID)
 	}
 	s.RefreshGameStats(ctx, in.GameID)
@@ -212,6 +258,7 @@ func logInputFromLog(l *models.Log) LogInput {
 		StartedAt: l.StartedAt, FinishedAt: l.FinishedAt, TimeToFinish: l.TimeToFinish,
 		TimeToMaster: l.TimeToMaster, Playtime: l.Playtime, SyncSessions: l.SyncSessions,
 		Language: l.Language, Draft: l.Draft, AutoCreated: l.AutoCreated,
+		PrimaryRating: &l.PrimaryRating,
 	}
 }
 
@@ -226,6 +273,18 @@ func (s *Store) SetPrimaryRating(ctx context.Context, logID, userID, gameID int6
 	tx.ExecContext(ctx, `UPDATE logs SET primary_rating=0 WHERE user_id=? AND game_id=?`, userID, gameID)
 	tx.ExecContext(ctx, `UPDATE logs SET primary_rating=1 WHERE id=?`, logID)
 	return tx.Commit()
+}
+
+// RenameLog changes the review/log title without touching any other field.
+func (s *Store) RenameLog(ctx context.Context, id, userID int64, name string) error {
+	res, err := s.DB.ExecContext(ctx, `UPDATE logs SET name=?,updated_at=? WHERE id=? AND user_id=? AND deleted_at IS NULL`, name, Now(), id, userID)
+	if err != nil {
+		return err
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		return ErrNotFound
+	}
+	return nil
 }
 
 func (s *Store) DeleteLog(ctx context.Context, id, userID int64) error {
@@ -281,21 +340,14 @@ func (s *Store) SessionLogFor(ctx context.Context, userID, gameID int64) (*model
 	if err != ErrNotFound {
 		return nil, err
 	}
-	status := "played"
-	if st, err := s.StatusFor(ctx, userID, gameID); err == nil {
-		switch {
-		case st.Playing:
-			status = "playing"
-		case st.Backlog:
-			status = "backlog"
-		}
-	}
-	return s.CreateLog(ctx, LogInput{UserID: userID, GameID: gameID, Status: status, AutoCreated: true})
+	// Shelf state is separate from a log's played status, so an auto-created
+	// session log always uses the neutral played outcome.
+	return s.CreateLog(ctx, LogInput{UserID: userID, GameID: gameID, Status: "played", AutoCreated: true})
 }
 
 func (s *Store) LatestLogFor(ctx context.Context, userID, gameID int64) (*models.Log, error) {
 	l, err := scanLog(s.DB.QueryRowContext(ctx, `SELECT `+logCols+` FROM logs l
-		WHERE l.user_id=? AND l.game_id=? AND l.deleted_at IS NULL ORDER BY l.updated_at DESC LIMIT 1`, userID, gameID))
+		WHERE l.user_id=? AND l.game_id=? AND l.deleted_at IS NULL ORDER BY l.updated_at DESC, l.id DESC LIMIT 1`, userID, gameID))
 	if err == sql.ErrNoRows {
 		return nil, ErrNotFound
 	}
@@ -637,84 +689,96 @@ func (s *Store) HasLikedLog(ctx context.Context, logID, userID int64) bool {
 
 func (s *Store) StatusFor(ctx context.Context, userID, gameID int64) (models.Status, error) {
 	st := models.Status{UserID: userID, GameID: gameID}
-	var playing, backlog, wishlist, liked int
-	var playedAt, playingAt, backlogAt, wishlistAt, updated string
-	err := s.DB.QueryRowContext(ctx, `SELECT played,playing,backlog,wishlist,updated_at,
-		COALESCE(played_at,''),COALESCE(playing_at,''),COALESCE(backlog_at,''),COALESCE(wishlist_at,'') FROM statuses WHERE user_id=? AND game_id=?`, userID, gameID).
-		Scan(&st.Played, &playing, &backlog, &wishlist, &updated, &playedAt, &playingAt, &backlogAt, &wishlistAt)
+	var liked int
+	var shelf, playedAt, shelfAt, updated string
+	err := s.DB.QueryRowContext(ctx, `SELECT COALESCE(shelf,''),played,updated_at,
+		COALESCE(played_at,''),COALESCE(shelf_at,'')
+		FROM statuses WHERE user_id=? AND game_id=?`, userID, gameID).
+		Scan(&shelf, &st.Played, &updated, &playedAt, &shelfAt)
 	if err != nil && err != sql.ErrNoRows {
 		return st, err
 	}
 	s.DB.QueryRowContext(ctx, `SELECT COUNT(*) FROM game_likes WHERE user_id=? AND game_id=?`, userID, gameID).Scan(&liked)
-	st.Playing = playing == 1
-	st.Backlog = backlog == 1
-	st.Wishlist = wishlist == 1
+	st.Shelf = strings.TrimSpace(shelf)
+	st.Playing = st.Shelf == "playing"
+	st.Backlog = st.Shelf == "backlog"
+	st.Wishlist = st.Shelf == "wishlist"
 	st.Liked = liked > 0
 	if err == nil {
 		st.UpdatedAt = parseTime(updated)
 		st.PlayedAt = parseTime(playedAt)
-		st.PlayingAt = parseTime(playingAt)
-		st.BacklogAt = parseTime(backlogAt)
-		st.WishlistAt = parseTime(wishlistAt)
+		st.ShelfAt = parseTime(shelfAt)
+		st.PlayingAt = parseTime(shelfAt)
+		st.BacklogAt = parseTime(shelfAt)
+		st.WishlistAt = parseTime(shelfAt)
+		if !st.Playing {
+			st.PlayingAt = time.Time{}
+		}
+		if !st.Backlog {
+			st.BacklogAt = time.Time{}
+		}
+		if !st.Wishlist {
+			st.WishlistAt = time.Time{}
+		}
 	}
 	return st, nil
 }
 
-// SetStatusFlag turns one shelf flag on or off and keeps the others.
+// SetShelf replaces the user's shelf for a game. Removing a shelf leaves the
+// times-played counter alone. Playing and played shelves imply at least one
+// play, so the counter is raised when needed.
+func (s *Store) SetShelf(ctx context.Context, userID, gameID int64, shelf string) error {
+	shelf = strings.ToLower(strings.TrimSpace(shelf))
+	if !ValidShelf(shelf) {
+		return ErrNotFound
+	}
+	now := Now()
+	var shelfAt any
+	if shelf != "" {
+		shelfAt = now
+	}
+	_, err := s.DB.ExecContext(ctx, `INSERT INTO statuses(user_id,game_id,shelf,shelf_at,updated_at)
+		VALUES(?,?,?,?,?)
+		ON CONFLICT(user_id,game_id) DO UPDATE SET
+		shelf=excluded.shelf,
+		shelf_at=CASE WHEN excluded.shelf='' THEN NULL
+			WHEN statuses.shelf=excluded.shelf THEN statuses.shelf_at
+			ELSE excluded.shelf_at END,
+		updated_at=excluded.updated_at`, userID, gameID, shelf, shelfAt, now)
+	if err != nil {
+		return err
+	}
+	if shelf == "playing" || shelf == "played" {
+		if err := s.EnsurePlayed(ctx, userID, gameID); err != nil {
+			return err
+		}
+	}
+	if err := s.cleanupEmptyStatus(ctx, userID, gameID); err != nil {
+		return err
+	}
+	return s.RefreshGameStats(ctx, gameID)
+}
+
+// SetStatusFlag is a compatibility wrapper for older callers. There is only
+// one shelf now, so switching a flag replaces the shelf and clearing a flag
+// removes the shelf only when it is the selected one.
 func (s *Store) SetStatusFlag(ctx context.Context, userID, gameID int64, flag string, on bool) error {
 	switch flag {
 	case "playing", "backlog", "wishlist":
 	default:
 		return ErrNotFound
 	}
-	now := Now()
-	query := `INSERT INTO statuses(user_id,game_id,` + flag + `,updated_at) VALUES(?,?,?,?)
-		ON CONFLICT(user_id,game_id) DO UPDATE SET ` + flag + `=excluded.` + flag + `,updated_at=excluded.updated_at`
-	args := []any{userID, gameID, b2i(on), now}
-	if flag == "playing" {
-		var playingAt any
-		if on {
-			playingAt = now
-		}
-		query = `INSERT INTO statuses(user_id,game_id,playing,playing_at,updated_at) VALUES(?,?,?,?,?)
-			ON CONFLICT(user_id,game_id) DO UPDATE SET playing=excluded.playing,
-			playing_at=CASE WHEN excluded.playing=0 THEN NULL
-				WHEN statuses.playing=0 THEN excluded.updated_at ELSE statuses.playing_at END,
-			updated_at=excluded.updated_at`
-		args = []any{userID, gameID, b2i(on), playingAt, now}
+	if on {
+		return s.SetShelf(ctx, userID, gameID, flag)
 	}
-	if flag == "backlog" {
-		var backlogAt any
-		if on {
-			backlogAt = now
-		}
-		query = `INSERT INTO statuses(user_id,game_id,backlog,backlog_at,updated_at) VALUES(?,?,?,?,?)
-			ON CONFLICT(user_id,game_id) DO UPDATE SET backlog=excluded.backlog,
-			backlog_at=CASE WHEN excluded.backlog=0 THEN NULL
-				WHEN statuses.backlog=0 THEN excluded.updated_at ELSE statuses.backlog_at END,
-			updated_at=excluded.updated_at`
-		args = []any{userID, gameID, b2i(on), backlogAt, now}
-	}
-	if flag == "wishlist" {
-		var wishlistAt any
-		if on {
-			wishlistAt = now
-		}
-		query = `INSERT INTO statuses(user_id,game_id,wishlist,wishlist_at,updated_at) VALUES(?,?,?,?,?)
-			ON CONFLICT(user_id,game_id) DO UPDATE SET wishlist=excluded.wishlist,
-			wishlist_at=CASE WHEN excluded.wishlist=0 THEN NULL
-				WHEN statuses.wishlist=0 THEN excluded.updated_at ELSE statuses.wishlist_at END,
-			updated_at=excluded.updated_at`
-		args = []any{userID, gameID, b2i(on), wishlistAt, now}
-	}
-	_, err := s.DB.ExecContext(ctx, query, args...)
+	st, err := s.StatusFor(ctx, userID, gameID)
 	if err != nil {
 		return err
 	}
-	if err := s.cleanupEmptyStatus(ctx, userID, gameID); err != nil {
-		return err
+	if st.Shelf != flag {
+		return nil
 	}
-	return s.RefreshGameStats(ctx, gameID)
+	return s.SetShelf(ctx, userID, gameID, "")
 }
 
 // SetPlayedCount sets the user's play counter exactly, clamping it at zero.
@@ -743,7 +807,8 @@ func (s *Store) SetPlayedCount(ctx context.Context, userID, gameID int64, count 
 	return s.RefreshGameStats(ctx, gameID)
 }
 
-// EnsurePlayed raises the play counter to at least one.
+// EnsurePlayed raises the play counter to at least one. It never changes the
+// shelf: play counts and game shelves are independent.
 func (s *Store) EnsurePlayed(ctx context.Context, userID, gameID int64) error {
 	now := Now()
 	_, err := s.DB.ExecContext(ctx, `INSERT INTO statuses(user_id,game_id,played,played_at,updated_at)
@@ -760,7 +825,7 @@ func (s *Store) EnsurePlayed(ctx context.Context, userID, gameID int64) error {
 
 func (s *Store) cleanupEmptyStatus(ctx context.Context, userID, gameID int64) error {
 	_, err := s.DB.ExecContext(ctx, `DELETE FROM statuses
-		WHERE user_id=? AND game_id=? AND played=0 AND playing=0 AND backlog=0 AND wishlist=0`, userID, gameID)
+		WHERE user_id=? AND game_id=? AND COALESCE(shelf,'')='' AND played=0`, userID, gameID)
 	return err
 }
 
@@ -794,42 +859,42 @@ func (s *Store) ToggleGameLike(ctx context.Context, userID, gameID int64) (bool,
 	return liked, nil
 }
 
-// SetStatuses replaces all shelf flags in one write. Imports use this so a
-// single game refresh covers every flag instead of one per shelf. A played
-// import keeps any higher play count the user has already recorded.
+// SetStatuses replaces a user's shelf in one write. Imports use this so a
+// single game refresh maps their old flags onto one shelf. A played import
+// keeps any higher play count the user has already recorded.
 func (s *Store) SetStatuses(ctx context.Context, userID, gameID int64, played, playing, backlog, wishlist, liked bool) error {
 	now := Now()
+	shelf := ""
+	switch {
+	case playing:
+		shelf = "playing"
+	case played:
+		shelf = "played"
+	case backlog:
+		shelf = "backlog"
+	case wishlist:
+		shelf = "wishlist"
+	}
 	playedCount := 0
-	var playedAt, playingAt, backlogAt, wishlistAt any
+	var playedAt, shelfAt any
 	if played {
 		playedCount = 1
 		playedAt = now
 	}
-	if playing {
-		playingAt = now
+	if shelf != "" {
+		shelfAt = now
 	}
-	if backlog {
-		backlogAt = now
-	}
-	if wishlist {
-		wishlistAt = now
-	}
-	_, err := s.DB.ExecContext(ctx, `INSERT INTO statuses(user_id,game_id,played,playing,backlog,wishlist,played_at,playing_at,backlog_at,wishlist_at,updated_at)
-		VALUES(?,?,?,?,?,?,?,?,?,?,?)
+	_, err := s.DB.ExecContext(ctx, `INSERT INTO statuses(user_id,game_id,played,played_at,shelf,shelf_at,updated_at)
+		VALUES(?,?,?,?,?,?,?)
 		ON CONFLICT(user_id,game_id) DO UPDATE SET
 		played=CASE WHEN excluded.played>0 THEN MAX(statuses.played,1) ELSE statuses.played END,
 		played_at=CASE WHEN excluded.played>0 AND statuses.played=0 THEN excluded.played_at ELSE statuses.played_at END,
-		playing=excluded.playing,
-		playing_at=CASE WHEN excluded.playing=0 THEN NULL
-			WHEN statuses.playing=0 THEN excluded.playing_at ELSE statuses.playing_at END,
-		backlog=excluded.backlog,
-		backlog_at=CASE WHEN excluded.backlog=0 THEN NULL
-			WHEN statuses.backlog=0 THEN excluded.backlog_at ELSE statuses.backlog_at END,
-		wishlist=excluded.wishlist,
-		wishlist_at=CASE WHEN excluded.wishlist=0 THEN NULL
-			WHEN statuses.wishlist=0 THEN excluded.wishlist_at ELSE statuses.wishlist_at END,
+		shelf=excluded.shelf,
+		shelf_at=CASE WHEN excluded.shelf='' THEN NULL
+			WHEN statuses.shelf=excluded.shelf THEN statuses.shelf_at
+			ELSE excluded.shelf_at END,
 		updated_at=excluded.updated_at`,
-		userID, gameID, playedCount, b2i(playing), b2i(backlog), b2i(wishlist), playedAt, playingAt, backlogAt, wishlistAt, now)
+		userID, gameID, playedCount, playedAt, shelf, shelfAt, now)
 	if err != nil {
 		return err
 	}
@@ -858,8 +923,10 @@ func (s *Store) ClearStatus(ctx context.Context, userID, gameID int64) error {
 func (s *Store) GameStatusCounts(ctx context.Context, gameID int64) map[string]int {
 	out := map[string]int{}
 	rows, err := s.DB.QueryContext(ctx, `SELECT
-		COALESCE(SUM(CASE WHEN played>0 THEN 1 ELSE 0 END),0),
-		COALESCE(SUM(playing),0),COALESCE(SUM(backlog),0),COALESCE(SUM(wishlist),0)
+		COALESCE(SUM(CASE WHEN shelf='played' THEN 1 ELSE 0 END),0),
+		COALESCE(SUM(CASE WHEN shelf='playing' THEN 1 ELSE 0 END),0),
+		COALESCE(SUM(CASE WHEN shelf='backlog' THEN 1 ELSE 0 END),0),
+		COALESCE(SUM(CASE WHEN shelf='wishlist' THEN 1 ELSE 0 END),0)
 		FROM statuses WHERE game_id=?`, gameID)
 	if err != nil {
 		return out
@@ -926,15 +993,14 @@ func (s *Store) RecentlyPlayedGames(ctx context.Context, userID int64, limit int
 		limit = 6
 	}
 	rows, err := s.DB.QueryContext(ctx, `SELECT `+gameCols+`,
-		CASE WHEN st.playing=1 AND COALESCE(st.playing_at,'') >= COALESCE(st.played_at,'') THEN 'Playing' ELSE 'Played' END,
-		CASE WHEN st.playing=1 AND COALESCE(st.playing_at,'') >= COALESCE(st.played_at,'') THEN COALESCE(st.playing_at,st.updated_at)
-			ELSE COALESCE(st.played_at,st.updated_at) END,
+		CASE WHEN st.shelf='playing' THEN 'Playing' ELSE 'Played' END,
+		COALESCE(st.shelf_at,st.updated_at),
 		COALESCE((SELECT l.rating FROM logs l WHERE l.user_id=st.user_id AND l.game_id=st.game_id
 			AND l.primary_rating=1 AND l.rating>0 AND l.deleted_at IS NULL
 			ORDER BY l.updated_at DESC LIMIT 1),0)
 		FROM statuses st JOIN games g ON g.id=st.game_id
-		WHERE st.user_id=? AND (st.playing=1 OR st.played>0)
-		ORDER BY MAX(COALESCE(st.playing_at,''),COALESCE(st.played_at,'')) DESC, g.id DESC
+		WHERE st.user_id=? AND st.shelf IN ('playing','played')
+		ORDER BY COALESCE(st.shelf_at,st.updated_at) DESC, g.id DESC
 		LIMIT ?`, userID, limit)
 	if err != nil {
 		return nil, err
@@ -955,6 +1021,24 @@ func (s *Store) RecentlyPlayedGames(ctx context.Context, userID int64, limit int
 	return out, rows.Err()
 }
 
+// UserShelfCounts returns how many games are on each of the user's shelves.
+func (s *Store) UserShelfCounts(ctx context.Context, userID int64) map[string]int {
+	counts := map[string]int{"playing": 0, "played": 0, "backlog": 0, "wishlist": 0}
+	rows, err := s.DB.QueryContext(ctx, `SELECT shelf,COUNT(*) FROM statuses WHERE user_id=? AND COALESCE(shelf,'')<>'' GROUP BY shelf`, userID)
+	if err != nil {
+		return counts
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var shelf string
+		var n int
+		if rows.Scan(&shelf, &n) == nil {
+			counts[shelf] = n
+		}
+	}
+	return counts
+}
+
 // ShelfGame is one game on a profile shelf and when it arrived there.
 type ShelfGame struct {
 	Game    *models.Game
@@ -967,27 +1051,19 @@ func (s *Store) ShelfGames(ctx context.Context, userID int64, shelf string, limi
 	if limit <= 0 {
 		limit = 3
 	}
-	var condition, eventAt string
-	switch shelf {
-	case "played":
-		condition = "st.played>0"
-		eventAt = "COALESCE(st.played_at,st.updated_at)"
-	case "playing":
-		condition = "st.playing=1"
-		eventAt = "COALESCE(st.playing_at,st.updated_at)"
-	case "backlog":
-		condition = "st.backlog=1"
-		eventAt = "COALESCE(st.backlog_at,st.updated_at)"
-	default:
+	shelf = strings.ToLower(strings.TrimSpace(shelf))
+	if shelf == "" || !ValidShelf(shelf) {
 		return nil, ErrNotFound
 	}
+	condition := "st.shelf=?"
+	eventAt := "COALESCE(st.shelf_at,st.updated_at)"
 	rows, err := s.DB.QueryContext(ctx, `SELECT `+gameCols+`,`+eventAt+`,
 		COALESCE((SELECT l.rating FROM logs l WHERE l.user_id=st.user_id AND l.game_id=st.game_id
 			AND l.primary_rating=1 AND l.rating>0 AND l.deleted_at IS NULL
 			ORDER BY l.updated_at DESC LIMIT 1),0)
 		FROM statuses st JOIN games g ON g.id=st.game_id
 		WHERE st.user_id=? AND `+condition+`
-		ORDER BY `+eventAt+` DESC, g.id DESC LIMIT ?`, userID, limit)
+		ORDER BY `+eventAt+` DESC, g.id DESC LIMIT ?`, userID, shelf, limit)
 	if err != nil {
 		return nil, err
 	}
@@ -1170,6 +1246,24 @@ type SessionInput struct {
 	Tags        []string
 }
 
+// capSessionTags enforces the documented 8-tag limit and removes duplicates.
+func capSessionTags(tags []string) []string {
+	out := make([]string, 0, len(tags))
+	seen := make(map[string]bool, len(tags))
+	for _, raw := range tags {
+		tag := strings.ToLower(strings.TrimSpace(raw))
+		if tag == "" || seen[tag] {
+			continue
+		}
+		seen[tag] = true
+		out = append(out, tag)
+		if len(out) == 8 {
+			break
+		}
+	}
+	return out
+}
+
 func (s *Store) CreateSession(ctx context.Context, in SessionInput) (int64, error) {
 	tx, err := s.DB.BeginTx(ctx, nil)
 	if err != nil {
@@ -1188,10 +1282,8 @@ func (s *Store) CreateSession(ctx context.Context, in SessionInput) (int64, erro
 			tx.ExecContext(ctx, `INSERT OR IGNORE INTO play_session_days(session_id,day) VALUES(?,?)`, id, d)
 		}
 	}
-	for _, t := range in.Tags {
-		if t != "" {
-			tx.ExecContext(ctx, `INSERT OR IGNORE INTO play_session_tags(session_id,tag) VALUES(?,?)`, id, strings.ToLower(t))
-		}
+	for _, t := range capSessionTags(in.Tags) {
+		tx.ExecContext(ctx, `INSERT OR IGNORE INTO play_session_tags(session_id,tag) VALUES(?,?)`, id, t)
 	}
 	if err := tx.Commit(); err != nil {
 		return 0, err
@@ -1217,10 +1309,8 @@ func (s *Store) UpdateSession(ctx context.Context, id int64, in SessionInput) er
 			tx.ExecContext(ctx, `INSERT OR IGNORE INTO play_session_days(session_id,day) VALUES(?,?)`, id, d)
 		}
 	}
-	for _, t := range in.Tags {
-		if t != "" {
-			tx.ExecContext(ctx, `INSERT OR IGNORE INTO play_session_tags(session_id,tag) VALUES(?,?)`, id, strings.ToLower(t))
-		}
+	for _, t := range capSessionTags(in.Tags) {
+		tx.ExecContext(ctx, `INSERT OR IGNORE INTO play_session_tags(session_id,tag) VALUES(?,?)`, id, t)
 	}
 	if err := tx.Commit(); err != nil {
 		return err
@@ -1235,6 +1325,17 @@ func (s *Store) DeleteSession(ctx context.Context, id, userID int64) error {
 		return ErrNotFound
 	}
 	if _, err := s.DB.ExecContext(ctx, `DELETE FROM play_sessions WHERE id=?`, id); err != nil {
+		return err
+	}
+	s.recalcPlaytime(ctx, logID)
+	return nil
+}
+
+// DeleteSessionsForLog clears a log's journal so an import can restore it
+// exactly without duplicating sessions on a re-import.
+func (s *Store) DeleteSessionsForLog(ctx context.Context, logID int64) error {
+	_, err := s.DB.ExecContext(ctx, `DELETE FROM play_sessions WHERE log_id=?`, logID)
+	if err != nil {
 		return err
 	}
 	s.recalcPlaytime(ctx, logID)
@@ -1340,6 +1441,121 @@ func (s *Store) SaveLibraryEntry(ctx context.Context, userID, gameID int64, plat
 func (s *Store) RemoveLibraryEntry(ctx context.Context, userID, gameID int64) error {
 	_, err := s.DB.ExecContext(ctx, `DELETE FROM library_entries WHERE user_id=? AND game_id=?`, userID, gameID)
 	return err
+}
+
+// UserGameRow is one game on the profile Games tab: shelf flags, the primary
+// rating, totals, and the latest log's played status.
+type UserGameRow struct {
+	Game         *models.Game
+	Shelf        string
+	Played       int
+	Playing      bool
+	Backlog      bool
+	Wishlist     bool
+	Rating       float64
+	Playtime     float64
+	Mastered     bool
+	HasReview    bool
+	Drafts       int
+	Logs         int
+	LastLogID    int64
+	PlayedStatus string
+	Ownership    string
+	Platform     string
+	PlayedYear   int
+	Tags         []string
+	UpdatedAt    time.Time
+}
+
+// UserGameRows returns every game the user has a status, log or library entry
+// for, newest activity first. Filtering happens in the web layer so the same
+// rows serve every Games-tab filter.
+func (s *Store) UserGameRows(ctx context.Context, userID int64) ([]UserGameRow, error) {
+	rows, err := s.DB.QueryContext(ctx, `SELECT `+gameCols+`,
+		COALESCE(st.shelf,''),COALESCE(st.played,0),
+		COALESCE(st.updated_at,g.updated_at),
+		COALESCE((SELECT l.rating FROM logs l WHERE l.user_id=x.user_id AND l.game_id=x.game_id
+			AND l.primary_rating=1 AND l.rating>0 AND l.deleted_at IS NULL ORDER BY l.updated_at DESC LIMIT 1),0),
+		COALESCE((SELECT SUM(l.playtime) FROM logs l WHERE l.user_id=x.user_id AND l.game_id=x.game_id AND l.deleted_at IS NULL),0),
+		COALESCE((SELECT MAX(l.mastered) FROM logs l WHERE l.user_id=x.user_id AND l.game_id=x.game_id AND l.deleted_at IS NULL),0),
+		COALESCE((SELECT MAX(CASE WHEN l.review<>'' THEN 1 ELSE 0 END) FROM logs l WHERE l.user_id=x.user_id AND l.game_id=x.game_id AND l.deleted_at IS NULL),0),
+		COALESCE((SELECT COUNT(*) FROM logs l WHERE l.user_id=x.user_id AND l.game_id=x.game_id AND l.deleted_at IS NULL AND l.draft=1),0),
+		COALESCE((SELECT COUNT(*) FROM logs l WHERE l.user_id=x.user_id AND l.game_id=x.game_id AND l.deleted_at IS NULL),0),
+		COALESCE((SELECT l.id FROM logs l WHERE l.user_id=x.user_id AND l.game_id=x.game_id AND l.deleted_at IS NULL ORDER BY l.updated_at DESC LIMIT 1),0),
+		COALESCE((SELECT l.status FROM logs l WHERE l.user_id=x.user_id AND l.game_id=x.game_id AND l.deleted_at IS NULL ORDER BY l.updated_at DESC LIMIT 1),'played'),
+		COALESCE((SELECT le.ownership FROM library_entries le WHERE le.user_id=x.user_id AND le.game_id=x.game_id LIMIT 1),''),
+		COALESCE((SELECT p.name FROM library_entries le JOIN platforms p ON p.id=le.platform_id
+			WHERE le.user_id=x.user_id AND le.game_id=x.game_id LIMIT 1),''),
+		COALESCE((SELECT MAX(CAST(substr(COALESCE(l.started_at,l.finished_at,st.played_at),1,4) AS INTEGER))
+			FROM logs l WHERE l.user_id=x.user_id AND l.game_id=x.game_id AND l.deleted_at IS NULL),0),
+		COALESCE((SELECT GROUP_CONCAT(DISTINCT pst.tag) FROM play_session_tags pst
+			JOIN play_sessions ps ON ps.id=pst.session_id JOIN logs l ON l.id=ps.log_id
+			WHERE l.user_id=x.user_id AND l.game_id=x.game_id),'')
+		FROM (SELECT user_id,game_id FROM statuses WHERE user_id=?
+			UNION SELECT user_id,game_id FROM library_entries WHERE user_id=?
+			UNION SELECT user_id,game_id FROM logs WHERE user_id=? AND deleted_at IS NULL) x
+		JOIN games g ON g.id=x.game_id
+		LEFT JOIN statuses st ON st.user_id=x.user_id AND st.game_id=x.game_id
+		ORDER BY COALESCE(st.updated_at,g.updated_at) DESC, g.id DESC`, userID, userID, userID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []UserGameRow
+	for rows.Next() {
+		var row UserGameRow
+		var mastered, review int
+		var updated, playedStatus, ownership, platform, tags string
+		g, err := scanGameWith(rows, &row.Shelf, &row.Played, &updated,
+			&row.Rating, &row.Playtime, &mastered, &review, &row.Drafts, &row.Logs, &row.LastLogID,
+			&playedStatus, &ownership, &platform, &row.PlayedYear, &tags)
+		if err != nil {
+			return nil, err
+		}
+		row.Game = g
+		row.Playing = row.Shelf == "playing"
+		row.Backlog = row.Shelf == "backlog"
+		row.Wishlist = row.Shelf == "wishlist"
+		row.Mastered = mastered == 1
+		row.HasReview = review == 1
+		row.PlayedStatus = NormalizePlayedStatus(playedStatus)
+		row.Ownership = ownership
+		row.Platform = platform
+		row.UpdatedAt = parseTime(updated)
+		if tags != "" {
+			row.Tags = strings.Split(tags, ",")
+		}
+		out = append(out, row)
+	}
+	return out, rows.Err()
+}
+
+// DeleteGameData removes the user's logs, journal, library, cover, status and
+// likes for one game. It is the editor's "delete all data for this game".
+func (s *Store) DeleteGameData(ctx context.Context, userID, gameID int64) error {
+	tx, err := s.DB.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	for _, stmt := range []string{
+		`DELETE FROM play_sessions WHERE log_id IN (SELECT id FROM logs WHERE user_id=? AND game_id=?)`,
+		`DELETE FROM logs WHERE user_id=? AND game_id=?`,
+		`DELETE FROM library_entries WHERE user_id=? AND game_id=?`,
+		`DELETE FROM covers WHERE user_id=? AND game_id=?`,
+		`DELETE FROM hidden_games WHERE user_id=? AND game_id=?`,
+		`DELETE FROM statuses WHERE user_id=? AND game_id=?`,
+		`DELETE FROM activities WHERE user_id=? AND game_id=?`,
+		`DELETE FROM game_likes WHERE user_id=? AND game_id=?`,
+	} {
+		if _, err := tx.ExecContext(ctx, stmt, userID, gameID); err != nil {
+			return err
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		return err
+	}
+	return s.RefreshGameStats(ctx, gameID)
 }
 
 // ---- covers / hidden games ----

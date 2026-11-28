@@ -1,9 +1,12 @@
 package web
 
 import (
+	"bytes"
+	"context"
 	"encoding/csv"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"strconv"
@@ -129,30 +132,31 @@ func (s *Server) settingsProfile(w http.ResponseWriter, r *http.Request) {
 	}
 	links := parseLinks(r.FormValue("links"))
 	err = s.st.UpdateProfile(r.Context(), u.ID, store.ProfileUpdate{
-		Bio:              strings.TrimSpace(r.FormValue("bio")),
-		SocialLinks:      links,
-		Avatar:           newAvatar,
-		Header:           newHeader,
-		PrivateProfile:   u.PrivateProfile,
-		HideActivity:     u.HideActivity,
-		ManuallyApproves: r.FormValue("manually_approves") == "1",
-		HideSocialGraph:  r.FormValue("hide_social_graph") == "1",
-		AdultOptIn:       u.AdultOptIn,
-		StarScale:        u.StarScale,
-		CoverMode:        u.CoverMode,
-		TimeDisplay:      u.TimeDisplay,
-		InfiniteScroll:   u.InfiniteScroll,
-		Theme:            u.Theme,
-		HighContrast:     u.HighContrast,
-		Timezone:         u.Timezone,
-		FadePlayed:       u.FadePlayed,
-		JournalView:      u.JournalView,
-		CommentPrivacy:   u.CommentPrivacy,
-		NotePrivacy:      u.NotePrivacy,
-		Federation:       u.Federation,
-		FedStatuses:      u.FedStatuses,
-		FedReviews:       u.FedReviews,
-		FedLists:         u.FedLists,
+		Bio:                 strings.TrimSpace(r.FormValue("bio")),
+		SocialLinks:         links,
+		Avatar:              newAvatar,
+		Header:              newHeader,
+		PrivateProfile:      u.PrivateProfile,
+		HideActivity:        u.HideActivity,
+		ManuallyApproves:    r.FormValue("manually_approves") == "1",
+		HideSocialGraph:     r.FormValue("hide_social_graph") == "1",
+		AdultOptIn:          u.AdultOptIn,
+		StarScale:           u.StarScale,
+		CoverMode:           u.CoverMode,
+		TimeDisplay:         u.TimeDisplay,
+		InfiniteScroll:      u.InfiniteScroll,
+		Theme:               u.Theme,
+		HighContrast:        u.HighContrast,
+		Timezone:            u.Timezone,
+		FadePlayed:          u.FadePlayed,
+		JournalView:         u.JournalView,
+		DefaultPlayedStatus: u.DefaultPlayedStatus,
+		CommentPrivacy:      u.CommentPrivacy,
+		NotePrivacy:         u.NotePrivacy,
+		Federation:          u.Federation,
+		FedStatuses:         u.FedStatuses,
+		FedReviews:          u.FedReviews,
+		FedLists:            u.FedLists,
 	})
 	if err != nil {
 		if newAvatar != oldAvatar {
@@ -315,7 +319,8 @@ func (s *Server) settingsPreferences(w http.ResponseWriter, r *http.Request) {
 		InfiniteScroll: r.FormValue("infinite_scroll") == "1", Theme: theme,
 		HighContrast: r.FormValue("high_contrast") == "1", Timezone: r.FormValue("timezone"),
 		FadePlayed: r.FormValue("fade_played") == "1", JournalView: u.JournalView,
-		CommentPrivacy: r.FormValue("comment_privacy"), NotePrivacy: r.FormValue("note_privacy"),
+		DefaultPlayedStatus: store.NormalizePlayedStatus(r.FormValue("default_played_status")),
+		CommentPrivacy:      u.CommentPrivacy, NotePrivacy: u.NotePrivacy,
 		Federation: u.Federation, FedStatuses: u.FedStatuses, FedReviews: u.FedReviews, FedLists: u.FedLists,
 	})
 	if err != nil {
@@ -342,7 +347,8 @@ func (s *Server) settingsPrivacy(w http.ResponseWriter, r *http.Request) {
 		StarScale:        u.StarScale, CoverMode: u.CoverMode, TimeDisplay: u.TimeDisplay,
 		InfiniteScroll: u.InfiniteScroll, Theme: u.Theme, HighContrast: u.HighContrast,
 		Timezone: u.Timezone, FadePlayed: u.FadePlayed, JournalView: u.JournalView,
-		CommentPrivacy: r.FormValue("comment_privacy"), NotePrivacy: r.FormValue("note_privacy"),
+		DefaultPlayedStatus: u.DefaultPlayedStatus,
+		CommentPrivacy:      r.FormValue("comment_privacy"), NotePrivacy: r.FormValue("note_privacy"),
 		Federation: u.Federation, FedStatuses: u.FedStatuses, FedReviews: u.FedReviews, FedLists: u.FedLists,
 	})
 	if err != nil {
@@ -377,13 +383,12 @@ func (s *Server) settingsFederation(w http.ResponseWriter, r *http.Request) {
 		HideSocialGraph: u.HideSocialGraph, AdultOptIn: u.AdultOptIn, StarScale: u.StarScale,
 		CoverMode: u.CoverMode, TimeDisplay: u.TimeDisplay, InfiniteScroll: u.InfiniteScroll,
 		Theme: u.Theme, HighContrast: u.HighContrast, Timezone: u.Timezone, FadePlayed: u.FadePlayed,
-		JournalView: u.JournalView, CommentPrivacy: u.CommentPrivacy, NotePrivacy: u.NotePrivacy,
-		Federation: r.FormValue("federation") == "1",
-		// Status and list federation have no delivery path yet; keep the stored
-		// values instead of turning them off behind the user's back.
-		FedStatuses: u.FedStatuses,
+		JournalView: u.JournalView, DefaultPlayedStatus: u.DefaultPlayedStatus,
+		CommentPrivacy: u.CommentPrivacy, NotePrivacy: u.NotePrivacy,
+		Federation:  r.FormValue("federation") == "1",
+		FedStatuses: r.FormValue("fed_statuses") == "1",
 		FedReviews:  r.FormValue("fed_reviews") == "1",
-		FedLists:    u.FedLists,
+		FedLists:    r.FormValue("fed_lists") == "1",
 	})
 	if err != nil {
 		s.serverError(w, r, err)
@@ -665,6 +670,68 @@ func (s *Server) libraryRemove(w http.ResponseWriter, r *http.Request) {
 
 }
 
+func gameTitle(g *models.Game) string {
+	if g == nil {
+		return ""
+	}
+	return g.Title
+}
+
+func gameSlug(g *models.Game) string {
+	if g == nil {
+		return ""
+	}
+	return g.Slug
+}
+
+// exportLog is the round-trippable log shape. It keeps every editable field
+// plus the journal, so a LudusLog export can be imported without data loss.
+type exportLog struct {
+	Game          string          `json:"game"`
+	GameSlug      string          `json:"game_slug"`
+	Name          string          `json:"name"`
+	Rating        float64         `json:"rating"`
+	Review        string          `json:"review"`
+	Spoiler       bool            `json:"spoiler"`
+	Status        string          `json:"status"`
+	Replay        bool            `json:"replay"`
+	Mastered      bool            `json:"mastered"`
+	Difficulty    string          `json:"difficulty"`
+	Platform      string          `json:"platform"`
+	PlayedOn      string          `json:"played_on"`
+	Ownership     string          `json:"ownership"`
+	Storefront    string          `json:"storefront"`
+	Edition       string          `json:"edition"`
+	StartedAt     string          `json:"started_at"`
+	FinishedAt    string          `json:"finished_at"`
+	TimeToFinish  float64         `json:"time_to_finish"`
+	TimeToMaster  float64         `json:"time_to_master"`
+	Playtime      float64         `json:"playtime"`
+	SyncSessions  bool            `json:"sync_sessions"`
+	PrimaryRating bool            `json:"primary_rating"`
+	Language      string          `json:"language"`
+	Draft         bool            `json:"draft"`
+	CreatedAt     time.Time       `json:"created_at"`
+	Sessions      []exportSession `json:"sessions"`
+}
+
+type exportSession struct {
+	Note        string   `json:"note"`
+	NotePrivacy string   `json:"note_privacy"`
+	Playtime    float64  `json:"playtime"`
+	Days        []string `json:"days"`
+	Tags        []string `json:"tags"`
+}
+
+type exportLibrary struct {
+	Game       string `json:"game"`
+	GameSlug   string `json:"game_slug"`
+	Platform   string `json:"platform"`
+	Ownership  string `json:"ownership"`
+	Storefront string `json:"storefront"`
+	Edition    string `json:"edition"`
+}
+
 func (s *Server) exportData(w http.ResponseWriter, r *http.Request) {
 	u := currentUser(r)
 	logs, _, _ := s.st.UserLogs(r.Context(), u.ID, false, 10000, 0)
@@ -674,31 +741,40 @@ func (s *Server) exportData(w http.ResponseWriter, r *http.Request) {
 		s.exportCSV(w, u, logs, lists, library)
 		return
 	}
-	type exportLog struct {
-		Game       string  `json:"game"`
-		Rating     float64 `json:"rating"`
-		Review     string  `json:"review"`
-		Status     string  `json:"status"`
-		Playtime   float64 `json:"playtime"`
-		StartedAt  string  `json:"started_at"`
-		FinishedAt string  `json:"finished_at"`
-	}
 	out := map[string]any{
+		"format":      "luduslog",
+		"version":     2,
 		"user":        map[string]any{"username": u.Username, "bio": u.Bio, "created_at": u.CreatedAt},
 		"exported_at": time.Now().UTC(),
 		"logs":        []exportLog{},
 		"lists":       lists,
-		"library":     library,
+		"library":     []exportLibrary{},
 	}
 	var el []exportLog
 	for _, l := range logs {
-		name := ""
-		if l.Game != nil {
-			name = l.Game.Title
+		e := exportLog{
+			Game: gameTitle(l.Game), GameSlug: gameSlug(l.Game), Name: l.Name, Rating: l.Rating, Review: l.Review,
+			Spoiler: l.Spoiler, Status: l.Status, Replay: l.Replay, Mastered: l.Mastered, Difficulty: l.Difficulty,
+			Platform: l.PlatformName, PlayedOn: l.PlayedOnName, Ownership: l.Ownership, Storefront: l.Storefront,
+			Edition: l.EditionName, StartedAt: l.StartedAt, FinishedAt: l.FinishedAt, TimeToFinish: l.TimeToFinish,
+			TimeToMaster: l.TimeToMaster, Playtime: l.Playtime, SyncSessions: l.SyncSessions,
+			PrimaryRating: l.PrimaryRating, Language: l.Language, Draft: l.Draft, CreatedAt: l.CreatedAt,
 		}
-		el = append(el, exportLog{name, l.Rating, l.Review, l.Status, l.Playtime, l.StartedAt, l.FinishedAt})
+		sessions, _ := s.st.SessionsFor(r.Context(), l.ID)
+		for _, sess := range sessions {
+			e.Sessions = append(e.Sessions, exportSession{Note: sess.Note, NotePrivacy: sess.NotePrivacy, Playtime: sess.Playtime, Days: sess.Days, Tags: sess.Tags})
+		}
+		el = append(el, e)
+	}
+	var libs []exportLibrary
+	for _, entry := range library {
+		libs = append(libs, exportLibrary{
+			Game: gameTitle(entry.Game), GameSlug: gameSlug(entry.Game), Platform: entry.Platform,
+			Ownership: entry.Ownership, Storefront: entry.Storefront, Edition: entry.Edition,
+		})
 	}
 	out["logs"] = el
+	out["library"] = libs
 	w.Header().Set("Content-Type", "application/json")
 	w.Header().Set("Content-Disposition", `attachment; filename="luduslog-`+u.Username+`.json"`)
 	json.NewEncoder(w).Encode(out)
@@ -738,6 +814,158 @@ func (s *Server) exportCSV(w http.ResponseWriter, u *models.User, logs []*models
 	}
 }
 
+// luduslogExport is the envelope written by exportData.
+type luduslogExport struct {
+	Format  string          `json:"format"`
+	Version int             `json:"version"`
+	Logs    []exportLog     `json:"logs"`
+	Library []exportLibrary `json:"library"`
+}
+
+func parseLuduslogExport(data []byte) (luduslogExport, bool) {
+	var payload luduslogExport
+	if !bytes.Contains(data, []byte(`"luduslog"`)) || json.Unmarshal(data, &payload) != nil {
+		return payload, false
+	}
+	return payload, payload.Format == "luduslog"
+}
+
+func (s *Server) platformIDByName(ctx context.Context, name string) *int64 {
+	if strings.TrimSpace(name) == "" {
+		return nil
+	}
+	var id int64
+	if err := s.st.DB.QueryRowContext(ctx, `SELECT id FROM platforms WHERE lower(name)=lower(?)`, strings.TrimSpace(name)).Scan(&id); err != nil {
+		return nil
+	}
+	return &id
+}
+
+// resolveExportGame finds a catalog game by slug first, then by exact title.
+func (s *Server) resolveExportGame(ctx context.Context, slug, title string) *models.Game {
+	if slug != "" {
+		if g, err := s.st.GameBySlug(ctx, slug); err == nil {
+			return g
+		}
+	}
+	if title == "" {
+		return nil
+	}
+	games, _, err := s.st.SearchGames(ctx, title, 10, 0, true)
+	if err != nil {
+		return nil
+	}
+	for i := range games {
+		if strings.EqualFold(games[i].Title, title) {
+			return &games[i]
+		}
+	}
+	return nil
+}
+
+func (s *Server) importLuduslogExport(r *http.Request, u *models.User, payload luduslogExport) (added, updated, sessions, missing int, err error) {
+	ctx := r.Context()
+	existing := map[int64][]*models.Log{}
+	claimed := map[int64]bool{}
+	type flags struct{ played, playing, backlog, wishlist bool }
+	shelf := map[int64]*flags{}
+	for _, e := range payload.Logs {
+		g := s.resolveExportGame(ctx, e.GameSlug, e.Game)
+		if g == nil {
+			missing++
+			continue
+		}
+		primary := e.PrimaryRating && e.Rating > 0 && !e.Draft
+		in := store.LogInput{
+			UserID: u.ID, GameID: g.ID, Name: e.Name, Rating: e.Rating, Review: e.Review,
+			Spoiler: e.Spoiler, Status: store.NormalizePlayedStatus(e.Status), Replay: e.Replay,
+			Mastered: e.Mastered, Difficulty: e.Difficulty, PlatformID: s.platformIDByName(ctx, e.Platform),
+			PlayedOnID: s.platformIDByName(ctx, e.PlayedOn), Ownership: e.Ownership, Storefront: e.Storefront,
+			StartedAt: e.StartedAt, FinishedAt: e.FinishedAt, TimeToFinish: e.TimeToFinish,
+			TimeToMaster: e.TimeToMaster, Playtime: e.Playtime, SyncSessions: e.SyncSessions,
+			Language: e.Language, Draft: e.Draft, PrimaryRating: &primary,
+		}
+		logs, ok := existing[g.ID]
+		if !ok {
+			logs, _ = s.st.UserGameLogs(ctx, u.ID, g.ID, true)
+			existing[g.ID] = logs
+		}
+		var match *models.Log
+		for _, candidate := range logs {
+			if !claimed[candidate.ID] && candidate.Name == e.Name {
+				match = candidate
+				break
+			}
+		}
+		if match == nil {
+			for _, candidate := range logs {
+				if !claimed[candidate.ID] {
+					match = candidate
+					break
+				}
+			}
+		}
+		var logID int64
+		if match != nil {
+			claimed[match.ID] = true
+			logID = match.ID
+			if _, err := s.st.UpdateLog(ctx, logID, in); err != nil {
+				return added, updated, sessions, missing, err
+			}
+			if err := s.st.DeleteSessionsForLog(ctx, logID); err != nil {
+				return added, updated, sessions, missing, err
+			}
+			updated++
+		} else {
+			l, err := s.st.CreateLog(ctx, in)
+			if err != nil {
+				return added, updated, sessions, missing, err
+			}
+			logID = l.ID
+			claimed[l.ID] = true
+			existing[g.ID] = append(existing[g.ID], l)
+			added++
+		}
+		for _, sess := range e.Sessions {
+			if _, err := s.st.CreateSession(ctx, store.SessionInput{
+				LogID: logID, Note: sess.Note, NotePrivacy: sess.NotePrivacy, Playtime: sess.Playtime,
+				Days: sess.Days, Tags: sess.Tags,
+			}); err != nil {
+				return added, updated, sessions, missing, err
+			}
+			sessions++
+		}
+		f := shelf[g.ID]
+		if f == nil {
+			f = &flags{}
+			shelf[g.ID] = f
+		}
+		f.played = f.played || playedLogStatus(in.Status)
+		f.playing = f.playing || in.Status == "playing"
+		f.backlog = f.backlog || in.Status == "backlog"
+		f.wishlist = f.wishlist || in.Status == "wishlist"
+		if in.Ownership != "" {
+			s.st.SaveLibraryEntry(ctx, u.ID, g.ID, in.PlatformID, in.Ownership, in.Storefront, e.Edition)
+		}
+	}
+	for gameID, f := range shelf {
+		if err := s.st.SetStatuses(ctx, u.ID, gameID, f.played, f.playing, f.backlog, f.wishlist, false); err != nil {
+			return added, updated, sessions, missing, err
+		}
+	}
+	for _, entry := range payload.Library {
+		g := s.resolveExportGame(ctx, entry.GameSlug, entry.Game)
+		if g == nil {
+			missing++
+			continue
+		}
+		if err := s.st.SaveLibraryEntry(ctx, u.ID, g.ID, s.platformIDByName(ctx, entry.Platform), entry.Ownership, entry.Storefront, entry.Edition); err != nil {
+			return added, updated, sessions, missing, err
+		}
+	}
+	return added, updated, sessions, missing, nil
+}
+
 func (s *Server) importData(w http.ResponseWriter, r *http.Request) {
 	u := currentUser(r)
 	file, header, err := r.FormFile("file")
@@ -747,7 +975,26 @@ func (s *Server) importData(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer file.Close()
-	entries, err := backloggd.Parse(io.LimitReader(file, 16<<20), header.Filename)
+	data, err := io.ReadAll(io.LimitReader(file, 16<<20))
+	if err != nil {
+		s.serverError(w, r, err)
+		return
+	}
+	if payload, ok := parseLuduslogExport(data); ok {
+		added, updated, sessions, missing, err := s.importLuduslogExport(r, u, payload)
+		if err != nil {
+			s.serverError(w, r, err)
+			return
+		}
+		msg := fmt.Sprintf("Restored %d logs (%d new) and %d play sessions", added+updated, added, sessions)
+		if missing > 0 {
+			msg += fmt.Sprintf("; %d games were not in the catalog", missing)
+		}
+		s.flash(w, r, "success", msg+".")
+		s.redirect(w, r, "/users/"+u.Username)
+		return
+	}
+	entries, err := backloggd.Parse(bytes.NewReader(data), header.Filename)
 	if err != nil {
 		s.flash(w, r, "error", "Could not read that export: "+err.Error())
 		s.redirect(w, r, "/settings?tab=import")

@@ -1,0 +1,33 @@
+{{define "content"}}
+<div class="section-head"><h1 class="mb0">Report</h1><a class="more" href="{{.ReturnTo}}">Back</a></div>
+<div class="card">
+  <p class="muted">Reporting {{.TargetType}}{{if .TargetName}}: <strong>{{.TargetName}}</strong>{{end}}</p>
+  <form class="stack" method="post" action="/report">
+    <input type="hidden" name="_csrf" value="{{.CSRF}}">
+    <input type="hidden" name="target_type" value="{{.TargetType}}">
+    <input type="hidden" name="target_id" value="{{.TargetID}}">
+    <input type="hidden" name="target_url" value="{{.TargetURL}}">
+    <input type="hidden" name="return_to" value="{{.ReturnTo}}">
+    <label>Reason
+      <select name="reason" required>
+        <option value="">Choose a reason…</option>
+        <option value="spam">Spam or unwanted content</option>
+        <option value="harassment">Harassment or bullying</option>
+        <option value="hate">Hate speech</option>
+        <option value="violence">Violence or threats</option>
+        <option value="misinformation">Misinformation</option>
+        <option value="legal">Legal issue</option>
+        <option value="other">Something else</option>
+      </select>
+    </label>
+    <label>Details <span class="muted">(optional)</span>
+      <textarea name="details" rows="4" maxlength="2000" placeholder="Add context for the moderators"></textarea>
+    </label>
+    {{if .CanForward}}
+    <label class="check"><input type="checkbox" name="forward" value="1"> Also forward this report to the remote instance ({{.TargetInstance}})</label>
+    <div class="field-hint">The remote instance only sees the reported link, reason and details. Reports stay private from the reported user.</div>
+    {{end}}
+    <button class="btn btn-primary" type="submit">Submit report</button>
+  </form>
+</div>
+{{end}}

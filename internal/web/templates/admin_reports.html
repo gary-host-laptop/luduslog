@@ -8,13 +8,18 @@
     <strong>{{.Reason}} <span class="pill">{{.TargetType}}</span> <span class="pill">{{.Status}}</span></strong>
     <span class="muted">{{timeago .CreatedAt}}</span>
   </div>
-  {{if .Reporter}}<div class="muted">Reported by {{.Reporter}}</div>{{end}}
+  <div class="muted">
+    Reported by {{if .Reporter}}{{.Reporter}}{{else if .RemoteReporter}}{{.RemoteReporter}}{{else}}remote actor{{end}}{{if .SourceInstance}} @ {{.SourceInstance}}{{end}}
+    {{if .TargetAuthor}} · author {{.TargetAuthor}}{{end}}{{if .TargetInstance}} @ {{.TargetInstance}}{{end}}
+    {{if .Forwarded}} · <span class="pill">Flag forwarded</span>{{end}}
+  </div>
+  {{if .ContentPreview}}<div class="prose mt1 report-preview">{{truncate (plain .ContentPreview) 400}}</div>{{end}}
   {{if .TargetURL}}<div class="mt1"><a href="{{.TargetURL}}">{{.TargetURL}}</a></div>{{end}}
   {{if .Details}}<div class="prose mt1">{{.Details}}</div>{{end}}
   <div class="btn-group mt1">
     <form method="post" action="/admin/reports/{{.ID}}"><input type="hidden" name="_csrf" value="{{$.CSRF}}"><input type="hidden" name="status" value="resolved"><input type="hidden" name="resolution" value="reviewed"><button class="btn btn-sm" type="submit">Resolve</button></form>
     <form method="post" action="/admin/reports/{{.ID}}"><input type="hidden" name="_csrf" value="{{$.CSRF}}"><input type="hidden" name="status" value="dismissed"><input type="hidden" name="resolution" value="no action needed"><button class="btn btn-sm btn-ghost" type="submit">Dismiss</button></form>
-    {{if or (eq .TargetType "log") (eq .TargetType "comment") (eq .TargetType "list")}}
+    {{if or (eq .TargetType "log") (eq .TargetType "comment") (eq .TargetType "list") (eq .TargetType "post")}}
     <form method="post" action="/admin/content/{{.TargetType}}/{{.TargetID}}/remove" onsubmit="return confirm('Remove this content?')"><input type="hidden" name="_csrf" value="{{$.CSRF}}"><input type="hidden" name="reason" value="reported: {{.Reason}}"><button class="btn btn-sm btn-danger" type="submit">Remove content</button></form>
     {{end}}
   </div>

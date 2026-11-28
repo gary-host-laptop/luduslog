@@ -318,4 +318,62 @@
       videoFrame.replaceChildren();
     });
   }
+
+  // Log editor tabs. Panels stay in the document so a single form submission
+  // keeps every field; without JavaScript all panels remain visible.
+  document.querySelectorAll("[data-log-tabs]").forEach(function (root) {
+    var tabs = Array.prototype.slice.call(root.querySelectorAll("[data-log-tab]"));
+    var panels = Array.prototype.slice.call(root.querySelectorAll("[data-log-panel]"));
+    if (!tabs.length || !panels.length) return;
+    root.setAttribute("data-enhanced", "");
+    function select(key, focus) {
+      tabs.forEach(function (tab) {
+        var on = tab.getAttribute("data-log-tab") === key;
+        tab.setAttribute("aria-selected", on ? "true" : "false");
+        tab.tabIndex = on ? 0 : -1;
+        if (on && focus) tab.focus();
+      });
+      panels.forEach(function (panel) {
+        panel.hidden = panel.getAttribute("data-log-panel") !== key;
+      });
+      if (history.replaceState) {
+        var url = new URL(window.location.href);
+        url.searchParams.set("tab", key);
+        history.replaceState(null, "", url.toString().replace(/\?tab=play$/, ""));
+      }
+    }
+    var initial = "play";
+    tabs.forEach(function (tab) {
+      if (tab.getAttribute("aria-selected") === "true") initial = tab.getAttribute("data-log-tab");
+    });
+    var hash = (window.location.hash || "").replace("#", "");
+    if (hash && tabs.some(function (tab) { return tab.getAttribute("data-log-tab") === hash; })) initial = hash;
+    tabs.forEach(function (tab, i) {
+      tab.addEventListener("click", function () { select(tab.getAttribute("data-log-tab"), false); });
+      tab.addEventListener("keydown", function (evt) {
+        var next = -1;
+        if (evt.key === "ArrowRight") next = (i + 1) % tabs.length;
+        else if (evt.key === "ArrowLeft") next = (i - 1 + tabs.length) % tabs.length;
+        else if (evt.key === "Home") next = 0;
+        else if (evt.key === "End") next = tabs.length - 1;
+        if (next < 0) return;
+        evt.preventDefault();
+        select(tabs[next].getAttribute("data-log-tab"), true);
+      });
+    });
+    select(initial, false);
+  });
+
+  // Journal day chips: fill any empty date inputs in the nearest form with
+  // today's date, leaving dates the user already typed alone.
+  document.querySelectorAll("[data-today]").forEach(function (btn) {
+    btn.addEventListener("click", function () {
+      var form = btn.closest("form");
+      if (!form) return;
+      var today = new Date().toISOString().slice(0, 10);
+      form.querySelectorAll('input[type="date"]').forEach(function (input) {
+        if (!input.value) input.value = today;
+      });
+    });
+  });
 })();

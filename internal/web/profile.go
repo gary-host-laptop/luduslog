@@ -3,6 +3,7 @@ package web
 import (
 	"net/http"
 	"net/url"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -41,6 +42,23 @@ type profileData struct {
 	PageNum           int
 	Pages             int
 	Total             int
+
+	GameRows      []store.UserGameRow
+	GameSort      string
+	GameStatus    string
+	GamePlayed    string
+	GameRating    string
+	GamePlatform  string
+	GameYear      string
+	GameTag       string
+	GameOwnership string
+	GamePlaytime  string
+	GameMastered  bool
+	GameReviewed  bool
+	GamePlatforms []string
+	GameYears     []int
+	GameTags      []string
+	GameFiltered  int
 }
 
 type shelfSection struct {
@@ -213,18 +231,43 @@ func (s *Server) profile(w http.ResponseWriter, r *http.Request) {
 		switch tab {
 		case "reviews":
 			data.Reviews, data.Total, _ = s.st.UserLogs(r.Context(), p.ID, true, 15, (page-1)*15)
+		case "games":
+			rows, _ := s.st.UserGameRows(r.Context(), p.ID)
+			if viewer == nil || !viewer.AdultOptIn {
+				visible := rows[:0]
+				for _, row := range rows {
+					if !row.Game.Adult {
+						visible = append(visible, row)
+					}
+				}
+				rows = visible
+			}
+			data.GameRows, data.GamePlatforms, data.GameYears, data.GameTags = filterGameRows(rows, r)
+			data.GameFiltered = len(data.GameRows)
+			data.GameSort = r.URL.Query().Get("sort")
+			data.GameStatus = r.URL.Query().Get("status")
+			data.GamePlayed = r.URL.Query().Get("played")
+			data.GameRating = r.URL.Query().Get("rating")
+			data.GamePlatform = r.URL.Query().Get("platform")
+			data.GameYear = r.URL.Query().Get("year")
+			data.GameTag = r.URL.Query().Get("tag")
+			data.GameOwnership = r.URL.Query().Get("ownership")
+			data.GamePlaytime = r.URL.Query().Get("playtime")
+			data.GameMastered = r.URL.Query().Get("mastered") == "1"
+			data.GameReviewed = r.URL.Query().Get("review") == "1"
 		case "lists":
 			data.Lists, _ = s.st.VisibleListsFor(r.Context(), p.ID, viewerID)
 			data.Total = len(data.Lists)
 		default:
 			data.Widgets = s.overviewWidgets(r, p, viewer, data.Favorites)
+			counts := s.st.UserShelfCounts(r.Context(), p.ID)
 			shelves := []struct {
 				key, label string
 				count      int
 			}{
-				{"played", "Played", data.Stats.GamesPlayed},
-				{"playing", "Playing", data.Stats.GamesPlaying},
-				{"backlog", "Backlog", data.Stats.GamesBacklog},
+				{"played", "Played", counts["played"]},
+				{"playing", "Playing", counts["playing"]},
+				{"backlog", "Backlog", counts["backlog"]},
 			}
 			for _, shelf := range shelves {
 				games, _ := s.st.ShelfGames(r.Context(), p.ID, shelf.key, 3)
@@ -240,15 +283,138 @@ func (s *Server) profile(w http.ResponseWriter, r *http.Request) {
 	s.render(w, r, "profile", data)
 }
 
+// filterGameRows applies the profile Games-tab filters and returns the option
+// lists discovered from the unfiltered rows.
+func filterGameRows(rows []store.UserGameRow, r *http.Request) (out []store.UserGameRow, platforms []string, years []int, tags []string) {
+	q := r.URL.Query()
+	status := q.Get("status")
+	played := q.Get("played")
+	rating, _ := strconv.Atoi(q.Get("rating"))
+	platform := q.Get("platform")
+	year, _ := strconv.Atoi(q.Get("year"))
+	tag := strings.ToLower(strings.TrimSpace(q.Get("tag")))
+	ownership := q.Get("ownership")
+	playtimeMin, _ := strconv.ParseFloat(q.Get("playtime"), 64)
+	mastered := q.Get("mastered") == "1"
+	reviewed := q.Get("review") == "1"
+
+	seenPlatform := map[string]bool{}
+	seenYear := map[int]bool{}
+	seenTag := map[string]bool{}
+	for _, row := range rows {
+		if row.Platform != "" && !seenPlatform[row.Platform] {
+			seenPlatform[row.Platform] = true
+			platforms = append(platforms, row.Platform)
+		}
+		if row.PlayedYear > 0 && !seenYear[row.PlayedYear] {
+			seenYear[row.PlayedYear] = true
+			years = append(years, row.PlayedYear)
+		}
+		for _, t := range row.Tags {
+			if t != "" && !seenTag[t] {
+				seenTag[t] = true
+				tags = append(tags, t)
+			}
+		}
+	}
+	sort.Strings(platforms)
+	sort.Sort(sort.Reverse(sort.IntSlice(years)))
+	sort.Strings(tags)
+
+	for _, row := range rows {
+		switch status {
+		case "played":
+			if row.Played < 1 {
+				continue
+			}
+		case "playing":
+			if !row.Playing {
+				continue
+			}
+		case "backlog":
+			if !row.Backlog {
+				continue
+			}
+		case "wishlist":
+			if !row.Wishlist {
+				continue
+			}
+		}
+		if played != "" && row.PlayedStatus != played {
+			continue
+		}
+		if rating > 0 && row.Rating < float64(rating) {
+			continue
+		}
+		if platform != "" && row.Platform != platform {
+			continue
+		}
+		if year > 0 && row.PlayedYear != year {
+			continue
+		}
+		if tag != "" {
+			found := false
+			for _, t := range row.Tags {
+				if strings.EqualFold(t, tag) {
+					found = true
+					break
+				}
+			}
+			if !found {
+				continue
+			}
+		}
+		if ownership != "" && row.Ownership != ownership {
+			continue
+		}
+		if playtimeMin > 0 && row.Playtime < playtimeMin {
+			continue
+		}
+		if mastered && !row.Mastered {
+			continue
+		}
+		if reviewed && !row.HasReview {
+			continue
+		}
+		out = append(out, row)
+	}
+	switch q.Get("sort") {
+	case "rating":
+		sort.SliceStable(out, func(i, j int) bool { return out[i].Rating > out[j].Rating })
+	case "playtime":
+		sort.SliceStable(out, func(i, j int) bool { return out[i].Playtime > out[j].Playtime })
+	case "title":
+		sort.SliceStable(out, func(i, j int) bool {
+			return strings.ToLower(out[i].Game.Title) < strings.ToLower(out[j].Game.Title)
+		})
+	}
+	return out, platforms, years, tags
+}
+
+type userLogCard struct {
+	Log          *models.Log
+	Sessions     []models.Session
+	SessionCount int
+	SessionHours float64
+}
+
 type userGameLogData struct {
 	Page
-	Profile  *models.User
-	Game     *models.Game
-	Status   models.Status
-	Rating   float64
-	Playtime float64
-	Logs     []*models.Log
-	IsMe     bool
+	Profile      *models.User
+	Game         *models.Game
+	Status       models.Status
+	Rating       float64
+	Playtime     float64
+	Logs         []*models.Log
+	Cards        []userLogCard
+	IsMe         bool
+	Sort         string
+	StatusFilter string
+	Replay       bool
+	Mastered     bool
+	Drafts       bool
+	Reviewed     bool
+	Filtered     int
 }
 
 // userGameLogsPage is the stable destination for a person's log of one game.
@@ -308,15 +474,57 @@ func (s *Server) userGameLogsPage(w http.ResponseWriter, r *http.Request) {
 	for _, l := range logs {
 		playtime += l.Playtime
 	}
+	q := r.URL.Query()
 	data := userGameLogData{
-		Page:     s.page(r, p.Username+" · "+g.Title),
-		Profile:  p,
-		Game:     g,
-		Status:   status,
-		Rating:   s.st.RatingForUser(r.Context(), p.ID, g.ID),
-		Playtime: playtime,
-		Logs:     logs,
-		IsMe:     isMe,
+		Page:         s.page(r, p.Username+" · "+g.Title),
+		Profile:      p,
+		Game:         g,
+		Status:       status,
+		Rating:       s.st.RatingForUser(r.Context(), p.ID, g.ID),
+		Playtime:     playtime,
+		IsMe:         isMe,
+		Sort:         q.Get("sort"),
+		StatusFilter: q.Get("status"),
+		Replay:       q.Get("replay") == "1",
+		Mastered:     q.Get("mastered") == "1",
+		Drafts:       q.Get("drafts") == "1",
+		Reviewed:     q.Get("review") == "1",
+	}
+	for _, l := range logs {
+		if data.StatusFilter != "" && l.Status != data.StatusFilter {
+			continue
+		}
+		if data.Replay && !l.Replay {
+			continue
+		}
+		if data.Mastered && !l.Mastered {
+			continue
+		}
+		if data.Drafts && !l.Draft {
+			continue
+		}
+		if data.Reviewed && l.Review == "" {
+			continue
+		}
+		data.Logs = append(data.Logs, l)
+	}
+	switch data.Sort {
+	case "oldest":
+		sort.SliceStable(data.Logs, func(i, j int) bool { return data.Logs[i].CreatedAt.Before(data.Logs[j].CreatedAt) })
+	case "rating":
+		sort.SliceStable(data.Logs, func(i, j int) bool { return data.Logs[i].Rating > data.Logs[j].Rating })
+	case "playtime":
+		sort.SliceStable(data.Logs, func(i, j int) bool { return data.Logs[i].Playtime > data.Logs[j].Playtime })
+	}
+	data.Filtered = len(data.Logs)
+	for _, l := range data.Logs {
+		card := userLogCard{Log: l}
+		card.Sessions, _ = s.st.SessionsForViewer(r.Context(), l.ID, viewerID)
+		card.SessionCount = len(card.Sessions)
+		for _, sess := range card.Sessions {
+			card.SessionHours += sess.Playtime
+		}
+		data.Cards = append(data.Cards, card)
 	}
 	s.render(w, r, "user_game_logs", data)
 }

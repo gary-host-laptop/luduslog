@@ -58,6 +58,9 @@ func (s *Server) routes() {
 	m.HandleFunc("POST /games/{slug}/log", s.requireUser(s.logSubmit))
 	m.HandleFunc("GET /logs/{id}/edit", s.requireUser(s.logEditForm))
 	m.HandleFunc("POST /logs/{id}/edit", s.requireUser(s.logEdit))
+	m.HandleFunc("POST /logs/{id}/rename", s.requireUser(s.logRename))
+	m.HandleFunc("POST /logs/{id}/cover", s.requireUser(s.logCover))
+	m.HandleFunc("POST /logs/{id}/delete-all", s.requireUser(s.logDeleteAll))
 	m.HandleFunc("POST /logs/{id}/delete", s.requireUser(s.logDelete))
 	m.HandleFunc("POST /logs/{id}/like", s.requireUser(s.likeLog))
 	m.HandleFunc("POST /games/{slug}/sessions", s.requireUser(s.gameSessionCreate))
@@ -84,9 +87,19 @@ func (s *Server) routes() {
 	m.HandleFunc("POST /folders/{id}/lists", s.requireUser(s.folderAddList))
 	m.HandleFunc("POST /folders/{id}/lists/remove", s.requireUser(s.folderRemoveList))
 
+	// Canonical posts
+	m.HandleFunc("GET /posts/{id}", s.postPage)
+	m.HandleFunc("POST /posts/{id}/like", s.requireUser(s.postLike))
+	m.HandleFunc("POST /posts/{id}/boost", s.requireUser(s.postBoost))
+	m.HandleFunc("POST /posts/{id}/delete", s.requireUser(s.postDelete))
+	m.HandleFunc("GET /posts/{id}/likes", s.postLikesCollection)
+	m.HandleFunc("GET /posts/{id}/shares", s.postSharesCollection)
+	m.HandleFunc("GET /posts/{id}/replies", s.postRepliesCollection)
+
 	// Social
 	m.HandleFunc("POST /comments", s.requireUser(s.commentCreate))
 	m.HandleFunc("POST /comments/{id}/delete", s.requireUser(s.commentDelete))
+	m.HandleFunc("GET /report", s.requireUser(s.reportPage))
 	m.HandleFunc("POST /report", s.requireUser(s.reportCreate))
 	m.HandleFunc("GET /notifications", s.requireUser(s.notificationsPage))
 	m.HandleFunc("POST /notifications/read", s.requireUser(s.notificationsRead))

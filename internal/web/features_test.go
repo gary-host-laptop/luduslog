@@ -125,6 +125,9 @@ func TestGameCoverPanelWeb(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	if err := st.SetShelf(ctx, alice.ID, game.ID, "played"); err != nil {
+		t.Fatal(err)
+	}
 	if _, err := st.DB.ExecContext(ctx, `UPDATE games SET avg_rating=8,weighted=3.8,rating_count=1,plays=7,playing=3,backlogs=5,wishlists=2 WHERE id=?`, game.ID); err != nil {
 		t.Fatal(err)
 	}
@@ -138,9 +141,11 @@ func TestGameCoverPanelWeb(t *testing.T) {
 		`class="game-cover-panel"`,
 		`class="game-cover-pane"`,
 		`class="game-library-card"`,
-		`name="flag" value="playing"`,
-		`name="flag" value="backlog"`,
-		`name="flag" value="wishlist"`,
+		`name="shelf" value="playing"`,
+		`name="shelf" value="played"`,
+		`name="shelf" value="backlog"`,
+		`name="shelf" value="wishlist"`,
+		`title="Remove from shelf"`,
 		`href="/games/cover-panel/log"`,
 		`href="/logs/` + strconv.FormatInt(userLog.ID, 10) + `/sessions"`,
 		`action="/games/cover-panel/rate"`,
@@ -508,11 +513,11 @@ func TestProfileOverviewShelves(t *testing.T) {
 	ctx := context.Background()
 	alice, _ := st.CreateUser(ctx, "shelfweb", "shelfweb@example.test", "hash", false)
 	shelves := []struct {
-		label, key, column string
+		label, key string
 	}{
-		{"Played", "played", "played_at"},
-		{"Playing", "playing", "playing_at"},
-		{"Backlog", "backlog", "backlog_at"},
+		{"Played", "played"},
+		{"Playing", "playing"},
+		{"Backlog", "backlog"},
 	}
 	for sIndex, shelf := range shelves {
 		for i := 1; i <= 4; i++ {
@@ -521,22 +526,18 @@ func TestProfileOverviewShelves(t *testing.T) {
 				Slug:   strings.ToLower(shelf.label) + "-shelf-" + strconv.Itoa(i),
 				Title:  shelf.label + " " + strconv.Itoa(i), ReleaseStatus: "released",
 			})
-			if shelf.key == "played" {
-				if err := st.SetPlayedCount(ctx, alice.ID, game.ID, 1); err != nil {
-					t.Fatal(err)
-				}
-			} else if err := st.SetStatusFlag(ctx, alice.ID, game.ID, shelf.key, true); err != nil {
+			if err := st.SetShelf(ctx, alice.ID, game.ID, shelf.key); err != nil {
 				t.Fatal(err)
 			}
 			eventAt := "2026-0" + strconv.Itoa(sIndex+1) + "-0" + strconv.Itoa(i) + "T12:00:00Z"
-			if _, err := st.DB.ExecContext(ctx, `UPDATE statuses SET `+shelf.column+`=?,updated_at=? WHERE user_id=? AND game_id=?`,
+			if _, err := st.DB.ExecContext(ctx, `UPDATE statuses SET shelf_at=?,updated_at=? WHERE user_id=? AND game_id=?`,
 				eventAt, eventAt, alice.ID, game.ID); err != nil {
 				t.Fatal(err)
 			}
 		}
 	}
 	wishlist, _ := st.SaveGame(ctx, &models.Game{IGDBID: -799, Slug: "shelf-wishlist", Title: "Shelf Wishlist", ReleaseStatus: "released"})
-	if err := st.SetStatusFlag(ctx, alice.ID, wishlist.ID, "wishlist", true); err != nil {
+	if err := st.SetShelf(ctx, alice.ID, wishlist.ID, "wishlist"); err != nil {
 		t.Fatal(err)
 	}
 
@@ -852,8 +853,11 @@ func TestOverviewWidgetsWeb(t *testing.T) {
 		t.Fatalf("save private list widget = %d", got)
 	}
 	_, ownerBody := getBody(t, client, ts.URL+"/users/widgetalice")
-	if !strings.Contains(ownerBody, "Private Widget List") || !strings.Contains(ownerBody, "Games saved for a rainy weekend.") {
-		t.Error("owner cannot see a selected private list and its description")
+	if !strings.Contains(ownerBody, "Private Widget List") || !strings.Contains(ownerBody, `class="list-widget-stats"`) {
+		t.Error("owner cannot see a selected private list and its counters")
+	}
+	if strings.Contains(ownerBody, "Games saved for a rainy weekend.") {
+		t.Error("highlighted list widget still renders the list description")
 	}
 	bobClient, _ := authedClient(t, ts, st, bob)
 	_, strangerBody := getBody(t, bobClient, ts.URL+"/users/widgetalice")
@@ -902,22 +906,39 @@ func TestListCoverCardsWeb(t *testing.T) {
 		if code != http.StatusOK || !strings.Contains(body, "Stack Web") {
 			t.Fatalf("%s missing list card (%d)", path, code)
 		}
-		start := strings.Index(body, `href="/users/coverweb/lists/stack-web"`)
-		if start < 0 {
+		linkAt := strings.Index(body, `href="/users/coverweb/lists/stack-web"`)
+		if linkAt < 0 {
 			t.Fatalf("%s missing the list card link", path)
 		}
-		start = strings.LastIndex(body[:start], "<a ")
-		if start < 0 {
-			t.Fatalf("%s missing the list card anchor", path)
-		}
-		card := body[start:]
-		if end := strings.Index(card, "</a>"); end >= 0 {
-			card = card[:end]
+		var card string
+		if path == "/games/stack-game-0" {
+			start := strings.LastIndex(body[:linkAt], "<a ")
+			if start < 0 {
+				t.Fatalf("%s missing the list card anchor", path)
+			}
+			card = body[start:]
+			if end := strings.Index(card, "</a>"); end >= 0 {
+				card = card[:end]
+			}
+		} else {
+			start := strings.LastIndex(body[:linkAt], `<div class="list-card"`)
+			if start < 0 {
+				t.Fatalf("%s missing the list card wrapper", path)
+			}
+			card = body[start:]
+			tagsAt := strings.Index(card, `class="list-card-tags`)
+			if tagsAt < 0 {
+				t.Fatalf("%s missing the list card tag row", path)
+			}
+			if end := strings.Index(card[tagsAt:], "</div>"); end >= 0 {
+				card = card[:tagsAt+end]
+			}
 		}
 		if !strings.Contains(card, `class="list-covers"`) {
 			t.Errorf("%s missing overlapping list covers", path)
 		}
-		if got := strings.Count(card, "<img "); got != 5 {
+		coverPart := strings.Split(card, `class="list-card-meta`)[0]
+		if got := strings.Count(coverPart, "<img "); got != 5 {
 			t.Errorf("%s rendered %d covers, want 5", path, got)
 		}
 		if !strings.Contains(card, "6 games") {
@@ -935,12 +956,12 @@ func TestListCoverStackCSS(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, want := range []string{
-		".list-card { --cover-w: 56px; --cover-h: 75px;",
-		".list-card-compact { --cover-w: 48px; --cover-h: 64px; }",
-		".list-card-widget { --cover-w: calc((100cqi - 4 * .7rem) / 5); }",
+		".list-card { --cover-w: 120px; --cover-h: 160px;",
+		".list-card-compact { --cover-w: 48px; --cover-h: 64px;",
+		".list-card-widget { --cover-w: calc((100cqi - 4 * .7rem) / 5);",
 		".list-card-widget .list-covers img { height: auto; aspect-ratio: 3 / 4; }",
 		".overview-widget .fav-grid { grid-template-columns: repeat(5, minmax(0, 1fr)); }",
-		".overview-widget .list-card { flex: 1; width: 100%; padding: 0; border: 0; background: none; align-items: flex-start; }",
+		".overview-widget .list-card { display: flex; flex: 1; width: 100%; padding: 0; border: 0; background: none; align-items: center; }",
 		".overview-review-head { display: flex; flex: 1; align-items: flex-start; gap: .75rem; }",
 		".overview-review-head .game-cover { width: calc((100cqi - 4 * .7rem) / 5); flex: none; }",
 		".overview-review-copy { display: flex; flex: 1; flex-direction: column; align-self: stretch; min-width: 0; }",
@@ -1000,19 +1021,15 @@ func TestReviewLikePlacementAndEmptyComments(t *testing.T) {
 	}
 }
 
-func TestHomeFeedRendersMissingUser(t *testing.T) {
+func TestTimelineItemRendersMissingUser(t *testing.T) {
 	ts, _ := testServer(t)
 	srv, ok := ts.Config.Handler.(*Server)
 	if !ok {
 		t.Fatal("test server handler is not *Server")
 	}
-	data := homeData{
-		Timeline: []models.TimelineItem{{Kind: "log"}},
-		Lists:    []*models.List{{Slug: "orphan", Title: "Orphan list"}},
-	}
 	var buf bytes.Buffer
-	if err := srv.pages["home"].ExecuteTemplate(&buf, "content", data); err != nil {
-		t.Fatalf("home feed with a missing user: %v", err)
+	if err := srv.pages["home"].ExecuteTemplate(&buf, "timeline_item", models.TimelineItem{Kind: "log"}); err != nil {
+		t.Fatalf("timeline item with a missing user: %v", err)
 	}
 	if !strings.Contains(buf.String(), "Someone") {
 		t.Fatal("missing-user fallback was not rendered")

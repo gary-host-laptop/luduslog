@@ -401,6 +401,77 @@ func (s *Store) SearchLists(ctx context.Context, q string, limit, offset int) ([
 	return out, total, nil
 }
 
+func listOrder(sortKey, direction string) string {
+	dir := "DESC"
+	if direction == "asc" {
+		dir = "ASC"
+	}
+	switch sortKey {
+	case "date":
+		return "l.created_at " + dir + ", l.id " + dir
+	case "entries":
+		return "(SELECT COUNT(*) FROM list_entries le WHERE le.list_id=l.id) " + dir + ", l.updated_at " + dir + ", l.id " + dir
+	default:
+		return "(SELECT COUNT(*) FROM list_likes ll WHERE ll.list_id=l.id) " + dir + ", l.updated_at " + dir + ", l.id " + dir
+	}
+}
+
+// ListsFeedSorted lists discoverable lists for the Everyone, Friends, or
+// Following tabs. Private and unlisted lists never enter discovery feeds.
+func (s *Store) ListsFeedSorted(ctx context.Context, viewerID int64, tab, sortKey, direction string, limit, offset int) ([]*models.List, int, error) {
+	conds := []string{"l.deleted_at IS NULL", "u.deactivated_at IS NULL"}
+	args := []any{}
+	switch tab {
+	case "friends", "following":
+		if viewerID == 0 {
+			return nil, 0, nil
+		}
+		var ids []int64
+		if tab == "friends" {
+			ids = s.FriendIDs(ctx, viewerID)
+		} else {
+			ids = s.FollowingIDs(ctx, viewerID)
+		}
+		if len(ids) == 0 {
+			return nil, 0, nil
+		}
+		conds = append(conds, "l.user_id IN ("+placeholders(len(ids))+")", "l.privacy IN ('public','personal')")
+		for _, id := range ids {
+			args = append(args, id)
+		}
+	default:
+		conds = append(conds, "l.privacy='public'")
+	}
+
+	from := ` FROM lists l JOIN users u ON u.id=l.user_id WHERE ` + strings.Join(conds, " AND ")
+	var total int
+	if err := s.DB.QueryRowContext(ctx, `SELECT COUNT(*)`+from, args...).Scan(&total); err != nil {
+		return nil, 0, err
+	}
+	rows, err := s.DB.QueryContext(ctx, `SELECT `+listCols+from+` ORDER BY `+listOrder(sortKey, direction)+` LIMIT ? OFFSET ?`, append(args, limit, offset)...)
+	if err != nil {
+		return nil, 0, err
+	}
+	var out []*models.List
+	for rows.Next() {
+		l, err := scanList(rows)
+		if err != nil {
+			continue
+		}
+		out = append(out, l)
+	}
+	err = rows.Err()
+	rows.Close()
+	if err != nil {
+		return nil, 0, err
+	}
+	for _, l := range out {
+		s.hydrateList(ctx, l, false)
+	}
+	s.loadListCovers(ctx, out)
+	return out, total, nil
+}
+
 func (s *Store) PopularLists(ctx context.Context, limit int) ([]*models.List, error) {
 	rows, err := s.DB.QueryContext(ctx, `SELECT `+listCols+` FROM lists l WHERE l.deleted_at IS NULL AND l.privacy='public'
 		ORDER BY (SELECT COUNT(*) FROM list_likes ll WHERE ll.list_id=l.id) DESC, l.updated_at DESC LIMIT ?`, limit)

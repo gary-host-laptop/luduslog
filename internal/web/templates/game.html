@@ -61,9 +61,11 @@
       </details>
       <div class="status-bar">
         <a class="played-pill" href="/games/{{.Game.Slug}}/log" title="Edit your log to change the played count" aria-label="Played {{.Status.Played}} times. Edit your log to change the count."><i class="ph-light ph-check-circle icon" aria-hidden="true"></i><span>Played</span><strong>{{.Status.Played}}</strong></a>
-        <form method="post" action="/games/{{.Game.Slug}}/status"><input type="hidden" name="_csrf" value="{{.CSRF}}"><input type="hidden" name="flag" value="playing"><input type="hidden" name="on" value="{{if .Status.Playing}}0{{else}}1{{end}}"><button class="{{if .Status.Playing}}on{{end}}" type="submit"><i class="ph-light ph-play icon" aria-hidden="true"></i>Playing</button></form>
-        <form method="post" action="/games/{{.Game.Slug}}/status"><input type="hidden" name="_csrf" value="{{.CSRF}}"><input type="hidden" name="flag" value="backlog"><input type="hidden" name="on" value="{{if .Status.Backlog}}0{{else}}1{{end}}"><button class="{{if .Status.Backlog}}on{{end}}" type="submit"><i class="ph-light ph-stack icon" aria-hidden="true"></i>Backlog</button></form>
-        <form method="post" action="/games/{{.Game.Slug}}/status"><input type="hidden" name="_csrf" value="{{.CSRF}}"><input type="hidden" name="flag" value="wishlist"><input type="hidden" name="on" value="{{if .Status.Wishlist}}0{{else}}1{{end}}"><button class="{{if .Status.Wishlist}}on{{end}}" type="submit"><i class="ph-light ph-heart icon" aria-hidden="true"></i>Wishlist</button></form>
+        <form method="post" action="/games/{{.Game.Slug}}/status"><input type="hidden" name="_csrf" value="{{.CSRF}}"><input type="hidden" name="shelf" value="playing"><button class="{{if eq .Status.Shelf "playing"}}on{{end}}" type="submit"><i class="ph-light ph-play icon" aria-hidden="true"></i>Playing</button></form>
+        <form method="post" action="/games/{{.Game.Slug}}/status"><input type="hidden" name="_csrf" value="{{.CSRF}}"><input type="hidden" name="shelf" value="played"><button class="{{if eq .Status.Shelf "played"}}on{{end}}" type="submit"><i class="ph-light ph-check-circle icon" aria-hidden="true"></i>Played</button></form>
+        <form method="post" action="/games/{{.Game.Slug}}/status"><input type="hidden" name="_csrf" value="{{.CSRF}}"><input type="hidden" name="shelf" value="backlog"><button class="{{if eq .Status.Shelf "backlog"}}on{{end}}" type="submit"><i class="ph-light ph-stack icon" aria-hidden="true"></i>Backlog</button></form>
+        <form method="post" action="/games/{{.Game.Slug}}/status"><input type="hidden" name="_csrf" value="{{.CSRF}}"><input type="hidden" name="shelf" value="wishlist"><button class="{{if eq .Status.Shelf "wishlist"}}on{{end}}" type="submit"><i class="ph-light ph-heart icon" aria-hidden="true"></i>Wishlist</button></form>
+        {{if .Status.Shelf}}<form method="post" action="/games/{{.Game.Slug}}/status"><input type="hidden" name="_csrf" value="{{.CSRF}}"><input type="hidden" name="shelf" value=""><button type="submit" title="Remove from shelf"><i class="ph-light ph-trash icon" aria-hidden="true"></i>Remove</button></form>{{end}}
       </div>
       <div class="game-library-actions">
         <button class="btn btn-sm btn-block game-action-open" type="button" data-dialog-open="game-list-dialog"><i class="ph-light ph-list-plus icon" aria-hidden="true"></i>Add to a list</button>
@@ -289,10 +291,11 @@
         <img class="avatar avatar-sm" src="{{avatar .User}}" alt="">
         <span class="friend-activity-name">{{.User.Username}}</span>
         <span class="friend-activity-status">
-          {{if gt .Status.Played 0}}<i class="ph-light ph-check-circle" role="img" title="Played" aria-label="Played"></i>{{end}}
-          {{if .Status.Playing}}<i class="ph-light ph-play" role="img" title="Playing" aria-label="Playing"></i>{{end}}
-          {{if .Status.Backlog}}<i class="ph-light ph-stack" role="img" title="Backlog" aria-label="Backlog"></i>{{end}}
-          {{if .Status.Wishlist}}<i class="ph-light ph-heart" role="img" title="Wishlist" aria-label="Wishlist"></i>{{end}}
+          {{if eq .Status.Shelf "playing"}}<i class="ph-light ph-play" role="img" title="Playing" aria-label="Playing"></i>
+          {{else if eq .Status.Shelf "played"}}<i class="ph-light ph-check-circle" role="img" title="Played" aria-label="Played"></i>
+          {{else if eq .Status.Shelf "backlog"}}<i class="ph-light ph-stack" role="img" title="Backlog" aria-label="Backlog"></i>
+          {{else if eq .Status.Shelf "wishlist"}}<i class="ph-light ph-heart" role="img" title="Wishlist" aria-label="Wishlist"></i>{{end}}
+          {{if gt .Status.Played 1}}<span class="muted">×{{.Status.Played}}</span>{{end}}
         </span>
         {{if .Rating}}<span class="friend-activity-rating" aria-label="Rated {{rating .Rating 10}} out of 10">{{rating .Rating 10}} <i class="ph-fill ph-star" aria-hidden="true"></i></span>{{end}}
       </a>
@@ -372,7 +375,7 @@
 <section class="section">
   <div class="section-head"><h2>Appears in lists</h2></div>
   <div class="grid grid-3">
-  {{range .Lists}}<a class="list-card list-card-compact" href="/users/{{.User.Username}}/lists/{{.Slug}}">{{if .CoverGames}}<div class="list-covers">{{range .CoverGames}}<img src="{{cover .}}" alt="" loading="lazy">{{end}}</div>{{end}}<div><h3>{{.Title}}</h3><div class="muted">{{.User.Username}} · {{.EntryCount}} {{plural .EntryCount "game" "games"}}</div></div></a>{{end}}
+  {{range .Lists}}<a class="list-card list-card-compact" href="/users/{{.User.Username}}/lists/{{.Slug}}">{{if .CoverGames}}<div class="list-covers">{{range .CoverGames}}<img src="{{cover .}}" alt="" loading="lazy">{{end}}</div>{{end}}<div class="list-card-body"><h3 class="list-card-title">{{.Title}}</h3><div class="list-card-meta muted">{{.User.Username}} · {{.EntryCount}} {{plural .EntryCount "game" "games"}}</div></div></a>{{end}}
   </div>
 </section>
 {{end}}

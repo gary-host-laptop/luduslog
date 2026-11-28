@@ -469,14 +469,10 @@ func (f GameFilter) where(ctx context.Context, s *Store) (string, []any) {
 			for _, st := range f.Statuses {
 				switch st {
 				case "played", "playing", "backlog", "wishlist":
-					expr := "st.played>0"
-					if st != "played" {
-						expr = "st." + st + "=1"
-					}
-					any = append(any, "EXISTS(SELECT 1 FROM statuses st WHERE st.game_id=g.id AND st.user_id=? AND "+expr+")")
-					args = append(args, f.UserID)
-				case "completed", "abandoned", "replayed":
-					// Completed/abandoned are log statuses, not shelf flags.
+					any = append(any, "EXISTS(SELECT 1 FROM statuses st WHERE st.game_id=g.id AND st.user_id=? AND st.shelf=?)")
+					args = append(args, f.UserID, st)
+				case "completed", "abandoned", "retired", "shelved", "replayed":
+					// These are log outcomes, not shelf values.
 					any = append(any, "EXISTS(SELECT 1 FROM logs l WHERE l.game_id=g.id AND l.user_id=? AND l.status=? AND l.deleted_at IS NULL)")
 					args = append(args, f.UserID, st)
 				}
@@ -498,11 +494,11 @@ func (f GameFilter) where(ctx context.Context, s *Store) (string, []any) {
 			args = append(args, f.UserID)
 		}
 		if f.HideOwned {
-			conds = append(conds, "NOT EXISTS(SELECT 1 FROM statuses st WHERE st.game_id=g.id AND st.user_id=? AND (st.played>0 OR st.playing=1 OR st.backlog=1 OR st.wishlist=1))")
+			conds = append(conds, "NOT EXISTS(SELECT 1 FROM statuses st WHERE st.game_id=g.id AND st.user_id=? AND COALESCE(st.shelf,'')<>'')")
 			args = append(args, f.UserID)
 		}
 		if f.NoStatus {
-			conds = append(conds, "NOT EXISTS(SELECT 1 FROM statuses st WHERE st.game_id=g.id AND st.user_id=? AND (st.played>0 OR st.playing=1 OR st.backlog=1 OR st.wishlist=1))")
+			conds = append(conds, "NOT EXISTS(SELECT 1 FROM statuses st WHERE st.game_id=g.id AND st.user_id=? AND COALESCE(st.shelf,'')<>'')")
 			args = append(args, f.UserID)
 		}
 	}
@@ -516,7 +512,7 @@ func (f GameFilter) where(ctx context.Context, s *Store) (string, []any) {
 				ph[i] = "?"
 				args = append(args, id)
 			}
-			conds = append(conds, "EXISTS(SELECT 1 FROM statuses st WHERE st.game_id=g.id AND st.user_id IN ("+strings.Join(ph, ",")+") AND (st.played>0 OR st.playing=1 OR st.backlog=1 OR st.wishlist=1))")
+			conds = append(conds, "EXISTS(SELECT 1 FROM statuses st WHERE st.game_id=g.id AND st.user_id IN ("+strings.Join(ph, ",")+") AND COALESCE(st.shelf,'')<>'')")
 		}
 	}
 	if len(conds) == 0 {
@@ -1024,13 +1020,13 @@ func refreshGameStats(ctx context.Context, q execQueryer, id int64) error {
 		rating_count=(SELECT COUNT(*) FROM logs l WHERE l.game_id=games.id AND l.rating>0 AND l.primary_rating=1 AND l.deleted_at IS NULL),
 		reviews=(SELECT COUNT(*) FROM logs l WHERE l.game_id=games.id AND l.review<>'' AND l.deleted_at IS NULL),
 		plays=(SELECT COUNT(*) FROM statuses st WHERE st.game_id=games.id AND st.played>0),
-		playing=(SELECT COUNT(*) FROM statuses st WHERE st.game_id=games.id AND st.playing=1),
-		backlogs=(SELECT COUNT(*) FROM statuses st WHERE st.game_id=games.id AND st.backlog=1),
-		wishlists=(SELECT COUNT(*) FROM statuses st WHERE st.game_id=games.id AND st.wishlist=1),
+		playing=(SELECT COUNT(*) FROM statuses st WHERE st.game_id=games.id AND st.shelf='playing'),
+		backlogs=(SELECT COUNT(*) FROM statuses st WHERE st.game_id=games.id AND st.shelf='backlog'),
+		wishlists=(SELECT COUNT(*) FROM statuses st WHERE st.game_id=games.id AND st.shelf='wishlist'),
 		completions=(SELECT COUNT(DISTINCT l.user_id) FROM logs l WHERE l.game_id=games.id AND l.status='completed' AND l.deleted_at IS NULL),
 		likes=(SELECT COUNT(*) FROM game_likes gl WHERE gl.game_id=games.id),
 		lists_count=(SELECT COUNT(DISTINCT le.list_id) FROM list_entries le JOIN lists li ON li.id=le.list_id WHERE le.game_id=games.id AND li.privacy IN ('public','unlisted','personal') AND li.deleted_at IS NULL),
-		popularity=(SELECT COUNT(*) FROM statuses st WHERE st.game_id=games.id AND (st.played>0 OR st.playing=1 OR st.backlog=1 OR st.wishlist=1))
+		popularity=(SELECT COUNT(*) FROM statuses st WHERE st.game_id=games.id AND (COALESCE(st.shelf,'')<>'' OR st.played>0))
 			+ 2*(SELECT COUNT(*) FROM game_likes gl WHERE gl.game_id=games.id)
 			+ 3*(SELECT COUNT(*) FROM logs l WHERE l.game_id=games.id AND l.review<>'' AND l.deleted_at IS NULL)
 		WHERE id=?`, id)
@@ -1195,10 +1191,10 @@ func (s *Store) RecentlyAnticipated(ctx context.Context, limit, days int, allowA
 		AND g.release_date>date('now')
 		AND g.wishlists>0
 		AND (? OR g.adult=0)
-		AND EXISTS(SELECT 1 FROM statuses st WHERE st.game_id=g.id AND st.wishlist=1
-			AND st.wishlist_at IS NOT NULL AND st.wishlist_at>=date('now','-'||?||' day'))
-		ORDER BY (SELECT COUNT(*) FROM statuses st WHERE st.game_id=g.id AND st.wishlist=1
-			AND st.wishlist_at IS NOT NULL AND st.wishlist_at>=date('now','-'||?||' day')) DESC,
+		AND EXISTS(SELECT 1 FROM statuses st WHERE st.game_id=g.id AND st.shelf='wishlist'
+			AND st.shelf_at IS NOT NULL AND st.shelf_at>=date('now','-'||?||' day'))
+		ORDER BY (SELECT COUNT(*) FROM statuses st WHERE st.game_id=g.id AND st.shelf='wishlist'
+			AND st.shelf_at IS NOT NULL AND st.shelf_at>=date('now','-'||?||' day')) DESC,
 			g.wishlists DESC, g.release_date, g.title
 		LIMIT ?`, b2i(allowAdult), days, days, limit)
 	if err != nil || len(recent) >= limit {
@@ -1243,6 +1239,17 @@ func (s *Store) ComingSoon(ctx context.Context, days int, allowAdult bool) ([]mo
 		AND g.parent_id IS NULL
 		AND (? OR g.adult=0)
 		ORDER BY g.release_date, g.title`, days, b2i(allowAdult))
+}
+
+// UpcomingGames returns the nearest upcoming releases whatever their date, so a
+// fixed-size rail can fill every slot instead of stopping at a date window.
+func (s *Store) UpcomingGames(ctx context.Context, limit int, allowAdult bool) ([]models.Game, error) {
+	return s.relatedGames(ctx, `SELECT `+gameCols+` FROM games g
+		WHERE g.release_date IS NOT NULL AND g.release_date<>''
+		AND g.release_date>=date('now')
+		AND g.parent_id IS NULL
+		AND (? OR g.adult=0)
+		ORDER BY g.release_date, g.title LIMIT ?`, b2i(allowAdult), limit)
 }
 
 func (s *Store) Top100(ctx context.Context, limit int) ([]models.Game, error) {

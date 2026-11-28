@@ -56,7 +56,7 @@
   {{end}}
 {{else}}
   {{if .Lists}}
-  <section class="section" style="margin-top:0"><div class="section-head"><h2>Lists</h2><span class="muted">{{.Total}} matches</span></div><div class="grid grid-2">{{range .Lists}}<a class="list-card" href="/users/{{.User.Username}}/lists/{{.Slug}}">{{if .CoverGames}}<div class="list-covers">{{range .CoverGames}}<img src="{{cover .}}" alt="" loading="lazy">{{end}}</div>{{end}}<div><h3>{{.Title}}</h3><div class="muted">{{.User.Username}} · {{.EntryCount}} {{plural .EntryCount "game" "games"}}</div></div></a>{{end}}</div>{{template "pager" .}}</section>
+  <section class="section" style="margin-top:0"><div class="section-head"><h2>Lists</h2><span class="muted">{{.Total}} matches</span></div><div class="grid grid-2">{{range .Lists}}{{template "list_card" (dict "l" . "meta" "search")}}{{end}}</div>{{template "pager" .}}</section>
   {{else}}
   <div class="empty"><h3>No lists for “{{.Q}}”</h3><p>Try <a href="/search?q={{urlquery .Q}}&tab=games">games</a>, <a href="/search?q={{urlquery .Q}}&tab=reviews">reviews</a>, or <a href="/search?q={{urlquery .Q}}&tab=people">people</a>.</p></div>
   {{end}}

@@ -15,7 +15,7 @@ const userCols = `id,username,email,email_verified,approved,password_hash,bio,av
 deactivated_at,last_username_change,private_profile,hide_activity,manually_approves,hide_social_graph,adult_optin,
 star_scale,cover_mode,time_display,infinite_scroll,theme,high_contrast,timezone,fade_played,journal_view,
 comment_privacy,note_privacy,catalog_editor,featured_badge,federation,fed_statuses,fed_reviews,fed_lists,remote_actor,
-overview_widget_1,overview_widget_2,featured_review_id,featured_list_id,social_links,yearly_goal`
+overview_widget_1,overview_widget_2,featured_review_id,featured_list_id,social_links,yearly_goal,default_played_status`
 
 type scanner interface{ Scan(dest ...any) error }
 
@@ -29,7 +29,7 @@ func scanUser(row scanner) (*models.User, error) {
 		&u.Role, &createdAt, &deact, &lastChange, &private, &hideAct, &manual, &hideGraph, &adult,
 		&u.StarScale, &u.CoverMode, &u.TimeDisplay, &scroll, &u.Theme, &hc, &u.Timezone, &fade, &u.JournalView,
 		&u.CommentPrivacy, &u.NotePrivacy, &catalog, &u.FeaturedBadge, &fed, &fedS, &fedR, &fedL, &u.RemoteActor,
-		&u.OverviewWidget1, &u.OverviewWidget2, &featuredReview, &featuredList, &social, &u.YearlyGoal)
+		&u.OverviewWidget1, &u.OverviewWidget2, &featuredReview, &featuredList, &social, &u.YearlyGoal, &u.DefaultPlayedStatus)
 	if err != nil {
 		return nil, err
 	}
@@ -63,6 +63,7 @@ func scanUser(row scanner) (*models.User, error) {
 	if u.StarScale != 10 {
 		u.StarScale = 5
 	}
+	u.DefaultPlayedStatus = NormalizePlayedStatus(u.DefaultPlayedStatus)
 	return &u, nil
 }
 
@@ -135,41 +136,42 @@ func (s *Store) UpdateEmail(ctx context.Context, id int64, email string) error {
 
 // ProfileUpdate carries the editable profile/settings surface.
 type ProfileUpdate struct {
-	Bio              string
-	SocialLinks      []models.SocialLink
-	Avatar           string
-	Header           string
-	PrivateProfile   bool
-	HideActivity     bool
-	ManuallyApproves bool
-	HideSocialGraph  bool
-	AdultOptIn       bool
-	StarScale        int
-	CoverMode        string
-	TimeDisplay      string
-	InfiniteScroll   bool
-	Theme            string
-	HighContrast     bool
-	Timezone         string
-	FadePlayed       bool
-	JournalView      string
-	CommentPrivacy   string
-	NotePrivacy      string
-	Federation       bool
-	FedStatuses      bool
-	FedReviews       bool
-	FedLists         bool
+	Bio                 string
+	SocialLinks         []models.SocialLink
+	Avatar              string
+	Header              string
+	PrivateProfile      bool
+	HideActivity        bool
+	ManuallyApproves    bool
+	HideSocialGraph     bool
+	AdultOptIn          bool
+	StarScale           int
+	CoverMode           string
+	TimeDisplay         string
+	InfiniteScroll      bool
+	Theme               string
+	HighContrast        bool
+	Timezone            string
+	FadePlayed          bool
+	JournalView         string
+	DefaultPlayedStatus string
+	CommentPrivacy      string
+	NotePrivacy         string
+	Federation          bool
+	FedStatuses         bool
+	FedReviews          bool
+	FedLists            bool
 }
 
 func (s *Store) UpdateProfile(ctx context.Context, id int64, p ProfileUpdate) error {
 	links, _ := json.Marshal(p.SocialLinks)
 	_, err := s.DB.ExecContext(ctx, `UPDATE users SET bio=?,social_links=?,avatar=?,header=?,private_profile=?,hide_activity=?,
 		manually_approves=?,hide_social_graph=?,adult_optin=?,star_scale=?,cover_mode=?,time_display=?,infinite_scroll=?,
-		theme=?,high_contrast=?,timezone=?,fade_played=?,journal_view=?,comment_privacy=?,note_privacy=?,
+		theme=?,high_contrast=?,timezone=?,fade_played=?,journal_view=?,default_played_status=COALESCE(NULLIF(?,''),default_played_status),comment_privacy=?,note_privacy=?,
 		federation=?,fed_statuses=?,fed_reviews=?,fed_lists=? WHERE id=?`,
 		p.Bio, string(links), p.Avatar, p.Header, b2i(p.PrivateProfile), b2i(p.HideActivity), b2i(p.ManuallyApproves),
 		b2i(p.HideSocialGraph), b2i(p.AdultOptIn), p.StarScale, p.CoverMode, p.TimeDisplay, b2i(p.InfiniteScroll),
-		p.Theme, b2i(p.HighContrast), p.Timezone, b2i(p.FadePlayed), p.JournalView, p.CommentPrivacy, p.NotePrivacy,
+		p.Theme, b2i(p.HighContrast), p.Timezone, b2i(p.FadePlayed), p.JournalView, p.DefaultPlayedStatus, p.CommentPrivacy, p.NotePrivacy,
 		b2i(p.Federation), b2i(p.FedStatuses), b2i(p.FedReviews), b2i(p.FedLists), id)
 	return err
 }

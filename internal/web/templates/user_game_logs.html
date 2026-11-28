@@ -7,61 +7,116 @@
       · <a href="/games/{{.Game.Slug}}">{{.Game.Title}}</a>
     </div>
   </div>
-  <a class="btn btn-sm" href="/games/{{.Game.Slug}}">Game page</a>
+  <div class="row user-log-head-actions">
+    {{if .IsMe}}<a class="btn btn-sm btn-primary" href="/games/{{.Game.Slug}}/log?new=1">New log</a>{{end}}
+    <a class="btn btn-sm" href="/games/{{.Game.Slug}}">Game page</a>
+  </div>
 </header>
 
 <section class="card mt2 user-log-summary">
-  <div class="row between">
+  <div class="row between user-log-summary-top">
     <div class="row user-log-id">
       <img class="avatar avatar-md" src="{{avatar .Profile}}" alt="">
       <div>
         <a href="/users/{{.Profile.Username}}"><strong>{{.Profile.Username}}</strong></a>
         <div class="muted">Log for <a href="/games/{{.Game.Slug}}">{{.Game.Title}}</a></div>
       </div>
-      <a href="/games/{{.Game.Slug}}"><img class="game-cover user-log-cover" src="{{cover .Game}}" alt="Cover of {{.Game.Title}}"></a>
+      <a href="/games/{{.Game.Slug}}"><img class="game-cover user-log-cover" src="{{userCover .Profile .Game}}" alt="Cover of {{.Game.Title}}"></a>
     </div>
-    {{if .IsMe}}<a class="btn btn-sm" href="/users/{{.Profile.Username}}?kind=logs">Your logs</a>{{end}}
+    {{if .IsMe}}<a class="btn btn-sm" href="/users/{{.Profile.Username}}?tab=games">All games</a>{{end}}
   </div>
   <div class="pill-row">
     {{if gt .Status.Played 0}}<span class="pill"><i class="ph-light ph-check-circle icon" aria-hidden="true"></i> Played {{.Status.Played}}×</span>{{end}}
-    {{if .Status.Playing}}<span class="pill"><i class="ph-light ph-play icon" aria-hidden="true"></i> Playing</span>{{end}}
-    {{if .Status.Backlog}}<span class="pill"><i class="ph-light ph-stack icon" aria-hidden="true"></i> Backlog</span>{{end}}
-    {{if .Status.Wishlist}}<span class="pill"><i class="ph-light ph-heart icon" aria-hidden="true"></i> Wishlist</span>{{end}}
+    {{if .Status.Shelf}}<span class="pill">{{shelfLabel .Status.Shelf}}</span>{{end}}
     {{if .Rating}}<span class="pill"><i class="ph-fill ph-star icon" aria-hidden="true"></i> {{rating .Rating 10}} / 10</span>{{end}}
     {{if .Playtime}}<span class="pill"><i class="ph-light ph-clock icon" aria-hidden="true"></i> {{hours .Playtime}}</span>{{end}}
   </div>
 </section>
 
-{{if .Logs}}
+<form class="log-filter card" method="get" action="/users/{{.Profile.Username}}/logs/{{.Game.Slug}}">
+  <div class="log-filter-fields">
+    <div><label for="filter-sort">Sort</label><select id="filter-sort" name="sort">
+      <option value="" {{if eq .Sort ""}}selected{{end}}>Newest</option>
+      <option value="oldest" {{if eq .Sort "oldest"}}selected{{end}}>Oldest</option>
+      <option value="rating" {{if eq .Sort "rating"}}selected{{end}}>Rating</option>
+      <option value="playtime" {{if eq .Sort "playtime"}}selected{{end}}>Playtime</option>
+    </select></div>
+    <div><label for="filter-status">Status</label><select id="filter-status" name="status">
+      <option value="">Any status</option>
+      {{range $s := slice "played" "completed" "playing" "backlog" "wishlist" "abandoned" "retired" "shelved" "replayed"}}
+      <option value="{{$s}}" {{if eq $.StatusFilter $s}}selected{{end}}>{{playedStatusLabel $s}}</option>
+      {{end}}
+    </select></div>
+    <div class="log-filter-checks">
+      <label class="check"><input type="checkbox" name="replay" value="1" {{if .Replay}}checked{{end}}> Replay</label>
+      <label class="check"><input type="checkbox" name="mastered" value="1" {{if .Mastered}}checked{{end}}> Mastered</label>
+      {{if .IsMe}}<label class="check"><input type="checkbox" name="drafts" value="1" {{if .Drafts}}checked{{end}}> Drafts</label>{{end}}
+      <label class="check"><input type="checkbox" name="review" value="1" {{if .Reviewed}}checked{{end}}> With review</label>
+    </div>
+    <div class="log-filter-actions">
+      <button class="btn btn-sm btn-primary" type="submit">Apply</button>
+      <a class="btn btn-sm" href="/users/{{.Profile.Username}}/logs/{{.Game.Slug}}">Reset</a>
+    </div>
+  </div>
+  <div class="muted log-filter-count">{{.Filtered}} {{plural .Filtered "log" "logs"}} shown</div>
+</form>
+
+{{if .Cards}}
 <section class="section user-log-entries">
-  {{range .Logs}}
-  <article class="card log-entry log-entry-detail" id="log-{{.ID}}">
-    <div class="log-head">
-      <span>{{timeago .CreatedAt}}</span>
-      <span class="pill">{{.Status}}</span>
-      {{if .Rating}}<span>{{stars .Rating 5}}</span><span>{{rating .Rating 10}} / 10</span>{{end}}
-      {{if .Replay}}<span class="pill">Replay</span>{{end}}
-      {{if .Mastered}}<span class="pill">Mastered</span>{{end}}
-      {{if .Draft}}<span class="draft-badge">Draft</span>{{end}}
-      {{if .Spoiler}}<span class="pill">Spoilers</span>{{end}}
+  {{range .Cards}}{{$log := .Log}}
+  <article class="card log-entry log-entry-detail log-entry-wide" id="log-{{$log.ID}}">
+    <a class="log-entry-cover" href="{{if $log.Review}}{{reviewPath $log}}{{else}}/games/{{$.Game.Slug}}{{end}}"><img src="{{userCover $.Profile $.Game}}" alt="Cover of {{$.Game.Title}}"></a>
+    <div class="log-entry-body">
+      <div class="log-head">
+        <span>{{timeago $log.CreatedAt}}</span>
+        <span class="pill">{{playedStatusLabel $log.Status}}</span>
+        {{if $log.Rating}}<span>{{stars $log.Rating 5}}</span><span>{{rating $log.Rating 10}} / 10</span>{{end}}
+        {{if $log.Replay}}<span class="pill">Replay</span>{{end}}
+        {{if $log.Mastered}}<span class="pill">Mastered</span>{{end}}
+        {{if $log.Draft}}<span class="draft-badge">Draft</span>{{end}}
+        {{if $log.Spoiler}}<span class="pill">Spoilers</span>{{end}}
+      </div>
+      {{if $log.Name}}<h2 class="log-title">{{if $log.Review}}<a href="{{reviewPath $log}}">{{$log.Name}}</a>{{else}}{{$log.Name}}{{end}}</h2>{{end}}
+      <div class="muted log-dates">
+        {{if $log.StartedAt}}<span>Started {{$log.StartedAt}}</span>{{end}}
+        {{if $log.FinishedAt}}<span>Finished {{$log.FinishedAt}}</span>{{end}}
+        {{if $log.PlatformName}}<span>Platform {{$log.PlatformName}}</span>{{end}}
+        {{if $log.PlayedOnName}}<span>Played on {{$log.PlayedOnName}}</span>{{end}}
+        {{if $log.Playtime}}<span>{{hours $log.Playtime}}</span>{{end}}
+      </div>
+      {{template "review_preview" $log}}
+      {{if .Sessions}}
+      <div class="log-session-excerpt">
+        <div class="row between"><strong>{{.SessionCount}} {{plural .SessionCount "session" "sessions"}}</strong><span class="muted">{{hours .SessionHours}}</span></div>
+        {{range firstSessions .Sessions 3}}
+        <div class="log-session-line">
+          <span class="muted">{{if .Days}}{{first .Days}}{{else}}{{if .StartedOn}}{{.StartedOn}}{{else}}{{date .CreatedAt}}{{end}}{{end}}</span>
+          {{if .Note}}<span>{{truncate (plain .Note) 220}}</span>{{end}}
+          {{range .Tags}}<span class="pill">#{{.}}</span>{{end}}
+        </div>
+        {{end}}
+        <a href="/logs/{{$log.ID}}/sessions">All sessions →</a>
+      </div>
+      {{end}}
+      <div class="log-actions">
+        {{if $log.Review}}<a href="{{reviewPath $log}}">Read the full review →</a>{{end}}
+        <a href="/logs/{{$log.ID}}/sessions">Sessions</a>
+        {{if $.IsMe}}
+        <a href="/logs/{{$log.ID}}/edit">Edit</a>
+        <form method="post" action="/logs/{{$log.ID}}/delete" onsubmit="return confirm('Delete this log?')">
+          <input type="hidden" name="_csrf" value="{{$.CSRF}}">
+          <button class="linklike" type="submit">Delete</button>
+        </form>
+        {{end}}
+      </div>
     </div>
-    {{if .Name}}<h2 class="log-title">{{if .Review}}<a href="{{reviewPath .}}">{{.Name}}</a>{{else}}{{.Name}}{{end}}</h2>{{end}}
-    <div class="muted log-dates">
-      {{if .StartedAt}}<span>Started {{.StartedAt}}</span>{{end}}
-      {{if .FinishedAt}}<span>Finished {{.FinishedAt}}</span>{{end}}
-      {{if .PlatformName}}<span>Platform {{.PlatformName}}</span>{{end}}
-      {{if .PlayedOnName}}<span>Played on {{.PlayedOnName}}</span>{{end}}
-      {{if .Playtime}}<span>{{hours .Playtime}}</span>{{end}}
-    </div>
-    {{template "review_preview" .}}
-    {{if .Review}}<div class="log-actions"><a href="{{reviewPath .}}">Read the full review →</a></div>{{end}}
   </article>
   {{end}}
 </section>
 {{else}}
 <div class="empty mt2">
-  <h3>No log entries yet</h3>
-  <p>{{if .IsMe}}<a href="/games/{{.Game.Slug}}/log">Log this game</a> to start your diary for it.{{else}}{{.Profile.Username}} has not logged this game yet.{{end}}</p>
+  <h3>No log entries match</h3>
+  <p>{{if .IsMe}}<a href="/games/{{.Game.Slug}}/log?new=1">Log this game</a> or clear the filters.{{else}}{{.Profile.Username}} has no matching logs for this game.{{end}}</p>
 </div>
 {{end}}
 {{end}}

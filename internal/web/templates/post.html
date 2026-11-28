@@ -1,0 +1,48 @@
+{{define "content"}}
+{{with .Post}}
+<article class="card post-page">
+  <div class="log-head">
+    {{with .User}}<a class="review-author byline-author" href="/users/{{.Username}}"><img class="avatar avatar-md" src="{{avatar .}}" alt=""> <strong>{{.Username}}</strong></a>{{end}}
+    <span>{{timeago .CreatedAt}}</span>
+    <span class="pill">{{.Kind}}</span>
+    {{if .Game}}<a href="/games/{{.Game.Slug}}">{{.Game.Title}}</a>{{end}}
+  </div>
+  <h1 class="mt2">{{if and .Log .Log.Name}}{{.Log.Name}}{{else if .Game}}{{.Game.Title}}{{else}}Post{{end}}</h1>
+  {{if .Game}}<div class="row mt2" style="align-items:flex-start;gap:1.2rem">
+    <a href="/games/{{.Game.Slug}}" style="flex:none"><img src="{{cover .Game}}" alt="" style="width:110px;border-radius:8px"></a>
+    <div>
+      <div class="muted"><a href="/games/{{.Game.Slug}}">{{.Game.Title}}</a>{{if .Log}}{{if .Log.PlatformName}} · {{.Log.PlatformName}}{{end}}{{if .Log.Playtime}} · {{hours .Log.Playtime}}{{end}}{{end}}</div>
+      {{if and .Log .Log.Rating}}<div class="mt1">{{stars .Log.Rating 5}} <span class="muted">{{rating .Log.Rating 10}}/10</span></div>{{end}}
+    </div>
+  </div>{{end}}
+  {{if .Body}}<div class="prose mt2">{{md .Body}}</div>{{end}}
+  {{if .Session}}{{with .Session}}<div class="log-head mt2">{{if .StartedOn}}<span>{{.StartedOn}}{{if .EndedOn}} → {{.EndedOn}}{{end}}</span>{{end}}{{if .Playtime}}<span>{{hours .Playtime}}</span>{{end}}</div>{{end}}{{end}}
+  <div class="post-actions mt2">
+    <form class="inline-form" method="post" action="/posts/{{.ID}}/like">
+      <input type="hidden" name="_csrf" value="{{$.CSRF}}"><input type="hidden" name="return_to" value="{{$.Path}}">
+      <button class="linklike{{if .Liked}} on{{end}}" type="submit" aria-pressed="{{.Liked}}"><i class="ph-light ph-heart icon" aria-hidden="true"></i>Like{{if .Likes}} · {{.Likes}}{{end}}</button>
+    </form>
+    <form class="inline-form" method="post" action="/posts/{{.ID}}/boost">
+      <input type="hidden" name="_csrf" value="{{$.CSRF}}"><input type="hidden" name="return_to" value="{{$.Path}}">
+      <button class="linklike{{if .Boosted}} on{{end}}" type="submit" aria-pressed="{{.Boosted}}"><i class="ph-light ph-repeat icon" aria-hidden="true"></i>Boost{{if .Boosts}} · {{.Boosts}}{{end}}</button>
+    </form>
+    <a class="linklike" href="#comments"><i class="ph-light ph-chat-circle icon" aria-hidden="true"></i>{{if .Comments}}{{.Comments}}{{else}}Reply{{end}}</a>
+    <a class="linklike post-report" href="/report?target_type=post&target_id={{.ID}}&return_to={{$.Path}}">Report</a>
+    {{if and $.User (eq $.User.ID .UserID)}}
+    <form class="inline-form" method="post" action="/posts/{{.ID}}/delete" onsubmit="return confirm('Delete this post?')">
+      <input type="hidden" name="_csrf" value="{{$.CSRF}}"><input type="hidden" name="return_to" value="/feed">
+      <button class="linklike" type="submit">Delete</button>
+    </form>
+    {{end}}
+  </div>
+</article>
+{{end}}
+
+<section class="section" id="comments">
+  <div class="section-head"><h2>Comments</h2><span class="muted">{{len .Comments}}</span></div>
+  <div class="card">
+    {{template "post_comments" (dict "Comments" .Comments "CanReply" .CanReply "CSRF" .CSRF "SubjectType" "post" "SubjectID" .Post.ID "Path" .Path "Open" true)}}
+  </div>
+  {{if not .User}}<div class="empty">Sign in to join the conversation.</div>{{end}}
+</section>
+{{end}}

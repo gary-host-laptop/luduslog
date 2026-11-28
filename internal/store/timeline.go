@@ -153,6 +153,9 @@ func (s *Store) Timeline(ctx context.Context, viewerID int64, ownerIDs []int64, 
 	if limit > 100 {
 		limit = 100
 	}
+	if err := s.EnsurePosts(ctx, ownerIDs); err != nil {
+		return nil, "", err
+	}
 	var (
 		before    time.Time
 		beforeKey string
@@ -218,6 +221,7 @@ func (s *Store) Timeline(ctx context.Context, viewerID int64, ownerIDs []int64, 
 			}
 			items = append(items, models.TimelineItem{
 				Key: timelineKey("log", l.ID), Kind: kind, At: l.CreatedAt, Log: l,
+				PostSubjectType: "log", PostSubjectID: l.ID,
 			})
 		}
 		err = rows.Err()
@@ -260,6 +264,7 @@ func (s *Store) Timeline(ctx context.Context, viewerID int64, ownerIDs []int64, 
 			session.CreatedAt = parseTime(created)
 			items = append(items, models.TimelineItem{
 				Key: timelineKey("session", session.ID), Kind: "session", At: session.CreatedAt, Session: session,
+				PostSubjectType: "session", PostSubjectID: session.ID,
 			})
 		}
 		err = rows.Err()
@@ -330,6 +335,8 @@ func (s *Store) Timeline(ctx context.Context, viewerID int64, ownerIDs []int64, 
 				}
 				item.At = parseTime(created)
 				item.Key = timelineKey("activity", activityID)
+				item.PostSubjectType = "activity"
+				item.PostSubjectID = activityID
 				items = append(items, item)
 			}
 			err = rows.Err()
@@ -338,6 +345,10 @@ func (s *Store) Timeline(ctx context.Context, viewerID int64, ownerIDs []int64, 
 				return nil, "", err
 			}
 		}
+	}
+
+	if boosts, err := s.BoostItems(ctx, ownerIDs, fetch); err == nil && timelineKindWanted(filter, "all") {
+		items = append(items, boosts...)
 	}
 
 	if len(items) == 0 {
@@ -391,6 +402,14 @@ func (s *Store) Timeline(ctx context.Context, viewerID int64, ownerIDs []int64, 
 					}
 				}
 			}
+		case "boost":
+			item.User = owners[item.UserID]
+			if item.PostID != nil {
+				item.Post, _ = s.PostByID(ctx, *item.PostID, viewerID)
+				if item.Post != nil {
+					item.Game = item.Post.Game
+				}
+			}
 		case "shelf", "like", "rating", "list", "follow":
 			item.User = owners[item.UserID]
 			if item.GameID != nil {
@@ -432,6 +451,9 @@ func (s *Store) Timeline(ctx context.Context, viewerID int64, ownerIDs []int64, 
 		}
 		item.UserID = owner.ID
 		if !timelineVisible(ctx, s, item, viewer, owner, visibility[owner.ID]) {
+			continue
+		}
+		if item.Kind == "boost" && !postVisibleTo(ctx, s, item.Post, viewer) {
 			continue
 		}
 		filtered = append(filtered, item)
@@ -539,6 +561,26 @@ func timelineVisible(ctx context.Context, s *Store, item models.TimelineItem, vi
 		return ok && approved
 	default:
 		return true
+	}
+}
+
+// postVisibleTo applies the canonical post's own visibility on top of the
+// booster's activity visibility.
+func postVisibleTo(ctx context.Context, s *Store, p *models.Post, viewer *models.User) bool {
+	if p == nil {
+		return false
+	}
+	switch p.Visibility {
+	case "public":
+		return true
+	case "followers":
+		if viewer == nil {
+			return false
+		}
+		ok, approved := s.IsFollowing(ctx, viewer.ID, p.UserID)
+		return ok && approved
+	default:
+		return viewer != nil && viewer.ID == p.UserID
 	}
 }
 

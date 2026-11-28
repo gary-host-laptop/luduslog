@@ -18,7 +18,6 @@ type homeData struct {
 	Anticipated []models.Game
 	Reviews     []*models.Log
 	Lists       []*models.List
-	Timeline    []models.TimelineItem
 	News        []models.News
 	GamesCount  int
 }
@@ -31,12 +30,9 @@ type comingSoonItem struct {
 func (s *Server) home(w http.ResponseWriter, r *http.Request) {
 	u := currentUser(r)
 	allowAdult := u != nil && u.AdultOptIn
-	trending, _ := s.st.RecentlyTrending(r.Context(), 12)
+	trending, _ := s.st.RecentlyTrending(r.Context(), 7)
 	sleepers, _ := s.st.SleeperHits(r.Context(), 6)
-	coming, _ := s.st.ComingSoon(r.Context(), 60, allowAdult)
-	if len(coming) > 6 {
-		coming = coming[:6]
-	}
+	coming, _ := s.st.UpcomingGames(r.Context(), 8, allowAdult)
 	var comingSoon []comingSoonItem
 	for _, g := range coming {
 		wishlisted := false
@@ -50,13 +46,8 @@ func (s *Server) home(w http.ResponseWriter, r *http.Request) {
 	anticipated, _ := s.st.RecentlyAnticipated(r.Context(), 6, 30, allowAdult)
 	reviews, _ := s.st.RecentReviews(r.Context(), 4)
 	lists, _ := s.st.PopularLists(r.Context(), 4)
-	var timeline []models.TimelineItem
-	if u != nil {
-		owners := append([]int64{u.ID}, s.st.FollowingIDs(r.Context(), u.ID)...)
-		timeline, _, _ = s.st.Timeline(r.Context(), u.ID, owners, "all", "", 12)
-	}
 	var news []models.News
-	if nrows, nerr := s.st.DB.QueryContext(r.Context(), `SELECT id,title,body,created_at FROM news ORDER BY created_at DESC LIMIT 3`); nerr == nil {
+	if nrows, nerr := s.st.DB.QueryContext(r.Context(), `SELECT id,title,body,created_at FROM news ORDER BY created_at DESC LIMIT 1`); nerr == nil {
 		defer nrows.Close()
 		for nrows.Next() {
 			var n models.News
@@ -75,7 +66,6 @@ func (s *Server) home(w http.ResponseWriter, r *http.Request) {
 		Anticipated: anticipated,
 		Reviews:     reviews,
 		Lists:       lists,
-		Timeline:    timeline,
 		News:        news,
 	}
 	s.render(w, r, "home", data)
@@ -235,17 +225,19 @@ func friendInteractionDescription(username string, rating float64, st models.Sta
 	if rating > 0 {
 		parts = append(parts, "rated it "+strconv.FormatFloat(rating, 'f', -1, 64)+"/10")
 	}
-	if st.Playing {
+	switch st.Shelf {
+	case "playing":
 		parts = append(parts, "is playing it")
-	}
-	if st.Played > 0 {
+	case "played":
 		parts = append(parts, "has played it")
-	}
-	if st.Backlog {
+	case "backlog":
 		parts = append(parts, "has it in their backlog")
-	}
-	if st.Wishlist {
+	case "wishlist":
 		parts = append(parts, "wants it on their wishlist")
+	default:
+		if st.Played > 0 {
+			parts = append(parts, "has played it")
+		}
 	}
 	if len(parts) == 0 {
 		return username + " interacted with this game"
@@ -503,14 +495,6 @@ func (s *Server) gameReviews(w http.ResponseWriter, r *http.Request) {
 		LoggedIn:  u != nil,
 	}
 	s.render(w, r, "reviews", data)
-}
-
-func (s *Server) listsDiscover(w http.ResponseWriter, r *http.Request) {
-	lists, _ := s.st.PopularLists(r.Context(), 40)
-	s.render(w, r, "lists_discover", struct {
-		Page
-		Lists []*models.List
-	}{s.page(r, "Lists"), lists})
 }
 
 type searchData struct {

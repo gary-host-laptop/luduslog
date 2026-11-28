@@ -34,7 +34,7 @@ func (s *Server) commentCreate(w http.ResponseWriter, r *http.Request) {
 	if back == "" || !strings.HasPrefix(back, "/") {
 		back = "/"
 	}
-	if subjectType != "log" && subjectType != "list" && subjectType != "profile" {
+	if subjectType != "log" && subjectType != "list" && subjectType != "profile" && subjectType != "post" {
 		s.notFound(w, r)
 		return
 	}
@@ -71,6 +71,20 @@ func (s *Server) commentCreate(w http.ResponseWriter, r *http.Request) {
 			s.notifyContext(r, l.UserID, u.ID, "comment", "log", subjectID, r.URL.Path)
 		}
 	}
+	if subjectType == "post" {
+		if p, err := s.st.PostByID(r.Context(), subjectID, u.ID); err == nil {
+			inReplyTo := p.APID
+			if parent != nil {
+				if pc, err := s.st.CommentByID(r.Context(), *parent); err == nil && pc.APID != "" {
+					inReplyTo = pc.APID
+				}
+			}
+			apID := s.absolute("/posts/" + itoa(p.ID) + "#c" + itoa(id))
+			s.st.SetCommentAPID(r.Context(), id, apID, inReplyTo)
+			s.notifyContext(r, p.UserID, u.ID, "comment", "post", p.ID, "/posts/"+itoa(p.ID))
+			s.deliverCommentActivity(r, u, p, id, body, inReplyTo, apID)
+		}
+	}
 	s.notifyMentions(r, u, "comment", id, body, back)
 	if parent != nil {
 		if c, err := s.st.CommentByID(r.Context(), *parent); err == nil && c.UserID != nil {
@@ -87,17 +101,85 @@ func (s *Server) commentDelete(w http.ResponseWriter, r *http.Request) {
 	if back == "" || !strings.HasPrefix(back, "/") {
 		back = "/"
 	}
+	c, _ := s.st.CommentByID(r.Context(), id)
 	if err := s.st.DeleteComment(r.Context(), id, u.ID); err != nil {
 		s.serverError(w, r, err)
 		return
 	}
+	if c != nil && c.SubjectType == "post" && c.APID != "" {
+		s.deliverCommentDelete(r, u, c)
+	}
 	s.redirect(w, r, back)
+}
+
+func (s *Server) reportPage(w http.ResponseWriter, r *http.Request) {
+	targetType := r.URL.Query().Get("target_type")
+	targetID, _ := strconv.ParseInt(r.URL.Query().Get("target_id"), 10, 64)
+	allowed := map[string]bool{"user": true, "log": true, "list": true, "comment": true, "post": true, "remote": true}
+	if !allowed[targetType] {
+		s.notFound(w, r)
+		return
+	}
+	returnTo := safeReturnTo(r.URL.Query().Get("return_to"))
+	if returnTo == "" {
+		returnTo = "/"
+	}
+	targetURL, targetName := r.URL.Query().Get("target_url"), ""
+	switch targetType {
+	case "post":
+		p, err := s.st.PostByID(r.Context(), targetID, currentUser(r).ID)
+		if err != nil {
+			s.notFound(w, r)
+			return
+		}
+		targetURL = s.absolute("/posts/" + itoa(p.ID))
+		targetName = postTitle(p)
+	case "user":
+		if u, err := s.st.UserByID(r.Context(), targetID); err == nil {
+			targetName = u.Username
+			targetURL = s.absolute("/users/" + u.Username)
+		}
+	case "log":
+		if l, err := s.st.LogByID(r.Context(), targetID); err == nil {
+			targetName = l.Name
+			if l.User != nil {
+				targetURL = s.absolute("/users/" + l.User.Username + "/reviews/" + itoa(l.ID))
+			}
+		}
+	case "list":
+		if l, err := s.st.ListByID(r.Context(), targetID, false); err == nil {
+			targetName = l.Title
+		}
+	}
+	if targetURL == "" {
+		targetURL = r.URL.Query().Get("target_url")
+	}
+	instance := ""
+	if host := hostOf(targetURL); host != "" && host != hostOf(s.cfg.BaseURL) {
+		instance = host
+	}
+	s.render(w, r, "report", reportData{
+		Page: s.page(r, "Report"), TargetType: targetType, TargetID: targetID,
+		TargetURL: targetURL, TargetName: targetName, TargetInstance: instance,
+		CanForward: instance != "" && targetType != "user", ReturnTo: returnTo,
+	})
+}
+
+type reportData struct {
+	Page
+	TargetType     string
+	TargetID       int64
+	TargetURL      string
+	TargetName     string
+	TargetInstance string
+	CanForward     bool
+	ReturnTo       string
 }
 
 func (s *Server) reportCreate(w http.ResponseWriter, r *http.Request) {
 	u := currentUser(r)
 	targetType := r.FormValue("target_type")
-	allowed := map[string]bool{"user": true, "log": true, "list": true, "comment": true, "remote": true}
+	allowed := map[string]bool{"user": true, "log": true, "list": true, "comment": true, "post": true, "remote": true}
 	if !allowed[targetType] {
 		s.notFound(w, r)
 		return
@@ -105,18 +187,34 @@ func (s *Server) reportCreate(w http.ResponseWriter, r *http.Request) {
 	id, _ := strconv.ParseInt(r.FormValue("target_id"), 10, 64)
 	reason := strings.TrimSpace(r.FormValue("reason"))
 	details := strings.TrimSpace(r.FormValue("details"))
+	targetURL := r.FormValue("target_url")
+	if targetType == "post" {
+		p, err := s.st.PostByID(r.Context(), id, u.ID)
+		if err != nil {
+			s.notFound(w, r)
+			return
+		}
+		targetURL = s.absolute("/posts/" + itoa(p.ID))
+	}
 	if reason == "" {
 		s.flash(w, r, "error", "Choose a reason for the report.")
-		s.redirect(w, r, r.FormValue("return_to"))
+		s.redirect(w, r, safeReturnTo(r.FormValue("return_to")))
 		return
 	}
-	if err := s.st.CreateReport(r.Context(), &u.ID, targetType, id, r.FormValue("target_url"), reason, details); err != nil {
+	forward := r.FormValue("forward") == "1" && hostOf(targetURL) != "" && hostOf(targetURL) != hostOf(s.cfg.BaseURL)
+	reportID, err := s.st.CreateReportDetailed(r.Context(), &u.ID, targetType, id, targetURL, reason, details, "", "", false)
+	if err != nil {
 		s.serverError(w, r, err)
 		return
 	}
+	if forward {
+		if err := s.forwardFlag(r, u, targetURL, reason, details, reportID); err == nil {
+			s.st.MarkReportForwarded(r.Context(), reportID)
+		}
+	}
 	s.flash(w, r, "success", "Thanks — a moderator will review this report.")
-	back := r.FormValue("return_to")
-	if !strings.HasPrefix(back, "/") {
+	back := safeReturnTo(r.FormValue("return_to"))
+	if back == "" {
 		back = "/"
 	}
 	s.redirect(w, r, back)

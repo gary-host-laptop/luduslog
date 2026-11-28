@@ -357,7 +357,7 @@ func TestLogFormNewFieldsAndTimePreservation(t *testing.T) {
 	if code != 200 {
 		t.Fatalf("log form = %d", code)
 	}
-	for _, want := range []string{`name="language"`, `name="played_on_id"`, `name="edition_game_id"`, `value="completed"`, `name="time_to_finish"`, `name="time_to_master"`, "Deluxe"} {
+	for _, want := range []string{`name="language"`, `name="played_on_id"`, `name="edition_game_id"`, `value="completed"`, `name="time_to_finish_hours"`, `name="time_to_finish_minutes"`, `name="time_to_master_hours"`, `name="time_to_master_minutes"`, "Deluxe"} {
 		if !strings.Contains(form, want) {
 			t.Errorf("log form missing %q", want)
 		}
@@ -815,9 +815,9 @@ func TestFederationToggles(t *testing.T) {
 
 	client, _ := authedClient(t, ts, st, alice)
 	_, settings := getBody(t, client, ts.URL+"/settings?tab=federation")
-	for _, unwanted := range []string{`name="fed_statuses"`, `name="fed_lists"`} {
-		if strings.Contains(settings, unwanted) {
-			t.Errorf("settings still offer an unimplemented toggle %q", unwanted)
+	for _, want := range []string{`name="fed_statuses"`, `name="fed_reviews"`, `name="fed_lists"`} {
+		if !strings.Contains(settings, want) {
+			t.Errorf("settings missing implemented federation toggle %q", want)
 		}
 	}
 
@@ -1018,15 +1018,15 @@ func TestFriendsActivityCard(t *testing.T) {
 		}
 		return page[start : i+end]
 	}
-	if bobRow := row(">bob<"); !strings.Contains(bobRow, "ph-check-circle") || !strings.Contains(bobRow, "ph-play") ||
+	if bobRow := row(">bob<"); !strings.Contains(bobRow, "ph-play") || strings.Contains(bobRow, "ph-check-circle") ||
 		!strings.Contains(bobRow, "8.0") || strings.Count(bobRow, "ph-star") != 1 ||
 		!strings.Contains(bobRow, `href="/users/bob/logs/friends-game"`) ||
 		!strings.Contains(bobRow, `aria-label="Rated 8.0 out of 10"`) ||
-		!strings.Contains(bobRow, `data-description="bob rated it 8/10, is playing it, has played it"`) {
+		!strings.Contains(bobRow, `data-description="bob rated it 8/10, is playing it"`) {
 		t.Errorf("bob row = %s", bobRow)
 	}
-	if carolRow := row(">carol<"); !strings.Contains(carolRow, "ph-stack") || !strings.Contains(carolRow, "ph-heart") || strings.Contains(carolRow, "ph-star") ||
-		!strings.Contains(carolRow, `data-description="carol has it in their backlog, wants it on their wishlist"`) {
+	if carolRow := row(">carol<"); !strings.Contains(carolRow, "ph-stack") || strings.Contains(carolRow, "ph-heart") || strings.Contains(carolRow, "ph-star") ||
+		!strings.Contains(carolRow, `data-description="carol has it in their backlog"`) {
 		t.Errorf("carol row = %s", carolRow)
 	}
 	if daveRow := row(">dave<"); !strings.Contains(daveRow, "7.0") || strings.Count(daveRow, "ph-star") != 1 ||
